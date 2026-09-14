@@ -1,0 +1,18 @@
+{
+  "rules": {
+    "lobbies": {
+      ".read": true,
+      "$lobbyId": {
+        ".write": "auth != null"
+      }
+    },
+    "bossRaid": {
+      "$lobbyId": {
+        ".read": true,
+        ".write": "auth != null"
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}
