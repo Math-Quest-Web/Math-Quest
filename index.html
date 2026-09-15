@@ -938,6 +938,13 @@ body {
   font-size: 0.9em;
 }
 
+.waiting-choose-heading {
+  font-family: 'Fredoka One', cursive;
+  color: #ffd84d;
+  text-align: center;
+  margin-top: 0;
+}
+
 .waiting-players h3 {
   font-family: 'Fredoka One', cursive;
   font-size: 1em;
@@ -1675,19 +1682,6 @@ textarea.community-input {
   </div>
 
   <div class="lobby-container">
-    <div class="boss-picker" id="bossPicker">
-      <div class="boss-pick-card selected" data-boss="grinmaw" onclick="selectLobbyBoss('grinmaw')">
-        <div class="boss-pick-icon">👹</div>
-        <div class="boss-pick-name">Grinmaw the Enthroned</div>
-        <div class="boss-pick-desc">A grinning demon lord who never leaves his throne. Summons imps and rains candy-fire.</div>
-      </div>
-      <div class="boss-pick-card" data-boss="warden" onclick="selectLobbyBoss('warden')">
-        <div class="boss-pick-icon">⛓️</div>
-        <div class="boss-pick-name">The Chained Warden</div>
-        <div class="boss-pick-desc">A shackled wraith that hungers for silence. Sweeps chains and strikes from the shadows.</div>
-      </div>
-    </div>
-
     <div class="lobby-create-box">
       <input id="lobbyNameInput" placeholder="Enter lobby name..." maxlength="30">
       <button class="big-play-button" onclick="createLobby()">➕ Create Lobby</button>
@@ -1716,22 +1710,35 @@ textarea.community-input {
   <div class="raid-container" style="position:relative;">
 
     <div id="raidWaitingRoom" class="raid-waiting-room">
-      <div class="waiting-boss-preview">
-        <div class="waiting-boss-icon" id="waitingBossIcon">👹</div>
-        <div>
-          <div class="waiting-boss-name" id="waitingBossName">Grinmaw the Enthroned</div>
-          <div class="waiting-boss-desc" id="waitingBossDesc">A grinning demon lord who never leaves his throne.</div>
+
+      <div id="raidBossChooseStep">
+        <h3 class="waiting-choose-heading">Choose Your Boss</h3>
+        <div class="boss-picker" id="raidBossPicker"></div>
+        <p id="raidBossChooseNotice" class="waiting-host-notice">Waiting for the host to choose a boss...</p>
+        <div class="waiting-actions">
+          <button class="big-play-button" style="background: #2d2d5e; box-shadow: 0 6px 0 #1a1a3a;" onclick="leaveLobby()">🚪 LEAVE LOBBY</button>
         </div>
       </div>
-      <div class="waiting-players">
-        <h3>Players in Lobby</h3>
-        <div id="waitingPlayerList" class="waiting-player-list"></div>
+
+      <div id="raidWaitingReady" style="display:none;">
+        <div class="waiting-boss-preview">
+          <div class="waiting-boss-icon" id="waitingBossIcon">👹</div>
+          <div>
+            <div class="waiting-boss-name" id="waitingBossName">Grinmaw the Enthroned</div>
+            <div class="waiting-boss-desc" id="waitingBossDesc">A grinning demon lord who never leaves his throne.</div>
+          </div>
+        </div>
+        <div class="waiting-players">
+          <h3>Players in Lobby</h3>
+          <div id="waitingPlayerList" class="waiting-player-list"></div>
+        </div>
+        <div class="waiting-actions">
+          <button id="startRaidBtn" class="big-play-button" style="display:none;" onclick="hostStartRaid()">▶ START RAID</button>
+          <button class="big-play-button" style="background: #2d2d5e; box-shadow: 0 6px 0 #1a1a3a;" onclick="leaveLobby()">🚪 LEAVE LOBBY</button>
+        </div>
+        <p id="waitingHostNotice" class="waiting-host-notice">Waiting for the host to start the raid...</p>
       </div>
-      <div class="waiting-actions">
-        <button id="startRaidBtn" class="big-play-button" style="display:none;" onclick="hostStartRaid()">▶ START RAID</button>
-        <button class="big-play-button" style="background: #2d2d5e; box-shadow: 0 6px 0 #1a1a3a;" onclick="leaveLobby()">🚪 LEAVE LOBBY</button>
-      </div>
-      <p id="waitingHostNotice" class="waiting-host-notice">Waiting for the host to start the raid...</p>
+
     </div>
 
     <div class="raid-game-wrapper" id="raidGameWrapper" style="display:none;">
@@ -1739,11 +1746,6 @@ textarea.community-input {
       <div id="countdownOverlay" class="countdown-overlay" style="display:none;">
         <h1 id="countdownNumber">3</h1>
         <p id="countdownText">Starting in...</p>
-      </div>
-      <div id="weakPointPanel" class="weak-point-panel" style="display:none;">
-        <div class="weak-point-label" id="weakPointLabel">⚡ WEAK POINT! Solve to strike:</div>
-        <div class="weak-point-question" id="weakPointQuestion"></div>
-        <div class="weak-point-input" id="weakPointInputDisplay"></div>
       </div>
       <div class="raid-ui">
         <div>❤️ <span id="raidHealth">5</span></div>
@@ -2551,7 +2553,7 @@ const BOSS_DEFS = {
     name: 'Grinmaw the Enthroned',
     icon: '👹',
     desc: 'A grinning demon lord who never leaves his throne. Summons imps and rains candy-fire.',
-    maxHp: 100,
+    maxHp: 150,
     bg1: '#3a0d0d', bg2: '#5c1a1a', accent: '#ffcc44'
   },
   warden: {
@@ -2559,24 +2561,48 @@ const BOSS_DEFS = {
     name: 'The Chained Warden',
     icon: '⛓️',
     desc: 'A shackled wraith that hungers for silence. Sweeps chains and strikes from the shadows.',
-    maxHp: 110,
+    maxHp: 165,
     bg1: '#12081f', bg2: '#241242', accent: '#a374ff'
+  },
+  wyrm: {
+    id: 'wyrm',
+    name: 'Trio, the Three-Headed Wyrm',
+    icon: '🐉',
+    desc: 'A sky serpent with three snapping heads. Watch all three - they don’t attack together.',
+    maxHp: 180,
+    bg1: '#0d2636', bg2: '#164a5c', accent: '#5ce1e6'
+  },
+  glutton: {
+    id: 'glutton',
+    name: 'The Glutton',
+    icon: '🍽️',
+    desc: 'A bottomless swamp beast that clamps shut to chew - time your shots between bites.',
+    maxHp: 160,
+    bg1: '#1a2a0d', bg2: '#33511a', accent: '#9ee66c'
   }
 };
 
-let lobbyBossChoice = 'grinmaw';
-function selectLobbyBoss(type) {
-  if (!BOSS_DEFS[type]) return;
-  lobbyBossChoice = type;
-  document.querySelectorAll('.boss-pick-card').forEach(card => {
-    card.classList.toggle('selected', card.dataset.boss === type);
+const BOSS_ORDER = ['grinmaw', 'warden', 'wyrm', 'glutton'];
+
+function renderBossPicker(container, onPick) {
+  container.innerHTML = BOSS_ORDER.map(id => {
+    const d = BOSS_DEFS[id];
+    return `
+      <div class="boss-pick-card" data-boss="${d.id}">
+        <div class="boss-pick-icon">${d.icon}</div>
+        <div class="boss-pick-name">${d.name}</div>
+        <div class="boss-pick-desc">${d.desc}</div>
+      </div>
+    `;
+  }).join('');
+  container.querySelectorAll('.boss-pick-card').forEach(card => {
+    card.addEventListener('click', () => onPick(card.dataset.boss));
   });
 }
 
 async function createLobby() {
   const nameInput = document.getElementById('lobbyNameInput');
   const name = nameInput.value.trim() || 'Unnamed Lobby';
-  const bossType = BOSS_DEFS[lobbyBossChoice] ? lobbyBossChoice : 'grinmaw';
 
   if (!await startFirebase()) {
     alert('Firebase not connected. Please check your config.');
@@ -2594,7 +2620,6 @@ async function createLobby() {
         return {
           name: name,
           hostId: mathQuestUid,
-          bossType: bossType,
           status: 'waiting',
           playerCount: 1,
           createdAt: Date.now(),
@@ -2618,7 +2643,7 @@ async function createLobby() {
 
     nameInput.value = '';
     refreshLobbies();
-    enterRaidRoom(lobbyId, name, true, bossType);
+    enterRaidRoom(lobbyId, name, true, null);
 
   } catch (error) {
     console.error('Error creating lobby:', error);
@@ -2630,19 +2655,52 @@ function enterRaidRoom(lobbyId, lobbyName, isHost, bossType) {
   currentLobbyId = lobbyId;
   currentLobbyName = lobbyName;
   isLobbyHost = isHost;
-  currentBossType = BOSS_DEFS[bossType] ? bossType : 'grinmaw';
+  currentBossType = BOSS_DEFS[bossType] ? bossType : null;
 
   document.getElementById('raidLobbyInfo').textContent =
     `🏛️ Lobby: ${currentLobbyName} (Code: ${lobbyId}) | ${isLobbyHost ? '👑 Host' : 'Player'}`;
 
-  showRaidWaitingRoom();
+  document.getElementById('raidWaitingRoom').style.display = 'block';
+  document.getElementById('raidGameWrapper').style.display = 'none';
+
+  if (currentBossType) {
+    showRaidWaitingReady();
+  } else {
+    showRaidBossChooseStep();
+  }
+
   showSection('raid');
   listenToLobbyWaitingRoom(lobbyId);
 }
 
-function showRaidWaitingRoom() {
-  document.getElementById('raidWaitingRoom').style.display = 'block';
-  document.getElementById('raidGameWrapper').style.display = 'none';
+function showRaidBossChooseStep() {
+  document.getElementById('raidBossChooseStep').style.display = 'block';
+  document.getElementById('raidWaitingReady').style.display = 'none';
+  const notice = document.getElementById('raidBossChooseNotice');
+  const picker = document.getElementById('raidBossPicker');
+  if (isLobbyHost) {
+    notice.style.display = 'none';
+    picker.style.display = 'grid';
+    renderBossPicker(picker, chooseBossAndContinue);
+  } else {
+    notice.style.display = 'block';
+    picker.style.display = 'none';
+  }
+}
+
+async function chooseBossAndContinue(type) {
+  if (!isLobbyHost || !currentLobbyId || !BOSS_DEFS[type]) return;
+  try {
+    await lobbyRef.child(currentLobbyId).child('bossType').set(type);
+  } catch (error) {
+    console.error('Error choosing boss:', error);
+    alert('Failed to choose a boss: ' + error.message);
+  }
+}
+
+function showRaidWaitingReady() {
+  document.getElementById('raidBossChooseStep').style.display = 'none';
+  document.getElementById('raidWaitingReady').style.display = 'block';
   const def = BOSS_DEFS[currentBossType] || BOSS_DEFS.grinmaw;
   document.getElementById('waitingBossIcon').textContent = def.icon;
   document.getElementById('waitingBossName').textContent = def.name;
@@ -2651,27 +2709,34 @@ function showRaidWaitingRoom() {
   document.getElementById('waitingHostNotice').style.display = isLobbyHost ? 'none' : 'block';
 }
 
-let waitingRoomPlayersRef = null;
-let waitingRoomStartRef = null;
+let waitingRoomLobbyRef = null;
 
 function listenToLobbyWaitingRoom(lobbyId) {
   cleanupWaitingRoomListeners();
 
-  waitingRoomPlayersRef = lobbyRef.child(lobbyId).child('players');
-  waitingRoomPlayersRef.on('value', (snap) => renderWaitingPlayerList(snap.val()));
+  waitingRoomLobbyRef = lobbyRef.child(lobbyId);
+  waitingRoomLobbyRef.on('value', (snap) => {
+    const data = snap.val();
+    if (!data) return;
 
-  waitingRoomStartRef = lobbyRef.child(lobbyId).child('raidStart');
-  waitingRoomStartRef.on('value', (snap) => {
-    const startedAt = snap.val();
-    if (startedAt) {
+    if (data.raidStart) {
       beginRaidFromSignal(lobbyId);
+      return;
     }
+
+    if (data.bossType && BOSS_DEFS[data.bossType]) {
+      currentBossType = data.bossType;
+      showRaidWaitingReady();
+    } else {
+      showRaidBossChooseStep();
+    }
+
+    renderWaitingPlayerList(data.players);
   });
 }
 
 function cleanupWaitingRoomListeners() {
-  if (waitingRoomPlayersRef) { waitingRoomPlayersRef.off(); waitingRoomPlayersRef = null; }
-  if (waitingRoomStartRef) { waitingRoomStartRef.off(); waitingRoomStartRef = null; }
+  if (waitingRoomLobbyRef) { waitingRoomLobbyRef.off(); waitingRoomLobbyRef = null; }
 }
 
 function renderWaitingPlayerList(data) {
@@ -2685,7 +2750,7 @@ function renderWaitingPlayerList(data) {
 }
 
 async function hostStartRaid() {
-  if (!isLobbyHost || !currentLobbyId) return;
+  if (!isLobbyHost || !currentLobbyId || !currentBossType) return;
   const startBtn = document.getElementById('startRaidBtn');
   if (startBtn) startBtn.disabled = true;
   try {
@@ -2818,6 +2883,11 @@ function resetRaidState() {
   raidG.boss.maxHp = def.maxHp;
   raidG.boss.phase = 1;
   raidG.boss.ultimateTriggered = false;
+  raidG.boss.lastWeakPoint = 0;
+  raidG.boss.invulnerable = false;
+  raidG.boss.feastCooldown = 260;
+  raidG.boss.feastTimer = 0;
+  raidG.boss.feastWarning = false;
   raidG.gameOver = false;
   raidG.victory = false;
   raidG.projectiles = [];
@@ -2883,13 +2953,15 @@ async function refreshLobbies() {
       const status = lobby.status || 'waiting';
       const playerCount = lobby.playerCount || 0;
       const isPlaying = status === 'playing';
-      const bossDef = BOSS_DEFS[lobby.bossType] || BOSS_DEFS.grinmaw;
+      const bossDef = BOSS_DEFS[lobby.bossType];
+      const bossIcon = bossDef ? bossDef.icon : '❓';
+      const bossLabel = bossDef ? bossDef.name : 'Host is choosing a boss...';
 
       html += `
         <div class="lobby-card">
           <div class="lobby-info">
-            <h3>${bossDef.icon} ${safeText(lobby.name || 'Unnamed Lobby')}</h3>
-            <p>${safeText(bossDef.name)} | Code: ${id} | Host: ${lobby.hostId === mathQuestUid ? '👑 You' : 'Player'}</p>
+            <h3>${bossIcon} ${safeText(lobby.name || 'Unnamed Lobby')}</h3>
+            <p>${safeText(bossLabel)} | Code: ${id} | Host: ${lobby.hostId === mathQuestUid ? '👑 You' : 'Player'}</p>
           </div>
           <div class="lobby-status">
             <span class="status-badge ${isPlaying ? 'playing' : 'waiting'}">${isPlaying ? '⚔️ In Raid' : '⏳ Waiting'}</span>
@@ -3050,10 +3122,6 @@ const raidStatusText = document.getElementById('raidStatusText');
 const countdownOverlay = document.getElementById('countdownOverlay');
 const countdownNumber = document.getElementById('countdownNumber');
 const countdownText = document.getElementById('countdownText');
-const weakPointPanel = document.getElementById('weakPointPanel');
-const weakPointLabel = document.getElementById('weakPointLabel');
-const weakPointQuestion = document.getElementById('weakPointQuestion');
-const weakPointInputDisplay = document.getElementById('weakPointInputDisplay');
 
 function startRaidWithLobby(lobbyId, bossType) {
   // Clean up any existing raid listeners
@@ -3335,10 +3403,11 @@ function grinmawCandyRain(b) {
     if (!p) return;
     const dx = p.x - b.x, dy = p.y - b.y;
     const dist = Math.hypot(dx, dy) || 1;
+    const spd = 2.3 + b.phase * 0.7;
     raidG.projectiles.push({
       x: b.x + 20, y: b.y + 30,
-      vx: (dx / dist) * (3 + b.phase), vy: (dy / dist) * (3 + b.phase),
-      r: 12, life: 120, isWarning: false, owner: id, isBossProjectile: true, kind: 'candy'
+      vx: (dx / dist) * spd, vy: (dy / dist) * spd,
+      r: 12, life: 140, isWarning: false, owner: id, isBossProjectile: true, kind: 'candy'
     });
   });
 }
@@ -3398,11 +3467,11 @@ function wardenChainSweep(b) {
 function wardenTeleportStrike(b) {
   const tx = 150 + Math.random() * 700;
   const ty = raidGROUND_Y - 60;
-  raidHazard({ kind: 'teleportReticle', x: tx, y: ty, life: 45 });
+  raidHazard({ kind: 'teleportReticle', x: tx, y: ty, life: 55 });
 }
 
 function wardenVoidPull(b) {
-  raidHazard({ kind: 'voidPull', x: 500, y: 300, life: 70 });
+  raidHazard({ kind: 'voidPull', x: 500, y: 300, life: 80 });
 }
 
 function wardenUltimate(b) {
@@ -3414,8 +3483,138 @@ function wardenUltimate(b) {
   raidHazard({ kind: 'chainSweep', x: 500, y: 350, phase: 'sweep', life: 20 });
 }
 
-const BOSS_ATTACK_FNS = { grinmaw: grinmawAttack, warden: wardenAttack };
-const BOSS_ULTIMATE_FNS = { grinmaw: grinmawUltimate, warden: wardenUltimate };
+// ------------------------------------------------------------
+// Trio, the Three-Headed Wyrm - flying, three independent heads
+// ------------------------------------------------------------
+
+const WYRM_HEAD_OFFSETS = [-70, 0, 70];
+
+function wyrmAttack(b) {
+  const options = ['volley', 'breath'];
+  if (b.phase >= 2) options.push('dive');
+  const pick = options[Math.floor(Math.random() * options.length)];
+  if (pick === 'volley') wyrmTripleVolley(b);
+  else if (pick === 'breath') wyrmBreathSweep(b);
+  else wyrmDiveBomb(b);
+}
+
+function wyrmTripleVolley(b) {
+  const targets = Object.keys(raidG.players);
+  if (targets.length === 0) return;
+  WYRM_HEAD_OFFSETS.forEach((offset, i) => {
+    setTimeout(() => {
+      if (!raidIsHost || raidG.gameOver || raidG.victory) return;
+      const pid = targets[Math.floor(Math.random() * targets.length)];
+      const p = raidG.players[pid];
+      if (!p) return;
+      const hx = b.x + offset, hy = b.y + 10;
+      const dx = p.x - hx, dy = p.y - hy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const spd = 2.6 + b.phase * 0.6;
+      raidG.projectiles.push({
+        x: hx, y: hy, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
+        r: 10, life: 140, isWarning: false, owner: pid, isBossProjectile: true, kind: 'fang'
+      });
+      raidSendBossState();
+    }, i * 220);
+  });
+}
+
+function wyrmBreathSweep(b) {
+  const leftToRight = Math.random() > 0.5;
+  raidHazard({
+    kind: 'breath',
+    startX: leftToRight ? 100 : 900,
+    endX: leftToRight ? 900 : 100,
+    y: raidGROUND_Y - 60,
+    life: 110, totalLife: 110
+  });
+}
+
+function wyrmDiveBomb(b) {
+  const targets = Object.keys(raidG.players);
+  const pid = targets[Math.floor(Math.random() * targets.length)];
+  const p = pid ? raidG.players[pid] : null;
+  raidHazard({ kind: 'teleportReticle', x: p ? p.x : 500, y: raidGROUND_Y - 60, life: 55 });
+}
+
+function wyrmUltimate(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    raidDamagePlayer(id, p, 2);
+  });
+  raidHazard({ kind: 'breath', startX: 100, endX: 900, y: raidGROUND_Y - 60, life: 60, totalLife: 60, timer: 40 });
+}
+
+// ------------------------------------------------------------
+// The Glutton - ground-based, clamps shut to become briefly invulnerable
+// ------------------------------------------------------------
+
+function gluttonAttack(b) {
+  const pick = Math.random() > 0.45 ? 'belch' : 'chomp';
+  if (pick === 'belch') gluttonBelch(b);
+  else gluttonChomp(b);
+}
+
+function gluttonBelch(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    const dx = p.x - b.x;
+    raidG.projectiles.push({
+      x: b.x, y: b.y - 10,
+      vx: Math.sign(dx || 1) * (1.3 + Math.random() * 0.6), vy: -5,
+      gravity: 0.11,
+      r: 15, life: 160, isWarning: false, owner: id, isBossProjectile: true, kind: 'bubble'
+    });
+  });
+}
+
+function gluttonChomp(b) {
+  const targets = Object.keys(raidG.players);
+  const pid = targets[Math.floor(Math.random() * targets.length)];
+  const p = pid ? raidG.players[pid] : null;
+  raidHazard({ kind: 'chomp', x: b.x, targetX: p ? p.x : b.x, y: raidGROUND_Y - 30, life: 55, totalLife: 55 });
+}
+
+function gluttonUltimate(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    raidDamagePlayer(id, p, 2);
+  });
+  raidHazard({ kind: 'chomp', x: b.x, targetX: b.x, y: raidGROUND_Y - 30, life: 30, totalLife: 30, timer: 15 });
+}
+
+// The Glutton's signature mechanic: it periodically clamps shut and takes no damage for
+// a beat, telegraphed first, so players learn to save their shots for the open window.
+function gluttonMaybeFeast(b) {
+  if (b.type !== 'glutton') return;
+  if (b.feastCooldown === undefined) {
+    b.feastCooldown = 260;
+    b.invulnerable = false;
+    b.feastWarning = false;
+  }
+  if (b.invulnerable) {
+    b.feastWarning = false;
+    b.feastTimer--;
+    if (b.feastTimer <= 0) {
+      b.invulnerable = false;
+      b.feastCooldown = 320;
+    }
+  } else {
+    b.feastCooldown--;
+    b.feastWarning = b.feastCooldown <= 25;
+    if (b.feastCooldown <= 0) {
+      b.invulnerable = true;
+      b.feastTimer = 80;
+    }
+  }
+}
+
+const BOSS_ATTACK_FNS = { grinmaw: grinmawAttack, warden: wardenAttack, wyrm: wyrmAttack, glutton: gluttonAttack };
+const BOSS_ULTIMATE_FNS = { grinmaw: grinmawUltimate, warden: wardenUltimate, wyrm: wyrmUltimate, glutton: gluttonUltimate };
 
 // ------------------------------------------------------------
 // Weak-point / ultimate-interrupt math events (host-authoritative)
@@ -3439,11 +3638,11 @@ function raidResolveMathEvent(success) {
   const type = raidG.mathEvent.type;
   const b = raidG.boss;
   if (type === 'weakpoint' && success) {
-    b.hp = Math.max(0, b.hp - 8);
+    b.hp = Math.max(0, b.hp - 6);
     raidG.slamAnimations.push({ x: b.x, y: b.y, life: 15, phase: 'impact', timer: 0 });
   } else if (type === 'ultimate') {
     if (success) {
-      b.hp = Math.max(0, b.hp - 5);
+      b.hp = Math.max(0, b.hp - 4);
       raidG.slamAnimations.push({ x: b.x, y: b.y, life: 20, phase: 'impact', timer: 0 });
     } else {
       (BOSS_ULTIMATE_FNS[b.type] || grinmawUltimate)(b);
@@ -3499,30 +3698,30 @@ function raidUpdateHazards() {
         }
       });
     } else if (hz.kind === 'chainSweep') {
-      if (hz.phase === 'windup' && hz.timer > 40) hz.phase = 'sweep';
+      if (hz.phase === 'windup' && hz.timer > 55) hz.phase = 'sweep';
       if (hz.phase === 'sweep') {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
-          if (Math.abs((p.y - 24) - hz.y) < 40) raidDamagePlayer(id, p, 1);
+          if (Math.abs((p.y - 24) - hz.y) < 36) raidDamagePlayer(id, p, 1);
         });
       }
       hz.life--;
     } else if (hz.kind === 'teleportReticle') {
-      if (hz.timer === 30) {
+      if (hz.timer === 45) {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
-          if (Math.abs(p.x - hz.x) < 50 && Math.abs((p.y - 24) - hz.y) < 60) raidDamagePlayer(id, p, 1);
+          if (Math.abs(p.x - hz.x) < 45 && Math.abs((p.y - 24) - hz.y) < 55) raidDamagePlayer(id, p, 1);
         });
       }
       hz.life--;
     } else if (hz.kind === 'voidPull') {
-      if (hz.timer === 50) {
+      if (hz.timer === 65) {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
-          if (Math.abs(p.x - hz.x) < 220) raidDamagePlayer(id, p, 1);
+          if (Math.abs(p.x - hz.x) < 150) raidDamagePlayer(id, p, 1);
         });
         for (let a = 0; a < 8; a++) {
           const ang = (a / 8) * Math.PI * 2;
@@ -3531,6 +3730,27 @@ function raidUpdateHazards() {
             r: 10, life: 90, isWarning: false, isBossProjectile: true, owner: 'void', kind: 'void'
           });
         }
+      }
+      hz.life--;
+    } else if (hz.kind === 'breath') {
+      const progress = Math.min(hz.timer / (hz.totalLife || 110), 1);
+      if (progress > 0.25) {
+        const curX = hz.startX + (hz.endX - hz.startX) * ((progress - 0.25) / 0.75);
+        Object.keys(raidG.players).forEach(id => {
+          const p = raidG.players[id];
+          if (!p) return;
+          if (Math.abs(p.x - curX) < 45) raidDamagePlayer(id, p, 1);
+        });
+      }
+      hz.life--;
+    } else if (hz.kind === 'chomp') {
+      const progress = Math.min(hz.timer / (hz.totalLife || 55), 1);
+      if (progress >= 1) {
+        Object.keys(raidG.players).forEach(id => {
+          const p = raidG.players[id];
+          if (!p) return;
+          if (Math.abs(p.x - hz.targetX) < 55 && Math.abs((p.y - 24) - hz.y) < 60) raidDamagePlayer(id, p, 1);
+        });
       }
       hz.life--;
     } else {
@@ -3550,6 +3770,12 @@ function raidBossUpdate() {
   if (b.type === 'warden') {
     b.x += Math.sin(raidG.frame * 0.014) * 1.1;
     b.y = 90 + Math.sin(raidG.frame * 0.02) * 24;
+  } else if (b.type === 'wyrm') {
+    b.x = 500 + Math.sin(raidG.frame * 0.01) * 260;
+    b.y = 110 + Math.sin(raidG.frame * 0.03) * 18;
+  } else if (b.type === 'glutton') {
+    b.x = 500 + Math.sin(raidG.frame * 0.012) * 60;
+    b.y = 95 + Math.sin(raidG.frame * 0.02) * 6;
   } else {
     b.x += Math.sin(raidG.frame * 0.018) * 0.8;
     b.y = 80 + Math.sin(raidG.frame * 0.025) * 12;
@@ -3561,14 +3787,17 @@ function raidBossUpdate() {
   else b.phase = 1;
   raidPhaseSpan.textContent = `PHASE ${b.phase}`;
 
+  gluttonMaybeFeast(b);
   raidMaybeTriggerUltimate(b);
   raidMaybeTriggerWeakPoint(b);
   raidCheckMathEventExpiry();
 
+  // The boss keeps attacking during a math event on purpose - the event is an extra
+  // thing to juggle, not a free timeout where players can shoot with no risk.
   b.attackTimer--;
-  if (b.attackTimer <= 0 && !raidG.mathEvent) {
+  if (b.attackTimer <= 0) {
     (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
-    b.attackTimer = Math.max(80, 150 - b.phase * 20);
+    b.attackTimer = Math.max(100, 170 - b.phase * 20);
     raidSendBossState();
   }
 
@@ -3577,7 +3806,7 @@ function raidBossUpdate() {
   raidG.slamAnimations.forEach(anim => {
     anim.life--;
     anim.timer++;
-    if (anim.phase === 'windup' && anim.timer > 15) {
+    if (anim.phase === 'windup' && anim.timer > 26) {
       anim.phase = 'strike';
     }
   });
@@ -3585,6 +3814,7 @@ function raidBossUpdate() {
 
   raidG.projectiles.forEach(proj => {
     if (!proj.isWarning) {
+      if (proj.gravity) proj.vy += proj.gravity;
       proj.x += proj.vx || 0;
       proj.y += proj.vy || 0;
     }
@@ -3610,16 +3840,20 @@ function raidBossUpdate() {
     proj.life--;
 
     if (Math.abs(proj.x - b.x) < 50 && Math.abs(proj.y - b.y) < 50) {
-      b.hp -= proj.damage || 5;
-      if (b.hp < 0) b.hp = 0;
       proj.life = 0;
-      raidG.slamAnimations.push({
-        x: proj.x,
-        y: proj.y,
-        life: 15,
-        phase: 'impact',
-        timer: 0
-      });
+      if (b.invulnerable) {
+        raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
+      } else {
+        b.hp -= proj.damage || 5;
+        if (b.hp < 0) b.hp = 0;
+        raidG.slamAnimations.push({
+          x: proj.x,
+          y: proj.y,
+          life: 15,
+          phase: 'impact',
+          timer: 0
+        });
+      }
       raidSendBossState();
     }
   });
@@ -3644,6 +3878,10 @@ function raidBossUpdate() {
           raidG.boss.phase = 1;
           raidG.boss.ultimateTriggered = false;
           raidG.boss.lastWeakPoint = raidG.frame;
+          raidG.boss.invulnerable = false;
+          raidG.boss.feastCooldown = 260;
+          raidG.boss.feastTimer = 0;
+          raidG.boss.feastWarning = false;
           raidG.gameOver = false;
           raidG.victory = false;
           raidG.projectiles = [];
@@ -3686,7 +3924,7 @@ function raidShootProjectile() {
   
   raidAmmo--;
   const speed = 6;
-  const damage = 5;
+  const damage = 3;
   
   raidG.playerProjectiles.push({
     x: raidLocal.x + raidLocal.w/2 - 4,
@@ -3950,7 +4188,21 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
 function drawBossDispatch(ctx, boss) {
   if (boss.type === 'warden') drawWarden(ctx, boss);
+  else if (boss.type === 'wyrm') drawWyrm(ctx, boss);
+  else if (boss.type === 'glutton') drawGlutton(ctx, boss);
   else drawGrinmaw(ctx, boss);
+}
+
+// Re-strokes the current path with a slight offset at low opacity, on top of a normal
+// stroke, so ink lines read like a couple of overlapping pen passes instead of a single
+// perfect vector line - the cheapest way to make the linework feel hand-drawn.
+function sketchStroke(ctx, seed) {
+  ctx.stroke();
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.translate(Math.sin(seed * 12.9) * 1.6, Math.cos(seed * 7.3) * 1.6);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGrinmaw(ctx, boss) {
@@ -3995,7 +4247,17 @@ function drawGrinmaw(ctx, boss) {
   ctx.shadowBlur = 0;
   ctx.strokeStyle = '#2a0808';
   ctx.lineWidth = 4;
-  ctx.stroke();
+  sketchStroke(ctx, b.x * 0.1);
+
+  // Cross-hatch shading on the jowls for a bit of ink-shadow texture
+  ctx.strokeStyle = 'rgba(42,8,8,0.35)';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.moveTo(b.x - 50 + i * 5, b.y + 4);
+    ctx.lineTo(b.x - 44 + i * 5, b.y + 22);
+    ctx.stroke();
+  }
 
   const eyeY = b.y - 8;
 
@@ -4154,6 +4416,266 @@ function drawWarden(ctx, boss) {
   }
 }
 
+function drawWyrmHead(ctx, x, y, facing, hpPercent, seed) {
+  ctx.shadowBlur = 20;
+  ctx.shadowColor = hpPercent > 0.4 ? '#5ce1e6' : '#2c8a8f';
+  const grad = ctx.createRadialGradient(x - 8, y - 8, 4, x, y, 34);
+  grad.addColorStop(0, hpPercent > 0.4 ? '#3fb8bd' : '#2c8a8f');
+  grad.addColorStop(1, '#0d4a4d');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(x - 20, y);
+  ctx.quadraticCurveTo(x - 24, y - 22, x, y - 26);
+  ctx.quadraticCurveTo(x + 24 * facing, y - 20, x + 30 * facing, y);
+  ctx.quadraticCurveTo(x + 20 * facing, y + 16, x, y + 18);
+  ctx.quadraticCurveTo(x - 22, y + 14, x - 20, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#052426';
+  ctx.lineWidth = 3;
+  sketchStroke(ctx, seed);
+
+  // Horn
+  ctx.fillStyle = '#e8fffb';
+  ctx.strokeStyle = '#052426';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y - 22);
+  ctx.quadraticCurveTo(x - 2, y - 40, x + 8, y - 42);
+  ctx.quadraticCurveTo(x + 2, y - 28, x + 6, y - 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Eye
+  ctx.fillStyle = '#fff685';
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = '#fff685';
+  ctx.beginPath();
+  ctx.ellipse(x + 8 * facing, y - 4, 5, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#0d0d0d';
+  ctx.beginPath();
+  ctx.ellipse(x + 9 * facing, y - 4, 2, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Snout / fangs
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.moveTo(x + 26 * facing, y + 2);
+  ctx.lineTo(x + 34 * facing, y + 4);
+  ctx.lineTo(x + 26 * facing, y + 9);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawWyrm(ctx, boss) {
+  const b = boss;
+  const hpPercent = b.hp / b.maxHp;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(b.x, raidGROUND_Y - 5, 160, 16, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Sinuous shared neck connecting the three heads to a central body
+  ctx.strokeStyle = '#0d4a4d';
+  ctx.lineWidth = 22;
+  ctx.lineCap = 'round';
+  WYRM_HEAD_OFFSETS.forEach(offset => {
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y + 20);
+    ctx.quadraticCurveTo(b.x + offset * 0.5, b.y - 10, b.x + offset, b.y);
+    ctx.stroke();
+  });
+  ctx.lineCap = 'butt';
+
+  // Central body / wings
+  ctx.shadowBlur = 30;
+  ctx.shadowColor = '#5ce1e6';
+  const bodyGrad = ctx.createRadialGradient(b.x, b.y + 10, 6, b.x, b.y + 20, 60);
+  bodyGrad.addColorStop(0, '#3fb8bd');
+  bodyGrad.addColorStop(1, '#0d3236');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y + 25, 50, 26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#052426';
+  ctx.lineWidth = 3;
+  sketchStroke(ctx, b.x * 0.07);
+
+  // Wing membranes
+  ctx.fillStyle = 'rgba(92,225,230,0.25)';
+  ctx.strokeStyle = 'rgba(5,36,38,0.6)';
+  ctx.lineWidth = 2;
+  [-1, 1].forEach(side => {
+    ctx.beginPath();
+    ctx.moveTo(b.x + side * 30, b.y + 15);
+    ctx.quadraticCurveTo(b.x + side * 120, b.y - 20, b.x + side * 150, b.y + 30);
+    ctx.quadraticCurveTo(b.x + side * 90, b.y + 20, b.x + side * 30, b.y + 35);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  WYRM_HEAD_OFFSETS.forEach((offset, i) => {
+    const bob = Math.sin(raidG.frame * 0.05 + i * 2.1) * 6;
+    drawWyrmHead(ctx, b.x + offset, b.y - 30 + bob, offset < 0 ? -1 : (offset > 0 ? 1 : (raidG.frame % 120 < 60 ? 1 : -1)), hpPercent, b.x * 0.1 + i);
+  });
+}
+
+function drawGlutton(ctx, boss) {
+  const b = boss;
+  const hpPercent = b.hp / b.maxHp;
+  const mouthOpen = !b.invulnerable && !b.feastWarning;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y + b.h / 2 + 30, 70, 16, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stubby legs
+  ctx.fillStyle = '#3a5a1a';
+  ctx.strokeStyle = '#1a2a0d';
+  ctx.lineWidth = 3;
+  [-35, 35].forEach(dx => {
+    ctx.beginPath();
+    ctx.roundRect(b.x + dx - 9, b.y + 30, 18, 26, 6);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  // Round bloated body
+  ctx.shadowBlur = b.invulnerable ? 45 : 30;
+  ctx.shadowColor = b.invulnerable ? '#ffffff' : (hpPercent > 0.4 ? '#9ee66c' : '#5a8a2f');
+  const bodyGrad = ctx.createRadialGradient(b.x - 20, b.y - 10, 10, b.x, b.y + 10, 70);
+  if (b.invulnerable) {
+    bodyGrad.addColorStop(0, '#e8ffcc');
+    bodyGrad.addColorStop(1, '#8fae5a');
+  } else {
+    bodyGrad.addColorStop(0, hpPercent > 0.4 ? '#c6e68c' : '#8aa35a');
+    bodyGrad.addColorStop(1, '#2f4a1a');
+  }
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y + 15, 62, 48, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#1a2a0d';
+  ctx.lineWidth = 4;
+  sketchStroke(ctx, b.x * 0.08);
+
+  // Belly spots (texture / detail)
+  ctx.fillStyle = 'rgba(26,42,13,0.3)';
+  [[-20, 20, 9], [10, 32, 6], [30, 10, 7]].forEach(([dx, dy, r]) => {
+    ctx.beginPath();
+    ctx.ellipse(b.x + dx, b.y + dy, r, r * 0.7, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Eyes
+  const eyeY = b.y - 12;
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.ellipse(b.x - 20, eyeY, 10, 11, 0, 0, Math.PI * 2);
+  ctx.ellipse(b.x + 20, eyeY, 10, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1a2a0d';
+  ctx.beginPath();
+  ctx.arc(b.x - 18, eyeY + 2, 5, 0, Math.PI * 2);
+  ctx.arc(b.x + 22, eyeY + 2, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Mouth - the tell for whether it's vulnerable
+  ctx.fillStyle = '#1a0f05';
+  ctx.strokeStyle = '#0d0803';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (mouthOpen) {
+    ctx.ellipse(b.x, b.y + 22, 30, 18, 0, 0, Math.PI * 2);
+  } else {
+    ctx.ellipse(b.x, b.y + 22, 30, b.invulnerable ? 3 : 8, 0, 0, Math.PI * 2);
+  }
+  ctx.fill();
+  ctx.stroke();
+  if (mouthOpen) {
+    ctx.fillStyle = 'white';
+    for (let i = -20; i <= 20; i += 10) {
+      ctx.beginPath();
+      ctx.moveTo(b.x + i - 4, b.y + 12);
+      ctx.lineTo(b.x + i + 4, b.y + 12);
+      ctx.lineTo(b.x + i, b.y + 20);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (b.feastWarning) {
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('closing...', b.x, b.y - 40);
+  }
+}
+
+// One shared visual for every math prompt (shield recharge, weak point, ultimate interrupt)
+// so they don't look like three different UI systems.
+function drawMathPrompt(ctx) {
+  const ev = (raidG.mathEvent && !raidG.mathEvent.resolved) ? raidG.mathEvent : null;
+  let label, question, inputDisplay, accent, timerFraction = null;
+
+  if (ev) {
+    label = ev.type === 'ultimate' ? '⚠️ ULTIMATE INCOMING - INTERRUPT IT!' : '⚡ WEAK POINT - STRIKE IT!';
+    question = ev.question + ' = ?';
+    inputDisplay = raidMathEventAnsweredLocally ? '✅ Answered! Waiting on the team...' : (raidEventMathInput || '') + ' █';
+    accent = ev.type === 'ultimate' ? '#ff6644' : '#ffd84d';
+    timerFraction = Math.max(0, 1 - (Date.now() - ev.startedAt) / ev.duration);
+  } else if (raidShowMathUI) {
+    label = '🧮 SOLVE TO RECHARGE YOUR SHIELD';
+    question = raidMathQuestion + ' = ?';
+    inputDisplay = (raidMathInput || '') + ' █';
+    accent = '#66ccff';
+  } else {
+    return;
+  }
+
+  const boxW = 440, boxX = 500 - boxW / 2, boxY = 165, boxH = 175;
+  ctx.shadowBlur = 40;
+  ctx.shadowColor = accent;
+  ctx.fillStyle = 'rgba(15,10,30,0.92)';
+  ctx.beginPath();
+  ctx.roundRect(boxX, boxY, boxW, boxH, 20);
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = accent;
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 500, boxY + 30);
+
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 34px monospace';
+  ctx.fillText(question, 500, boxY + 78);
+
+  ctx.font = '26px monospace';
+  ctx.fillStyle = '#ccddff';
+  ctx.fillText(inputDisplay, 500, boxY + 122);
+
+  if (timerFraction !== null) {
+    const barW = boxW - 40, barX = 500 - barW / 2, barY = boxY + boxH - 22;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(barX, barY, barW, 10);
+    ctx.fillStyle = timerFraction > 0.3 ? accent : '#ff4466';
+    ctx.fillRect(barX, barY, barW * timerFraction, 10);
+  }
+}
+
 function raidDraw() {
   const bossDef = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
   const skyGrad = raidCtx.createLinearGradient(0, 0, 0, raidGROUND_Y);
@@ -4168,19 +4690,52 @@ function raidDraw() {
   raidCtx.fillStyle = groundGrad;
   raidCtx.fillRect(0, raidGROUND_Y, 1000, 100);
   
-  raidCtx.fillStyle = '#3d3d6b';
+  raidCtx.fillStyle = bossDef.accent + '55';
   for (let i = 0; i < 20; i++) {
     raidCtx.fillRect(i*55 + (raidG.frame*0.5)%55, raidGROUND_Y+6, 30, 6);
   }
-  
-  raidCtx.fillStyle = 'rgba(255,255,255,0.3)';
-  for (let i = 0; i < 30; i++) {
-    const sx = (i * 137 + 50) % 1000;
-    const sy = (i * 97 + 20) % 400;
-    const size = (i % 3) + 1;
-    raidCtx.beginPath();
-    raidCtx.arc(sx, sy, size, 0, Math.PI * 2);
-    raidCtx.fill();
+
+  // Ambient arena decoration - each boss gets its own atmosphere instead of shared generic stars.
+  if (raidG.boss.type === 'wyrm') {
+    raidCtx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (let i = 0; i < 7; i++) {
+      const cx = ((i * 191 - raidG.frame * (0.3 + (i % 3) * 0.15)) % 1200 + 1200) % 1200 - 100;
+      const cy = 60 + (i * 53) % 260;
+      raidCtx.beginPath();
+      raidCtx.ellipse(cx, cy, 45, 16, 0, 0, Math.PI * 2);
+      raidCtx.ellipse(cx + 30, cy + 6, 30, 12, 0, 0, Math.PI * 2);
+      raidCtx.ellipse(cx - 30, cy + 8, 28, 11, 0, 0, Math.PI * 2);
+      raidCtx.fill();
+    }
+  } else if (raidG.boss.type === 'glutton') {
+    raidCtx.fillStyle = 'rgba(158,230,108,0.4)';
+    for (let i = 0; i < 16; i++) {
+      const bx = (i * 113) % 1000;
+      const by = raidGROUND_Y - ((raidG.frame * (1 + (i % 3) * 0.4) + i * 47) % raidGROUND_Y);
+      const r = 2 + (i % 3) * 1.5;
+      raidCtx.beginPath();
+      raidCtx.arc(bx, by, r, 0, Math.PI * 2);
+      raidCtx.fill();
+    }
+  } else if (raidG.boss.type === 'grinmaw') {
+    raidCtx.fillStyle = 'rgba(255,180,80,0.45)';
+    for (let i = 0; i < 18; i++) {
+      const ex = (i * 91 + 30) % 1000;
+      const ey = raidGROUND_Y - ((raidG.frame * (1.2 + (i % 4) * 0.5) + i * 61) % (raidGROUND_Y + 100));
+      raidCtx.beginPath();
+      raidCtx.arc(ex, ey, 1.5 + (i % 2), 0, Math.PI * 2);
+      raidCtx.fill();
+    }
+  } else {
+    raidCtx.fillStyle = 'rgba(200,164,255,0.3)';
+    for (let i = 0; i < 30; i++) {
+      const sx = (i * 137 + 50) % 1000;
+      const sy = (i * 97 + 20) % 400;
+      const size = (i % 3) + 1;
+      raidCtx.beginPath();
+      raidCtx.arc(sx, sy, size, 0, Math.PI * 2);
+      raidCtx.fill();
+    }
   }
 
   raidG.slamAnimations.forEach(anim => {
@@ -4237,6 +4792,12 @@ function raidDraw() {
         raidCtx.arc(x, y, 3 + (1 - anim.life / 20) * 5, 0, Math.PI * 2);
         raidCtx.fill();
       }
+    } else if (anim.phase === 'blocked') {
+      raidCtx.strokeStyle = `rgba(220,220,220,${anim.life / 10})`;
+      raidCtx.lineWidth = 2;
+      raidCtx.beginPath();
+      raidCtx.arc(anim.x, anim.y, 10 + (1 - anim.life / 10) * 14, 0, Math.PI * 2);
+      raidCtx.stroke();
     }
   });
 
@@ -4266,25 +4827,54 @@ function raidDraw() {
       raidCtx.lineTo(1000, hz.y);
       raidCtx.stroke();
     } else if (hz.kind === 'teleportReticle') {
-      const progress = Math.min(hz.timer / 30, 1);
+      const progress = Math.min(hz.timer / 45, 1);
       raidCtx.strokeStyle = progress >= 1 ? '#ffffff' : '#a374ff';
       raidCtx.lineWidth = 4;
       raidCtx.beginPath();
-      raidCtx.arc(hz.x, hz.y, 40 * (1 - progress) + 15, 0, Math.PI * 2);
+      raidCtx.arc(hz.x, hz.y, 50 * (1 - progress) + 15, 0, Math.PI * 2);
       raidCtx.stroke();
-      if (progress >= 1) {
+      if (progress < 1) {
+        raidCtx.fillStyle = `rgba(163,116,255,${0.15 + progress * 0.15})`;
+        raidCtx.beginPath();
+        raidCtx.arc(hz.x, hz.y, 45, 0, Math.PI * 2);
+        raidCtx.fill();
+      } else {
         raidCtx.fillStyle = 'rgba(255,255,255,0.5)';
         raidCtx.beginPath();
         raidCtx.arc(hz.x, hz.y, 45, 0, Math.PI * 2);
         raidCtx.fill();
       }
     } else if (hz.kind === 'voidPull') {
-      const progress = Math.min(hz.timer / 50, 1);
+      const progress = Math.min(hz.timer / 65, 1);
       raidCtx.strokeStyle = `rgba(120,60,200,${0.4 + progress * 0.4})`;
       raidCtx.lineWidth = 3;
       raidCtx.beginPath();
-      raidCtx.arc(hz.x, hz.y, 60 * (1 - progress) + 10, 0, Math.PI * 2);
+      raidCtx.arc(hz.x, hz.y, 90 * (1 - progress) + 10, 0, Math.PI * 2);
       raidCtx.stroke();
+    } else if (hz.kind === 'breath') {
+      const total = hz.totalLife || 110;
+      const progress = Math.min(hz.timer / total, 1);
+      raidCtx.fillStyle = `rgba(92,225,230,${Math.max(0, 0.18 - progress * 0.15)})`;
+      raidCtx.fillRect(Math.min(hz.startX, hz.endX), hz.y - 260, Math.abs(hz.endX - hz.startX), 320);
+      if (progress > 0.25) {
+        const curX = hz.startX + (hz.endX - hz.startX) * ((progress - 0.25) / 0.75);
+        raidCtx.shadowBlur = 25;
+        raidCtx.shadowColor = '#5ce1e6';
+        raidCtx.fillStyle = 'rgba(92,225,230,0.55)';
+        raidCtx.fillRect(curX - 22, hz.y - 260, 44, 320);
+        raidCtx.shadowBlur = 0;
+      }
+    } else if (hz.kind === 'chomp') {
+      const total = hz.totalLife || 55;
+      const progress = Math.min(hz.timer / total, 1);
+      raidCtx.strokeStyle = progress >= 1 ? '#ffffff' : 'rgba(158,230,108,0.7)';
+      raidCtx.lineWidth = progress >= 1 ? 5 : 3;
+      raidCtx.setLineDash(progress >= 1 ? [] : [6, 6]);
+      raidCtx.beginPath();
+      raidCtx.moveTo(hz.x, hz.y);
+      raidCtx.lineTo(hz.targetX, hz.y);
+      raidCtx.stroke();
+      raidCtx.setLineDash([]);
     }
   });
   raidCtx.shadowBlur = 0;
@@ -4306,20 +4896,31 @@ function raidDraw() {
       raidCtx.textBaseline = 'middle';
       raidCtx.fillText('⚠️', p.x, p.y + 10);
     } else if (p.isBossProjectile) {
+      const palette = {
+        fang: ['#aaffee', '#2ce6c6', '#0d5c50'],
+        bubble: ['#eaffcc', '#9ee66c', '#3d6b1f'],
+        void: ['#d8b8ff', '#7c3ce6', '#2a0f4a']
+      }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
       raidCtx.shadowBlur = 30;
-      raidCtx.shadowColor = '#ff4400';
+      raidCtx.shadowColor = palette[1];
       const grad = raidCtx.createRadialGradient(p.x-4, p.y-4, 2, p.x, p.y, p.r);
-      grad.addColorStop(0, '#ff8844');
-      grad.addColorStop(0.5, '#ff4400');
-      grad.addColorStop(1, '#882200');
+      grad.addColorStop(0, palette[0]);
+      grad.addColorStop(0.5, palette[1]);
+      grad.addColorStop(1, palette[2]);
       raidCtx.fillStyle = grad;
       raidCtx.beginPath();
       raidCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       raidCtx.fill();
-      raidCtx.fillStyle = `rgba(255, 68, 0, 0.2)`;
-      raidCtx.beginPath();
-      raidCtx.arc(p.x - p.vx * 0.5, p.y - p.vy * 0.5, p.r * 0.8, 0, Math.PI * 2);
-      raidCtx.fill();
+      if (p.kind === 'bubble') {
+        raidCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+        raidCtx.lineWidth = 1.5;
+        raidCtx.stroke();
+      } else {
+        raidCtx.fillStyle = `${palette[1]}33`;
+        raidCtx.beginPath();
+        raidCtx.arc(p.x - p.vx * 0.5, p.y - p.vy * 0.5, p.r * 0.8, 0, Math.PI * 2);
+        raidCtx.fill();
+      }
     }
   });
   raidCtx.shadowBlur = 0;
@@ -4380,26 +4981,7 @@ function raidDraw() {
   raidCtx.textBaseline = 'middle';
   raidCtx.fillText(`${bossDef.icon} ${bossDef.name} — ${Math.round(hpPct * 100)}%`, 500, barY + 14);
 
-  if (raidShowMathUI) {
-    raidCtx.shadowBlur = 40;
-    raidCtx.shadowColor = '#a374ff';
-    raidCtx.fillStyle = 'rgba(20,10,40,0.92)';
-    raidCtx.roundRect(300, 180, 400, 160, 20);
-    raidCtx.fill();
-    raidCtx.strokeStyle = '#a374ff';
-    raidCtx.lineWidth = 4;
-    raidCtx.roundRect(300, 180, 400, 160, 20);
-    raidCtx.stroke();
-    raidCtx.shadowBlur = 0;
-    raidCtx.fillStyle = 'white';
-    raidCtx.font = 'bold 32px monospace';
-    raidCtx.textAlign = 'center';
-    raidCtx.textBaseline = 'middle';
-    raidCtx.fillText('🧮  SOLVE:  ' + raidMathQuestion, 500, 240);
-    raidCtx.font = '28px monospace';
-    raidCtx.fillStyle = '#ccddff';
-    raidCtx.fillText('ANSWER: ' + raidMathInput + ' █', 500, 300);
-  }
+  drawMathPrompt(raidCtx);
 
   if (raidG.gameOver) {
     raidCtx.shadowBlur = 30;
@@ -4460,17 +5042,6 @@ function raidUpdateUI() {
   raidAmmoSpan.textContent = raidAmmo;
   if (raidDashSpan) {
     raidDashSpan.textContent = raidLocal.dashCooldown > 0 ? Math.ceil(raidLocal.dashCooldown / 60) + 's' : 'READY';
-  }
-  if (weakPointPanel) {
-    const ev = raidG.mathEvent;
-    if (ev && !ev.resolved) {
-      weakPointPanel.style.display = 'block';
-      weakPointLabel.textContent = ev.type === 'ultimate' ? '⚠️ ULTIMATE INCOMING! Interrupt it:' : '⚡ WEAK POINT! Solve to strike:';
-      weakPointQuestion.textContent = ev.question + ' = ?';
-      weakPointInputDisplay.textContent = raidMathEventAnsweredLocally ? '✅ Answered!' : raidEventMathInput + ' █';
-    } else {
-      weakPointPanel.style.display = 'none';
-    }
   }
 }
 
