@@ -2888,6 +2888,11 @@ function resetRaidState() {
   raidG.boss.feastCooldown = 260;
   raidG.boss.feastTimer = 0;
   raidG.boss.feastWarning = false;
+  raidG.boss.anim = { state: 'idle', timer: 0 };
+  raidG.boss.animScale = 1;
+  raidG.boss.animAlpha = 1;
+  raidG.boss.animOffsetX = 0;
+  raidG.boss.animOffsetY = 0;
   raidG.gameOver = false;
   raidG.victory = false;
   raidG.projectiles = [];
@@ -3414,6 +3419,7 @@ function grinmawCandyRain(b) {
 
 function grinmawThroneSlam(b) {
   const slamX = 200 + Math.random() * 600;
+  b.anim = { state: 'windup', timer: 0 };
   raidG.slamAnimations.push({ x: slamX, y: raidGROUND_Y - 20, life: 40, phase: 'windup', timer: 0 });
   raidG.projectiles.push({ x: slamX, y: raidGROUND_Y - 20, vx: 0, vy: 0, r: 60, life: 60, isWarning: true, owner: 'slam' });
 
@@ -3434,6 +3440,7 @@ function grinmawMinionSummon(b) {
   [150, 850].forEach((startX, i) => {
     raidHazard({ kind: 'imp', x: startX, y: raidGROUND_Y - 40, vx: i === 0 ? 1.3 : -1.3, life: 300 });
   });
+  b.anim = { state: 'roar', timer: 0 };
 }
 
 function grinmawUltimate(b) {
@@ -3443,7 +3450,33 @@ function grinmawUltimate(b) {
     if (!p) return;
     raidDamagePlayer(id, p, 2);
   });
+  b.anim = { state: 'roar', timer: 0 };
   raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 25, phase: 'impact', timer: 0 });
+}
+
+// Grinmaw's animation: rears back before a Throne Slam, then snaps down with the
+// impact; a quick scale-pulse "roar" plays for the Minion Summon and the ultimate.
+function updateGrinmawAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'windup') {
+    const t = Math.min(a.timer / 50, 1);
+    b.animOffsetY = -18 * t;
+    if (t >= 1) { a.state = 'slam'; a.timer = 0; }
+  } else if (a.state === 'slam') {
+    const t = Math.min(a.timer / 6, 1);
+    b.animOffsetY = -18 * (1 - t) + 5 * t;
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'roar') {
+    const t = Math.min(a.timer / 14, 1);
+    b.animScale = 1 + Math.sin(t * Math.PI) * 0.15;
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'settle') {
+    const t = Math.min(a.timer / 15, 1);
+    b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
+    b.animScale = 1 + ((b.animScale || 1) - 1) * (1 - t);
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetY = 0; b.animScale = 1; }
+  }
 }
 
 // ------------------------------------------------------------
@@ -3468,6 +3501,7 @@ function wardenTeleportStrike(b) {
   const tx = 150 + Math.random() * 700;
   const ty = raidGROUND_Y - 60;
   raidHazard({ kind: 'teleportReticle', x: tx, y: ty, life: 55 });
+  b.anim = { state: 'vanish', timer: 0, homeX: b.x, homeY: b.y, targetX: tx, targetY: ty - 40 };
 }
 
 function wardenVoidPull(b) {
@@ -3481,6 +3515,31 @@ function wardenUltimate(b) {
     raidDamagePlayer(id, p, 2);
   });
   raidHazard({ kind: 'chainSweep', x: 500, y: 350, phase: 'sweep', life: 20 });
+}
+
+// The Warden actually vanishes from its spot and reappears at the strike point instead
+// of staying put while a reticle magically appears out of nowhere.
+function updateWardenAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'vanish') {
+    const t = Math.min(a.timer / 15, 1);
+    b.animAlpha = 1 - t;
+    if (t >= 1) { a.state = 'appear'; a.timer = 0; b.x = a.targetX; b.y = a.targetY; }
+  } else if (a.state === 'appear') {
+    const t = Math.min(a.timer / 12, 1);
+    b.animAlpha = t;
+    if (t >= 1) { a.state = 'hold'; a.timer = 0; }
+  } else if (a.state === 'hold') {
+    b.animAlpha = 1;
+    if (a.timer > 25) { a.state = 'return'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
+  } else if (a.state === 'return') {
+    const t = Math.min(a.timer / 20, 1);
+    b.x = a.startX + (a.homeX - a.startX) * t;
+    b.y = a.startY + (a.homeY - a.startY) * t;
+    b.animAlpha = 1;
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animAlpha = 1; }
+  }
 }
 
 // ------------------------------------------------------------
@@ -3501,6 +3560,7 @@ function wyrmAttack(b) {
 function wyrmTripleVolley(b) {
   const targets = Object.keys(raidG.players);
   if (targets.length === 0) return;
+  b.anim = { state: 'coil', timer: 0 };
   WYRM_HEAD_OFFSETS.forEach((offset, i) => {
     setTimeout(() => {
       if (!raidIsHost || raidG.gameOver || raidG.victory) return;
@@ -3536,6 +3596,7 @@ function wyrmDiveBomb(b) {
   const pid = targets[Math.floor(Math.random() * targets.length)];
   const p = pid ? raidG.players[pid] : null;
   raidHazard({ kind: 'teleportReticle', x: p ? p.x : 500, y: raidGROUND_Y - 60, life: 55 });
+  b.anim = { state: 'dip', timer: 0 };
 }
 
 function wyrmUltimate(b) {
@@ -3547,14 +3608,42 @@ function wyrmUltimate(b) {
   raidHazard({ kind: 'breath', startX: 100, endX: 900, y: raidGROUND_Y - 60, life: 60, totalLife: 60, timer: 40 });
 }
 
+// The Wyrm's whole body coils back then lunges forward for a volley, or dips down
+// before a dive bomb - layered as an offset on top of its normal flight path so it
+// never stops flying, just punctuates it.
+function updateWyrmAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'coil') {
+    const t = Math.min(a.timer / 10, 1);
+    b.animOffsetX = -20 * t;
+    if (t >= 1) { a.state = 'lunge'; a.timer = 0; }
+  } else if (a.state === 'lunge') {
+    const t = Math.min(a.timer / 8, 1);
+    b.animOffsetX = -20 + 40 * t;
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'dip') {
+    const t = Math.min(a.timer / 20, 1);
+    b.animOffsetY = Math.sin(t * Math.PI) * 30;
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'settle') {
+    const t = Math.min(a.timer / 15, 1);
+    b.animOffsetX = (b.animOffsetX || 0) * (1 - t);
+    b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetX = 0; b.animOffsetY = 0; }
+  }
+}
+
 // ------------------------------------------------------------
 // The Glutton - ground-based, clamps shut to become briefly invulnerable
 // ------------------------------------------------------------
 
 function gluttonAttack(b) {
+  // Never interrupt a dive already in progress - just lob a bubble instead.
+  if (b.anim && b.anim.state !== 'idle') { gluttonBelch(b); return; }
   const pick = Math.random() > 0.45 ? 'belch' : 'chomp';
   if (pick === 'belch') gluttonBelch(b);
-  else gluttonChomp(b);
+  else gluttonStartChomp(b);
 }
 
 function gluttonBelch(b) {
@@ -3571,11 +3660,19 @@ function gluttonBelch(b) {
   });
 }
 
-function gluttonChomp(b) {
+// Instead of an abstract line hazard, the Glutton actually submerges into the swamp,
+// disappears, then surges up close to the target to bite before retreating back out.
+function gluttonStartChomp(b) {
   const targets = Object.keys(raidG.players);
   const pid = targets[Math.floor(Math.random() * targets.length)];
   const p = pid ? raidG.players[pid] : null;
-  raidHazard({ kind: 'chomp', x: b.x, targetX: p ? p.x : b.x, y: raidGROUND_Y - 30, life: 55, totalLife: 55 });
+  b.anim = {
+    state: 'submerge',
+    timer: 0,
+    homeX: b.x, homeY: b.y,
+    targetX: p ? Math.max(60, Math.min(940, p.x)) : b.x,
+    targetPid: pid
+  };
 }
 
 function gluttonUltimate(b) {
@@ -3584,13 +3681,60 @@ function gluttonUltimate(b) {
     if (!p) return;
     raidDamagePlayer(id, p, 2);
   });
-  raidHazard({ kind: 'chomp', x: b.x, targetX: b.x, y: raidGROUND_Y - 30, life: 30, totalLife: 30, timer: 15 });
+  b.anim = { state: 'bite', timer: 0, homeX: b.x, homeY: b.y };
+  b.animScale = 1.4;
+}
+
+function updateGluttonAnimation(b) {
+  const a = b.anim;
+  const diveY = raidGROUND_Y - 90; // depth it swims at while submerged, near ground level
+  a.timer++;
+  if (a.state === 'submerge') {
+    const t = Math.min(a.timer / 22, 1);
+    b.x = a.homeX;
+    b.y = a.homeY + (diveY - a.homeY) * t;
+    b.animScale = 1 - t * 0.55;
+    b.animAlpha = 1 - t * 0.75;
+    if (t >= 1) { a.state = 'hidden'; a.timer = 0; }
+  } else if (a.state === 'hidden') {
+    b.y = diveY;
+    b.animScale = 0.45;
+    b.animAlpha = 0.22;
+    if (a.timer > 18) { a.state = 'lunge'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
+  } else if (a.state === 'lunge') {
+    const t = Math.min(a.timer / 12, 1);
+    b.x = a.startX + (a.targetX - a.startX) * t;
+    b.y = a.startY + ((raidGROUND_Y - 55) - a.startY) * t;
+    b.animScale = 0.45 + t * 1.05;
+    b.animAlpha = 0.22 + t * 0.78;
+    if (t >= 1) {
+      a.state = 'bite'; a.timer = 0;
+      Object.keys(raidG.players).forEach(id => {
+        const p = raidG.players[id];
+        if (!p) return;
+        if (Math.abs(p.x - b.x) < 60 && Math.abs((p.y - 24) - b.y) < 70) raidDamagePlayer(id, p, 1);
+      });
+    }
+  } else if (a.state === 'bite') {
+    const t = Math.min(a.timer / 10, 1);
+    b.animScale = 1.5 - t * 0.5;
+    b.animAlpha = 1;
+    if (t >= 1) { a.state = 'retreat'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
+  } else if (a.state === 'retreat') {
+    const t = Math.min(a.timer / 22, 1);
+    b.x = a.startX + (a.homeX - a.startX) * t;
+    b.y = a.startY + (a.homeY - a.startY) * t;
+    b.animScale = 1;
+    b.animAlpha = 1;
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animScale = 1; b.animAlpha = 1; }
+  }
 }
 
 // The Glutton's signature mechanic: it periodically clamps shut and takes no damage for
 // a beat, telegraphed first, so players learn to save their shots for the open window.
 function gluttonMaybeFeast(b) {
   if (b.type !== 'glutton') return;
+  if (b.anim && b.anim.state !== 'idle') return; // don't clamp shut mid-dive
   if (b.feastCooldown === undefined) {
     b.feastCooldown = 260;
     b.invulnerable = false;
@@ -3743,16 +3887,6 @@ function raidUpdateHazards() {
         });
       }
       hz.life--;
-    } else if (hz.kind === 'chomp') {
-      const progress = Math.min(hz.timer / (hz.totalLife || 55), 1);
-      if (progress >= 1) {
-        Object.keys(raidG.players).forEach(id => {
-          const p = raidG.players[id];
-          if (!p) return;
-          if (Math.abs(p.x - hz.targetX) < 55 && Math.abs((p.y - 24) - hz.y) < 60) raidDamagePlayer(id, p, 1);
-        });
-      }
-      hz.life--;
     } else {
       hz.life--;
     }
@@ -3767,18 +3901,33 @@ function raidBossUpdate() {
 
   if (countdownActive) return;
 
+  if (!b.anim) b.anim = { state: 'idle', timer: 0 };
+
   if (b.type === 'warden') {
-    b.x += Math.sin(raidG.frame * 0.014) * 1.1;
-    b.y = 90 + Math.sin(raidG.frame * 0.02) * 24;
+    if (b.anim.state === 'idle') {
+      b.x += Math.sin(raidG.frame * 0.014) * 1.1;
+      b.y = 90 + Math.sin(raidG.frame * 0.02) * 24;
+    } else {
+      updateWardenAnimation(b);
+    }
   } else if (b.type === 'wyrm') {
     b.x = 500 + Math.sin(raidG.frame * 0.01) * 260;
     b.y = 110 + Math.sin(raidG.frame * 0.03) * 18;
+    if (b.anim.state !== 'idle') updateWyrmAnimation(b);
+    b.x += b.animOffsetX || 0;
+    b.y += b.animOffsetY || 0;
   } else if (b.type === 'glutton') {
-    b.x = 500 + Math.sin(raidG.frame * 0.012) * 60;
-    b.y = 95 + Math.sin(raidG.frame * 0.02) * 6;
+    if (b.anim.state === 'idle') {
+      b.x = 500 + Math.sin(raidG.frame * 0.012) * 60;
+      b.y = 95 + Math.sin(raidG.frame * 0.02) * 6;
+    } else {
+      updateGluttonAnimation(b);
+    }
   } else {
     b.x += Math.sin(raidG.frame * 0.018) * 0.8;
     b.y = 80 + Math.sin(raidG.frame * 0.025) * 12;
+    if (b.anim.state !== 'idle') updateGrinmawAnimation(b);
+    b.y += b.animOffsetY || 0;
   }
 
   const hpPercent = (b.hp / b.maxHp) * 100;
@@ -3882,6 +4031,11 @@ function raidBossUpdate() {
           raidG.boss.feastCooldown = 260;
           raidG.boss.feastTimer = 0;
           raidG.boss.feastWarning = false;
+          raidG.boss.anim = { state: 'idle', timer: 0 };
+          raidG.boss.animScale = 1;
+          raidG.boss.animAlpha = 1;
+          raidG.boss.animOffsetX = 0;
+          raidG.boss.animOffsetY = 0;
           raidG.gameOver = false;
           raidG.victory = false;
           raidG.projectiles = [];
@@ -4187,10 +4341,20 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 }
 
 function drawBossDispatch(ctx, boss) {
+  const scale = boss.animScale !== undefined ? boss.animScale : 1;
+  const alpha = boss.animAlpha !== undefined ? boss.animAlpha : 1;
+  ctx.save();
+  if (scale !== 1) {
+    ctx.translate(boss.x, boss.y);
+    ctx.scale(scale, scale);
+    ctx.translate(-boss.x, -boss.y);
+  }
+  ctx.globalAlpha = alpha;
   if (boss.type === 'warden') drawWarden(ctx, boss);
   else if (boss.type === 'wyrm') drawWyrm(ctx, boss);
   else if (boss.type === 'glutton') drawGlutton(ctx, boss);
   else drawGrinmaw(ctx, boss);
+  ctx.restore();
 }
 
 // Re-strokes the current path with a slight offset at low opacity, on top of a normal
@@ -4864,20 +5028,23 @@ function raidDraw() {
         raidCtx.fillRect(curX - 22, hz.y - 260, 44, 320);
         raidCtx.shadowBlur = 0;
       }
-    } else if (hz.kind === 'chomp') {
-      const total = hz.totalLife || 55;
-      const progress = Math.min(hz.timer / total, 1);
-      raidCtx.strokeStyle = progress >= 1 ? '#ffffff' : 'rgba(158,230,108,0.7)';
-      raidCtx.lineWidth = progress >= 1 ? 5 : 3;
-      raidCtx.setLineDash(progress >= 1 ? [] : [6, 6]);
-      raidCtx.beginPath();
-      raidCtx.moveTo(hz.x, hz.y);
-      raidCtx.lineTo(hz.targetX, hz.y);
-      raidCtx.stroke();
-      raidCtx.setLineDash([]);
     }
   });
   raidCtx.shadowBlur = 0;
+
+  // Swamp ripples while the Glutton is submerged, hinting at where it went.
+  if (raidG.boss.type === 'glutton' && raidG.boss.anim &&
+      (raidG.boss.anim.state === 'submerge' || raidG.boss.anim.state === 'hidden')) {
+    const rb = raidG.boss;
+    for (let i = 0; i < 3; i++) {
+      const t = ((raidG.frame + i * 12) % 36) / 36;
+      raidCtx.strokeStyle = `rgba(158,230,108,${0.35 * (1 - t)})`;
+      raidCtx.lineWidth = 2;
+      raidCtx.beginPath();
+      raidCtx.ellipse(rb.anim.homeX || rb.x, (rb.anim.homeY || rb.y) + 25, 20 + t * 40, 7 + t * 12, 0, 0, Math.PI * 2);
+      raidCtx.stroke();
+    }
+  }
 
   drawBossDispatch(raidCtx, raidG.boss);
 
