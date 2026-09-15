@@ -910,6 +910,88 @@ body {
   color: #e0e0ff;
 }
 
+.raid-tutorial {
+  margin: 22px 22px 0;
+  background: #12122a;
+  border: 2px solid #3a3a6a;
+  border-radius: 16px;
+  padding: 14px 20px;
+  color: #cfcfef;
+}
+
+.raid-tutorial summary {
+  cursor: pointer;
+  font-family: 'Fredoka One', cursive;
+  color: #ffd84d;
+  font-size: 1.05em;
+  outline: none;
+}
+
+.raid-tutorial-body {
+  margin-top: 12px;
+  font-family: Arial, sans-serif;
+  font-size: 0.88em;
+  line-height: 1.6;
+}
+
+.raid-tutorial-body p {
+  margin: 0 0 8px;
+}
+
+.raid-tutorial-body p:last-child {
+  margin-bottom: 0;
+}
+
+.difficulty-picker {
+  padding: 18px 22px 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.difficulty-picker-label {
+  font-family: 'Fredoka One', cursive;
+  color: #aaaacc;
+  font-size: 0.95em;
+}
+
+.difficulty-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.difficulty-btn {
+  background: #0f0f1f;
+  border: 2px solid #3a3a6a;
+  border-radius: 30px;
+  padding: 8px 18px;
+  color: #ccccdd;
+  font-family: 'Fredoka One', cursive;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.difficulty-btn:hover {
+  border-color: #6c63ff;
+}
+
+.difficulty-btn.selected {
+  border-color: #ffd84d;
+  background: #171730;
+  color: #ffd84d;
+  box-shadow: 0 0 0 2px rgba(255, 216, 77, 0.3);
+}
+
+.waiting-difficulty {
+  margin-top: 6px;
+  font-family: Arial, sans-serif;
+  font-size: 0.85em;
+  color: #ffd84d;
+}
+
 .waiting-boss-preview {
   display: flex;
   align-items: center;
@@ -1571,7 +1653,7 @@ textarea.community-input {
 
   <button class="nav-button"
           onclick="showSection('lobby', this)">
-    🏛️ Lobby
+    ⚔️ Raid
   </button>
 
   <button class="nav-button"
@@ -1709,10 +1791,24 @@ textarea.community-input {
 
   <div class="raid-container" style="position:relative;">
 
+    <details class="raid-tutorial">
+      <summary>❓ How to Play</summary>
+      <div class="raid-tutorial-body">
+        <p><strong>Move:</strong> ← → &nbsp; <strong>Jump:</strong> ↑ &nbsp; <strong>Shoot:</strong> Space &nbsp; <strong>Shield:</strong> Shift / E &nbsp; <strong>Dash:</strong> X</p>
+        <p>Shield blocks one hit for free, then costs a quick math answer to recharge. Dash gives you a burst of speed and brief invincibility on a cooldown.</p>
+        <p>Watch for <strong>weak-point</strong> math prompts - answer fastest to land a bonus strike - and <strong>ultimate interrupt</strong> prompts that reduce or cancel the boss's biggest attack if solved in time.</p>
+        <p>Bring the boss's HP bar at the top of the screen to zero before your team runs out of hearts!</p>
+      </div>
+    </details>
+
     <div id="raidWaitingRoom" class="raid-waiting-room">
 
       <div id="raidBossChooseStep">
         <h3 class="waiting-choose-heading">Choose Your Boss</h3>
+        <div class="difficulty-picker" id="raidDifficultyPicker">
+          <span class="difficulty-picker-label">Difficulty:</span>
+          <div class="difficulty-options" id="raidDifficultyOptions"></div>
+        </div>
         <div class="boss-picker" id="raidBossPicker"></div>
         <p id="raidBossChooseNotice" class="waiting-host-notice">Waiting for the host to choose a boss...</p>
         <div class="waiting-actions">
@@ -1726,6 +1822,7 @@ textarea.community-input {
           <div>
             <div class="waiting-boss-name" id="waitingBossName">Grinmaw the Enthroned</div>
             <div class="waiting-boss-desc" id="waitingBossDesc">A grinning demon lord who never leaves his throne.</div>
+            <div class="waiting-difficulty" id="waitingDifficultyLabel">⚖️ Normal</div>
           </div>
         </div>
         <div class="waiting-players">
@@ -2537,6 +2634,8 @@ let currentLobbyId = null;
 let currentLobbyName = '';
 let isLobbyHost = false;
 let currentBossType = 'grinmaw';
+let currentDifficulty = 'normal';
+let pendingDifficulty = 'normal';
 
 // Simple 4-digit lobby code generator
 function generateLobbyCode() {
@@ -2583,6 +2682,31 @@ const BOSS_DEFS = {
 };
 
 const BOSS_ORDER = ['grinmaw', 'warden', 'wyrm', 'glutton'];
+
+// ============================================================
+// DIFFICULTY DEFINITIONS
+// ============================================================
+
+const DIFFICULTY_DEFS = {
+  easy: { id: 'easy', label: '😊 Easy', hpMult: 0.7, cooldownMult: 1.4 },
+  normal: { id: 'normal', label: '⚖️ Normal', hpMult: 1, cooldownMult: 1 },
+  hard: { id: 'hard', label: '🔥 Hard', hpMult: 1.35, cooldownMult: 0.7 }
+};
+
+const DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
+
+function renderDifficultyPicker(container) {
+  container.innerHTML = DIFFICULTY_ORDER.map(id => {
+    const d = DIFFICULTY_DEFS[id];
+    return `<button type="button" class="difficulty-btn${id === pendingDifficulty ? ' selected' : ''}" data-difficulty="${id}">${d.label}</button>`;
+  }).join('');
+  container.querySelectorAll('.difficulty-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pendingDifficulty = btn.dataset.difficulty;
+      renderDifficultyPicker(container);
+    });
+  });
+}
 
 function renderBossPicker(container, onPick) {
   container.innerHTML = BOSS_ORDER.map(id => {
@@ -2656,6 +2780,7 @@ function enterRaidRoom(lobbyId, lobbyName, isHost, bossType) {
   currentLobbyName = lobbyName;
   isLobbyHost = isHost;
   currentBossType = BOSS_DEFS[bossType] ? bossType : null;
+  pendingDifficulty = 'normal';
 
   document.getElementById('raidLobbyInfo').textContent =
     `🏛️ Lobby: ${currentLobbyName} (Code: ${lobbyId}) | ${isLobbyHost ? '👑 Host' : 'Player'}`;
@@ -2678,20 +2803,27 @@ function showRaidBossChooseStep() {
   document.getElementById('raidWaitingReady').style.display = 'none';
   const notice = document.getElementById('raidBossChooseNotice');
   const picker = document.getElementById('raidBossPicker');
+  const diffPicker = document.getElementById('raidDifficultyPicker');
   if (isLobbyHost) {
     notice.style.display = 'none';
     picker.style.display = 'grid';
+    diffPicker.style.display = 'flex';
     renderBossPicker(picker, chooseBossAndContinue);
+    renderDifficultyPicker(document.getElementById('raidDifficultyOptions'));
   } else {
     notice.style.display = 'block';
     picker.style.display = 'none';
+    diffPicker.style.display = 'none';
   }
 }
 
 async function chooseBossAndContinue(type) {
   if (!isLobbyHost || !currentLobbyId || !BOSS_DEFS[type]) return;
   try {
-    await lobbyRef.child(currentLobbyId).child('bossType').set(type);
+    await lobbyRef.child(currentLobbyId).update({
+      bossType: type,
+      difficulty: pendingDifficulty
+    });
   } catch (error) {
     console.error('Error choosing boss:', error);
     alert('Failed to choose a boss: ' + error.message);
@@ -2702,10 +2834,14 @@ function showRaidWaitingReady() {
   document.getElementById('raidBossChooseStep').style.display = 'none';
   document.getElementById('raidWaitingReady').style.display = 'block';
   const def = BOSS_DEFS[currentBossType] || BOSS_DEFS.grinmaw;
+  const diffDef = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
   document.getElementById('waitingBossIcon').textContent = def.icon;
   document.getElementById('waitingBossName').textContent = def.name;
   document.getElementById('waitingBossDesc').textContent = def.desc;
+  document.getElementById('waitingDifficultyLabel').textContent = diffDef.label;
   document.getElementById('startRaidBtn').style.display = isLobbyHost ? 'inline-block' : 'none';
+  // Re-enable in case a previous lobby's raid start left this disabled - it's the same DOM node reused across lobbies.
+  document.getElementById('startRaidBtn').disabled = false;
   document.getElementById('waitingHostNotice').style.display = isLobbyHost ? 'none' : 'block';
 }
 
@@ -2726,6 +2862,7 @@ function listenToLobbyWaitingRoom(lobbyId) {
 
     if (data.bossType && BOSS_DEFS[data.bossType]) {
       currentBossType = data.bossType;
+      currentDifficulty = DIFFICULTY_DEFS[data.difficulty] ? data.difficulty : 'normal';
       showRaidWaitingReady();
     } else {
       showRaidBossChooseStep();
@@ -2878,9 +3015,10 @@ async function leaveLobby() {
 function resetRaidState() {
   // Reset all raid state variables
   const def = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS[currentBossType] || BOSS_DEFS.grinmaw;
+  const diff = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
   raidG.boss.type = def.id;
-  raidG.boss.hp = def.maxHp;
-  raidG.boss.maxHp = def.maxHp;
+  raidG.boss.hp = Math.round(def.maxHp * diff.hpMult);
+  raidG.boss.maxHp = Math.round(def.maxHp * diff.hpMult);
   raidG.boss.phase = 1;
   raidG.boss.ultimateTriggered = false;
   raidG.boss.lastWeakPoint = 0;
@@ -2961,12 +3099,14 @@ async function refreshLobbies() {
       const bossDef = BOSS_DEFS[lobby.bossType];
       const bossIcon = bossDef ? bossDef.icon : '❓';
       const bossLabel = bossDef ? bossDef.name : 'Host is choosing a boss...';
+      const diffDef = DIFFICULTY_DEFS[lobby.difficulty];
+      const diffLabel = bossDef ? (diffDef ? diffDef.label : DIFFICULTY_DEFS.normal.label) : '';
 
       html += `
         <div class="lobby-card">
           <div class="lobby-info">
             <h3>${bossIcon} ${safeText(lobby.name || 'Unnamed Lobby')}</h3>
-            <p>${safeText(bossLabel)} | Code: ${id} | Host: ${lobby.hostId === mathQuestUid ? '👑 You' : 'Player'}</p>
+            <p>${safeText(bossLabel)}${diffLabel ? ' | ' + diffLabel : ''} | Code: ${id} | Host: ${lobby.hostId === mathQuestUid ? '👑 You' : 'Player'}</p>
           </div>
           <div class="lobby-status">
             <span class="status-badge ${isPlaying ? 'playing' : 'waiting'}">${isPlaying ? '⚔️ In Raid' : '⏳ Waiting'}</span>
@@ -3049,6 +3189,9 @@ let raidIsHost = false;
 let raidHostChecked = false;
 let raidInitialized = false;
 let raidLoopRunning = false;
+let raidPresenceInterval = null;
+let raidHostCheckInterval = null;
+let raidConnectedRef = null;
 
 // Countdown system
 let countdownActive = false;
@@ -3127,6 +3270,7 @@ const raidStatusText = document.getElementById('raidStatusText');
 const countdownOverlay = document.getElementById('countdownOverlay');
 const countdownNumber = document.getElementById('countdownNumber');
 const countdownText = document.getElementById('countdownText');
+document.getElementById('raidLeaveBtn').addEventListener('click', leaveLobby);
 
 function startRaidWithLobby(lobbyId, bossType) {
   // Clean up any existing raid listeners
@@ -3172,6 +3316,18 @@ function cleanupRaid() {
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
+  }
+  if (raidPresenceInterval) {
+    clearInterval(raidPresenceInterval);
+    raidPresenceInterval = null;
+  }
+  if (raidHostCheckInterval) {
+    clearInterval(raidHostCheckInterval);
+    raidHostCheckInterval = null;
+  }
+  if (raidConnectedRef) {
+    raidConnectedRef.off();
+    raidConnectedRef = null;
   }
   countdownOverlay.style.display = 'none';
   countdownActive = false;
@@ -3946,7 +4102,8 @@ function raidBossUpdate() {
   b.attackTimer--;
   if (b.attackTimer <= 0) {
     (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
-    b.attackTimer = Math.max(100, 170 - b.phase * 20);
+    const cooldownMult = (DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal).cooldownMult;
+    b.attackTimer = Math.round(Math.max(100, 170 - b.phase * 20) * cooldownMult);
     raidSendBossState();
   }
 
@@ -4022,8 +4179,9 @@ function raidBossUpdate() {
       if (raidIsHost) {
         startCountdown(() => {
           const def = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
-          raidG.boss.hp = def.maxHp;
-          raidG.boss.maxHp = def.maxHp;
+          const diff = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
+          raidG.boss.hp = Math.round(def.maxHp * diff.hpMult);
+          raidG.boss.maxHp = Math.round(def.maxHp * diff.hpMult);
           raidG.boss.phase = 1;
           raidG.boss.ultimateTriggered = false;
           raidG.boss.lastWeakPoint = raidG.frame;
@@ -5241,7 +5399,8 @@ function raidInit() {
   raidAmmo = 3;
   ammoRegenTimer = 0;
 
-  raidDbRef.ref('.info/connected').on('value', (snap) => {
+  raidConnectedRef = raidDbRef.ref('.info/connected');
+  raidConnectedRef.on('value', (snap) => {
     if (snap.val() === true) {
       raidStatusDot.className = 'dot online';
       raidStatusText.textContent = 'connected';
@@ -5254,7 +5413,7 @@ function raidInit() {
     }
   });
 
-  setInterval(() => {
+  raidPresenceInterval = setInterval(() => {
     if (raidPresenceRef && raidMyId) {
       raidPresenceRef.child(raidMyId).set(Date.now());
     }
@@ -5278,8 +5437,8 @@ function raidInit() {
   raidListenToMathHits();
 
   setTimeout(raidCheckHost, 1500);
-  
-  setInterval(() => {
+
+  raidHostCheckInterval = setInterval(() => {
     if (!raidHostChecked) return;
     if (!raidPlayerRef) return;
     raidPlayerRef.once('value', (snap) => {
@@ -5297,8 +5456,6 @@ function raidInit() {
       }
     });
   }, 5000);
-
-  document.getElementById('raidLeaveBtn').addEventListener('click', leaveLobby);
 
   // The waiting-room "Start Raid" click is the sync signal every client already
   // agreed on, so every client (host and non-host alike) runs its own countdown here.
