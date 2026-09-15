@@ -965,6 +965,12 @@ body {
   color: #666;
 }
 
+.waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
 .waiting-host-notice {
   color: #888;
   font-family: Arial, sans-serif;
@@ -1721,7 +1727,10 @@ textarea.community-input {
         <h3>Players in Lobby</h3>
         <div id="waitingPlayerList" class="waiting-player-list"></div>
       </div>
-      <button id="startRaidBtn" class="big-play-button" style="display:none;" onclick="hostStartRaid()">▶ START RAID</button>
+      <div class="waiting-actions">
+        <button id="startRaidBtn" class="big-play-button" style="display:none;" onclick="hostStartRaid()">▶ START RAID</button>
+        <button class="big-play-button" style="background: #2d2d5e; box-shadow: 0 6px 0 #1a1a3a;" onclick="leaveLobby()">🚪 LEAVE LOBBY</button>
+      </div>
       <p id="waitingHostNotice" class="waiting-host-notice">Waiting for the host to start the raid...</p>
     </div>
 
