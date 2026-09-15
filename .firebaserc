@@ -1,1 +1,15 @@
-{"projects":{"default":"mathquest-f54b5"}}
+{
+  "projects": {
+    "default": "mathquest-f54b5"
+  },
+  "targets": {
+    "mathquest-f54b5": {
+      "hosting": {
+        "mathquest": [
+          "math-quest-site"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
