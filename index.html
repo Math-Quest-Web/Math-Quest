@@ -3031,6 +3031,7 @@ function resetRaidState() {
   raidG.boss.animAlpha = 1;
   raidG.boss.animOffsetX = 0;
   raidG.boss.animOffsetY = 0;
+  resetBossFlow(raidG.boss);
   raidG.gameOver = false;
   raidG.victory = false;
   raidG.projectiles = [];
@@ -3208,7 +3209,8 @@ const ammoRegenDelay = 120;
 const raidG = {
   players: {},
   boss: { type: 'grinmaw', x: 500, y: 80, w: 120, h: 80, hp: 100, maxHp: 100, phase: 1,
-          attackTimer: 0, attackCooldown: 120, phaseTimer: 0, ultimateTriggered: false },
+          attackTimer: 0, attackCooldown: 120, phaseTimer: 0, ultimateTriggered: false,
+          transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0 },
   projectiles: [],
   playerProjectiles: [],
   slamAnimations: [],
@@ -3545,6 +3547,26 @@ function raidHazard(props) {
   raidG.hazards.push(Object.assign({ life: 60, timer: 0 }, props));
 }
 
+// Fight-flow state shared by every boss: phase-transition beat, "exposed" damage window
+// after a big attack, no-repeat attack picking and phase-3 combos. Must never hold
+// undefined (Firebase rejects it), so use '' / 0 / false defaults.
+function resetBossFlow(b) {
+  b.transition = 0;
+  b.transitionPhase = 1;
+  b.exposed = 0;
+  b.lastPhase = 1;
+  b.lastAttack = '';
+  b.comboPending = false;
+  b.comboTimer = 0;
+}
+
+function raidPickAttack(b, options) {
+  const pool = options.length > 1 ? options.filter(o => o !== b.lastAttack) : options;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  b.lastAttack = pick;
+  return pick;
+}
+
 // ------------------------------------------------------------
 // Grinmaw the Enthroned - ground-anchored, warm palette
 // ------------------------------------------------------------
@@ -3552,7 +3574,7 @@ function raidHazard(props) {
 function grinmawAttack(b) {
   const options = ['candy', 'slam'];
   if (b.phase >= 2) options.push('minions');
-  const pick = options[Math.floor(Math.random() * options.length)];
+  const pick = raidPickAttack(b, options);
   if (pick === 'candy') grinmawCandyRain(b);
   else if (pick === 'slam') grinmawThroneSlam(b);
   else grinmawMinionSummon(b);
@@ -3622,7 +3644,7 @@ function updateGrinmawAnimation(b) {
   } else if (a.state === 'slam') {
     const t = Math.min(a.timer / 6, 1);
     b.animOffsetY = -18 * (1 - t) + 5 * t;
-    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; b.exposed = 70; }
   } else if (a.state === 'roar') {
     const t = Math.min(a.timer / 14, 1);
     b.animScale = 1 + Math.sin(t * Math.PI) * 0.15;
@@ -3642,7 +3664,7 @@ function updateGrinmawAnimation(b) {
 function wardenAttack(b) {
   const options = ['chain', 'teleport'];
   if (b.phase >= 2) options.push('void');
-  const pick = options[Math.floor(Math.random() * options.length)];
+  const pick = raidPickAttack(b, options);
   if (pick === 'chain') wardenChainSweep(b);
   else if (pick === 'teleport') wardenTeleportStrike(b);
   else wardenVoidPull(b);
@@ -3685,7 +3707,7 @@ function updateWardenAnimation(b) {
   } else if (a.state === 'appear') {
     const t = Math.min(a.timer / 12, 1);
     b.animAlpha = t;
-    if (t >= 1) { a.state = 'hold'; a.timer = 0; }
+    if (t >= 1) { a.state = 'hold'; a.timer = 0; b.exposed = 60; }
   } else if (a.state === 'hold') {
     b.animAlpha = 1;
     if (a.timer > 25) { a.state = 'return'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
@@ -3707,7 +3729,7 @@ const WYRM_HEAD_OFFSETS = [-70, 0, 70];
 function wyrmAttack(b) {
   const options = ['volley', 'breath'];
   if (b.phase >= 2) options.push('dive');
-  const pick = options[Math.floor(Math.random() * options.length)];
+  const pick = raidPickAttack(b, options);
   if (pick === 'volley') wyrmTripleVolley(b);
   else if (pick === 'breath') wyrmBreathSweep(b);
   else wyrmDiveBomb(b);
@@ -3781,7 +3803,7 @@ function updateWyrmAnimation(b) {
   } else if (a.state === 'dip') {
     const t = Math.min(a.timer / 20, 1);
     b.animOffsetY = Math.sin(t * Math.PI) * 30;
-    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+    if (t >= 1) { a.state = 'settle'; a.timer = 0; b.exposed = 60; }
   } else if (a.state === 'settle') {
     const t = Math.min(a.timer / 15, 1);
     b.animOffsetX = (b.animOffsetX || 0) * (1 - t);
@@ -3797,9 +3819,26 @@ function updateWyrmAnimation(b) {
 function gluttonAttack(b) {
   // Never interrupt a dive already in progress - just lob a bubble instead.
   if (b.anim && b.anim.state !== 'idle') { gluttonBelch(b); return; }
-  const pick = Math.random() > 0.45 ? 'belch' : 'chomp';
+  const options = ['belch', 'chomp'];
+  if (b.phase >= 2) options.push('fan');
+  const pick = raidPickAttack(b, options);
   if (pick === 'belch') gluttonBelch(b);
+  else if (pick === 'fan') gluttonBubbleFan(b);
   else gluttonStartChomp(b);
+}
+
+// Phase 2+: a spread of bubbles lobbed straight up that rain back down across the arena,
+// so the answer is to keep moving rather than to stand under the boss.
+function gluttonBubbleFan(b) {
+  for (let i = 0; i < 5; i++) {
+    const ang = (-150 + i * 30) * Math.PI / 180;
+    raidG.projectiles.push({
+      x: b.x, y: b.y - 10,
+      vx: Math.cos(ang) * 3.4, vy: Math.sin(ang) * 6.2,
+      gravity: 0.13,
+      r: 14, life: 170, isWarning: false, owner: 'fan', isBossProjectile: true, kind: 'bubble'
+    });
+  }
 }
 
 function gluttonBelch(b) {
@@ -3864,7 +3903,7 @@ function updateGluttonAnimation(b) {
     b.animScale = 0.45 + t * 1.05;
     b.animAlpha = 0.22 + t * 0.78;
     if (t >= 1) {
-      a.state = 'bite'; a.timer = 0;
+      a.state = 'bite'; a.timer = 0; b.exposed = 55;
       Object.keys(raidG.players).forEach(id => {
         const p = raidG.players[id];
         if (!p) return;
@@ -4092,19 +4131,54 @@ function raidBossUpdate() {
   else b.phase = 1;
   raidPhaseSpan.textContent = `PHASE ${b.phase}`;
 
-  gluttonMaybeFeast(b);
-  raidMaybeTriggerUltimate(b);
-  raidMaybeTriggerWeakPoint(b);
+  if (b.exposed > 0) b.exposed--;
+
+  // Phase change beat: the boss stops, roars and is briefly untouchable while the arena
+  // is cleared, so a phase feels like a moment rather than a silent number change.
+  // Waits for any in-progress attack animation to finish first.
+  if (b.phase > (b.lastPhase || 1) && b.anim.state === 'idle' && !(b.transition > 0)) {
+    b.lastPhase = b.phase;
+    b.transition = 100;
+    b.transitionPhase = b.phase;
+    b.comboPending = false;
+    b.exposed = 0;
+    b.attackTimer = 150;
+    raidG.projectiles = [];
+    raidG.hazards = [];
+    raidSendBossState();
+  }
+  const inTransition = b.transition > 0;
+  if (inTransition) {
+    b.transition--;
+    if (b.anim.state === 'idle') b.animScale = 1 + Math.sin(raidG.frame * 0.5) * 0.06 * (b.transition / 100);
+    if (b.transition === 0 && b.anim.state === 'idle') b.animScale = 1;
+  }
+
+  if (!inTransition) {
+    gluttonMaybeFeast(b);
+    raidMaybeTriggerUltimate(b);
+    raidMaybeTriggerWeakPoint(b);
+  }
   raidCheckMathEventExpiry();
 
   // The boss keeps attacking during a math event on purpose - the event is an extra
   // thing to juggle, not a free timeout where players can shoot with no risk.
-  b.attackTimer--;
-  if (b.attackTimer <= 0) {
+  if (!inTransition) b.attackTimer--;
+  if (!inTransition && b.attackTimer <= 0) {
     (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
     const cooldownMult = (DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal).cooldownMult;
     b.attackTimer = Math.round(Math.max(100, 170 - b.phase * 20) * cooldownMult);
+    // Phase 3 combo: a second, different attack follows shortly after the first.
+    if (b.phase >= 3 && Math.random() < 0.45) { b.comboPending = true; b.comboTimer = 50; }
     raidSendBossState();
+  }
+  if (b.comboPending && !inTransition) {
+    b.comboTimer--;
+    if (b.comboTimer <= 0 && b.anim.state === 'idle') {
+      b.comboPending = false;
+      (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
+      raidSendBossState();
+    }
   }
 
   raidUpdateHazards();
@@ -4147,10 +4221,10 @@ function raidBossUpdate() {
 
     if (Math.abs(proj.x - b.x) < 50 && Math.abs(proj.y - b.y) < 50) {
       proj.life = 0;
-      if (b.invulnerable) {
+      if (b.invulnerable || b.transition > 0) {
         raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
       } else {
-        b.hp -= proj.damage || 5;
+        b.hp -= (proj.damage || 5) * (b.exposed > 0 ? 2 : 1);
         if (b.hp < 0) b.hp = 0;
         raidG.slamAnimations.push({
           x: proj.x,
@@ -4194,6 +4268,7 @@ function raidBossUpdate() {
           raidG.boss.animAlpha = 1;
           raidG.boss.animOffsetX = 0;
           raidG.boss.animOffsetY = 0;
+          resetBossFlow(raidG.boss);
           raidG.gameOver = false;
           raidG.victory = false;
           raidG.projectiles = [];
@@ -4998,19 +5073,55 @@ function drawMathPrompt(ctx) {
   }
 }
 
+// Local-only juice, derived each frame by watching state that is already synced
+// (boss hp, my health, boss.transition), so it works identically for host and clients.
+const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [] };
+
+function raidFxTick() {
+  const b = raidG.boss;
+  if (raidFx.lastBossHp === null || b.hp > raidFx.lastBossHp) {
+    raidFx.lastBossHp = b.hp;
+  } else if (b.hp < raidFx.lastBossHp) {
+    const d = Math.round(raidFx.lastBossHp - b.hp);
+    const big = d >= 6;
+    raidFx.floaters.push({ x: b.x + (Math.random() - 0.5) * 50, y: b.y - 45, text: '-' + d, big: big, life: 45, max: 45 });
+    raidFx.shake = Math.max(raidFx.shake, big ? 7 : 3);
+    raidFx.lastBossHp = b.hp;
+  }
+  if (raidFx.lastHealth === null || raidLocal.health > raidFx.lastHealth) {
+    raidFx.lastHealth = raidLocal.health;
+  } else if (raidLocal.health < raidFx.lastHealth) {
+    raidFx.shake = Math.max(raidFx.shake, 11);
+    raidFx.hurtFlash = 14;
+    raidFx.lastHealth = raidLocal.health;
+  }
+  if (b.transition > 0 && raidFx.lastTransition === 0) raidFx.shake = Math.max(raidFx.shake, 22);
+  raidFx.lastTransition = b.transition || 0;
+
+  raidFx.shake *= 0.86;
+  if (raidFx.shake < 0.3) raidFx.shake = 0;
+  if (raidFx.hurtFlash > 0) raidFx.hurtFlash--;
+  raidFx.floaters.forEach(f => { f.y -= 0.9; f.life--; });
+  raidFx.floaters = raidFx.floaters.filter(f => f.life > 0);
+}
+
 function raidDraw() {
+  raidFxTick();
   const bossDef = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
+  const shakeAmt = raidFx.shake + (raidG.boss.transition > 0 ? 4 : 0);
+  raidCtx.save();
+  if (shakeAmt > 0) raidCtx.translate((Math.random() - 0.5) * shakeAmt, (Math.random() - 0.5) * shakeAmt);
   const skyGrad = raidCtx.createLinearGradient(0, 0, 0, raidGROUND_Y);
   skyGrad.addColorStop(0, bossDef.bg2);
   skyGrad.addColorStop(1, bossDef.bg1);
   raidCtx.fillStyle = skyGrad;
-  raidCtx.fillRect(0, 0, 1000, 600);
+  raidCtx.fillRect(-30, -30, 1060, 630 + 30);
 
   const groundGrad = raidCtx.createLinearGradient(0, raidGROUND_Y, 0, 600);
   groundGrad.addColorStop(0, '#2a2a4a');
   groundGrad.addColorStop(1, '#1a1a2e');
   raidCtx.fillStyle = groundGrad;
-  raidCtx.fillRect(0, raidGROUND_Y, 1000, 100);
+  raidCtx.fillRect(-30, raidGROUND_Y, 1060, 130);
   
   raidCtx.fillStyle = bossDef.accent + '55';
   for (let i = 0; i < 20; i++) {
@@ -5206,6 +5317,30 @@ function raidDraw() {
 
   drawBossDispatch(raidCtx, raidG.boss);
 
+  // Shield ring while the boss can't be hurt (phase change), gold pulse while it's exposed.
+  const fb = raidG.boss;
+  if (fb.transition > 0) {
+    raidCtx.strokeStyle = 'rgba(255,255,255,0.75)';
+    raidCtx.lineWidth = 4;
+    raidCtx.setLineDash([10, 8]);
+    raidCtx.beginPath();
+    raidCtx.arc(fb.x, fb.y, 85 + Math.sin(raidG.frame * 0.4) * 4, 0, Math.PI * 2);
+    raidCtx.stroke();
+    raidCtx.setLineDash([]);
+  } else if (fb.exposed > 0) {
+    const pulse = 0.5 + 0.5 * Math.sin(raidG.frame * 0.4);
+    raidCtx.strokeStyle = `rgba(255,216,77,${0.5 + pulse * 0.4})`;
+    raidCtx.lineWidth = 5;
+    raidCtx.beginPath();
+    raidCtx.arc(fb.x, fb.y, 78 + pulse * 6, 0, Math.PI * 2);
+    raidCtx.stroke();
+    raidCtx.fillStyle = '#ffd84d';
+    raidCtx.font = 'bold 20px sans-serif';
+    raidCtx.textAlign = 'center';
+    raidCtx.textBaseline = 'middle';
+    raidCtx.fillText('EXPOSED  x2 DAMAGE', fb.x, fb.y + 100);
+  }
+
   raidG.projectiles.forEach(p => {
     if (p.isWarning) {
       const pulse = 0.5 + 0.5 * Math.sin(raidG.frame * 0.1);
@@ -5280,6 +5415,25 @@ function raidDraw() {
   drawPlayerCuphead(raidCtx, lp.x, lp.y, lp.w, lp.h, lp.facing,
              lp.health, lp.maxHealth, lp.shield, lp.invincible, true);
 
+  raidFx.floaters.forEach(f => {
+    raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
+    raidCtx.font = f.big ? 'bold 34px sans-serif' : 'bold 22px sans-serif';
+    raidCtx.textAlign = 'center';
+    raidCtx.textBaseline = 'middle';
+    raidCtx.lineWidth = 5;
+    raidCtx.strokeStyle = '#1a0d0d';
+    raidCtx.strokeText(f.text, f.x, f.y);
+    raidCtx.fillStyle = f.big ? '#ffd84d' : '#ffffff';
+    raidCtx.fillText(f.text, f.x, f.y);
+  });
+  raidCtx.globalAlpha = 1;
+  raidCtx.restore();
+
+  if (raidFx.hurtFlash > 0) {
+    raidCtx.fillStyle = `rgba(255,30,60,${0.28 * (raidFx.hurtFlash / 14)})`;
+    raidCtx.fillRect(0, 0, 1000, 600);
+  }
+
   // Fixed boss health bar - stays put at the top of the screen, independent of the boss's position.
   const barW = 700, barX = 500 - barW / 2, barY = 20;
   const hpPct = Math.max(0, raidG.boss.hp / raidG.boss.maxHp);
@@ -5297,6 +5451,15 @@ function raidDraw() {
     raidCtx.lineTo(barX + (barW / 10) * i, barY + 28);
     raidCtx.stroke();
   }
+  // Phase notches at 60% and 30% so players can see how close the next phase change is.
+  raidCtx.strokeStyle = '#ffd84d';
+  raidCtx.lineWidth = 3;
+  [0.6, 0.3].forEach(pct => {
+    raidCtx.beginPath();
+    raidCtx.moveTo(barX + barW * pct, barY - 4);
+    raidCtx.lineTo(barX + barW * pct, barY + 32);
+    raidCtx.stroke();
+  });
   raidCtx.strokeStyle = bossDef.accent;
   raidCtx.lineWidth = 3;
   raidCtx.strokeRect(barX, barY, barW, 28);
@@ -5305,6 +5468,30 @@ function raidDraw() {
   raidCtx.textAlign = 'center';
   raidCtx.textBaseline = 'middle';
   raidCtx.fillText(`${bossDef.icon} ${bossDef.name} — ${Math.round(hpPct * 100)}%`, 500, barY + 14);
+
+  const tb = raidG.boss;
+  if (tb.transition > 0) {
+    const fade = Math.min(1, tb.transition / 25) * Math.min(1, (100 - tb.transition) / 10);
+    const pop = 1 + Math.max(0, (tb.transition - 85) / 15) * 0.4;
+    raidCtx.save();
+    raidCtx.globalAlpha = fade;
+    raidCtx.translate(500, 235);
+    raidCtx.scale(pop, pop);
+    raidCtx.textAlign = 'center';
+    raidCtx.textBaseline = 'middle';
+    raidCtx.lineWidth = 8;
+    raidCtx.strokeStyle = '#1a0d0d';
+    raidCtx.fillStyle = tb.transitionPhase >= 3 ? '#ff5577' : '#ffd84d';
+    raidCtx.font = 'bold 64px sans-serif';
+    raidCtx.strokeText(`PHASE ${tb.transitionPhase}`, 0, 0);
+    raidCtx.fillText(`PHASE ${tb.transitionPhase}`, 0, 0);
+    raidCtx.font = 'bold 24px sans-serif';
+    raidCtx.fillStyle = '#ffffff';
+    const sub = tb.transitionPhase >= 3 ? 'ENRAGED - it will chain attacks!' : 'New attacks unlocked!';
+    raidCtx.strokeText(sub, 0, 46);
+    raidCtx.fillText(sub, 0, 46);
+    raidCtx.restore();
+  }
 
   drawMathPrompt(raidCtx);
 
