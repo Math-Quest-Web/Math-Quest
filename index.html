@@ -3558,6 +3558,7 @@ function resetBossFlow(b) {
   b.lastAttack = '';
   b.comboPending = false;
   b.comboTimer = 0;
+  b.attackTimer = 200; // breathing room before the first attack of a fight
 }
 
 function raidPickAttack(b, options) {
@@ -4167,9 +4168,9 @@ function raidBossUpdate() {
   if (!inTransition && b.attackTimer <= 0) {
     (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
     const cooldownMult = (DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal).cooldownMult;
-    b.attackTimer = Math.round(Math.max(100, 170 - b.phase * 20) * cooldownMult);
-    // Phase 3 combo: a second, different attack follows shortly after the first.
-    if (b.phase >= 3 && Math.random() < 0.45) { b.comboPending = true; b.comboTimer = 50; }
+    b.attackTimer = Math.round((250 - b.phase * 20) * cooldownMult);
+    // Phase 3 combo: occasionally a second, different attack follows the first after a clear pause.
+    if (b.phase >= 3 && Math.random() < 0.3) { b.comboPending = true; b.comboTimer = 90; }
     raidSendBossState();
   }
   if (b.comboPending && !inTransition) {
