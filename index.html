@@ -3024,6 +3024,37 @@ async function publishCreatorSet() {
 
 const raidDb = firebase.database();
 let lobbyRef = raidDb.ref('lobbies');
+
+// A lobby's raid state lives at bossRaid/<same id>. Always delete both together, otherwise the
+// raid data is orphaned forever (and a recycled 4-digit code would inherit a stale fight).
+async function removeLobbyAndRaidData(id) {
+  await Promise.all([
+    lobbyRef.child(id).remove(),
+    raidDb.ref('bossRaid/' + id).remove()
+  ]);
+}
+
+// One-off cleanup of raid data whose lobby no longer exists. Raid data is read BEFORE the
+// lobby list, so a raid seen here always had its lobby created earlier; if that lobby is
+// missing now, the raid data is orphaned. Only 4-digit lobby ids are touched.
+let orphanSweepDone = false;
+async function sweepOrphanRaidData() {
+  if (orphanSweepDone) return;
+  orphanSweepDone = true;
+  try {
+    const raidSnap = await raidDb.ref('bossRaid').once('value');
+    const raids = raidSnap.val();
+    if (!raids) return;
+    const lobbySnap = await lobbyRef.once('value');
+    const lobbies = lobbySnap.val() || {};
+    const orphans = Object.keys(raids).filter(id => /^\d{4}$/.test(id) && !lobbies[id] && id !== currentLobbyId);
+    await Promise.all(orphans.map(id => raidDb.ref('bossRaid/' + id).remove()));
+    if (orphans.length) console.log('🧹 Removed orphaned raid data:', orphans.length);
+  } catch (e) {
+    console.error('Orphan raid data sweep failed:', e);
+    orphanSweepDone = false;
+  }
+}
 let currentLobbyId = null;
 let currentLobbyName = '';
 let isLobbyHost = false;
@@ -3150,6 +3181,7 @@ async function createLobby() {
       });
       if (result.committed) {
         lobbyId = candidate;
+        raidDb.ref('bossRaid/' + candidate).remove();
       }
       attempts++;
     }
@@ -3384,7 +3416,7 @@ async function leaveLobby() {
       }
       
       if (newCount === 0) {
-  	await lobbyRef2.remove();
+  	await removeLobbyAndRaidData(currentLobbyId);
   	console.log('🗑️ Lobby deleted (last player left):', currentLobbyId);
       }
     }
@@ -3478,6 +3510,8 @@ async function refreshLobbies() {
     return;
   }
 
+  sweepOrphanRaidData();
+
   try {
     const snapshot = await lobbyRef.orderByChild('createdAt').limitToLast(50).once('value');
     const data = snapshot.val();
@@ -3558,7 +3592,7 @@ setInterval(async () => {
         // Check when it became empty (use lastUpdate or createdAt)
         const emptySince = lobby.emptySince || lobby.createdAt || now;
         if (now - emptySince > 5000) { // 5 seconds
-          await lobbyRef.child(id).remove();
+          await removeLobbyAndRaidData(id);
           console.log('🗑️ Auto-deleted empty lobby:', id);
         } else {
           // Mark when it became empty
@@ -3888,12 +3922,13 @@ function raidListenToPresence() {
             const newCount = Math.max(0, (current || 1) - 1);
             if (newCount === 0) {
               // Delete lobby after 5 seconds if no players
+              const emptyId = currentLobbyId;
               setTimeout(() => {
-                lobbyRef.child(currentLobbyId).once('value', (snap) => {
+                lobbyRef.child(emptyId).once('value', (snap) => {
                   const lobby = snap.val();
                   if (lobby && (lobby.playerCount || 0) === 0) {
-                    lobbyRef.child(currentLobbyId).remove();
-                    console.log('🗑️ Lobby auto-deleted (all players left):', currentLobbyId);
+                    removeLobbyAndRaidData(emptyId);
+                    console.log('🗑️ Lobby auto-deleted (all players left):', emptyId);
                   }
                 });
               }, 5000);
