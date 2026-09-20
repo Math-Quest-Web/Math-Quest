@@ -910,6 +910,343 @@ body {
   color: #e0e0ff;
 }
 
+/* ---------- Shop ---------- */
+.sidebar-coins {
+  margin-top: auto;
+  background: rgba(255,255,255,0.12);
+  color: #ffd84d;
+  text-align: center;
+  padding: 12px;
+  border-radius: 14px;
+  font-size: 1.05em;
+}
+
+.shop-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.shop-coins {
+  background: #1a1a2e;
+  color: #ffd84d;
+  padding: 12px 24px;
+  border-radius: 30px;
+  font-size: 1.3em;
+  box-shadow: var(--shadow);
+  border: 2px solid rgba(255,216,77,0.35);
+}
+
+.shop-tabs { display: flex; gap: 10px; }
+
+.shop-tab {
+  border: none;
+  padding: 12px 22px;
+  border-radius: 30px;
+  background: rgba(255,255,255,0.18);
+  color: white;
+  font-family: 'Fredoka One', cursive;
+  font-size: 1em;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.shop-tab:hover { background: rgba(255,255,255,0.3); }
+.shop-tab.active { background: white; color: var(--sidebar); }
+
+.shop-panel {
+  background: #1a1a2e;
+  border-radius: 25px;
+  padding: 26px;
+  color: #e0e0ff;
+  box-shadow: var(--shadow);
+}
+
+.crate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.crate-card {
+  background: #0f0f1f;
+  border: 3px solid #2f2f5a;
+  border-radius: 22px;
+  padding: 18px;
+  text-align: center;
+  transition: 0.2s;
+}
+
+.crate-card:hover {
+  border-color: var(--glow);
+  transform: translateY(-3px);
+  box-shadow: 0 0 24px var(--glow);
+}
+
+.crate-art { height: 150px; display: flex; justify-content: center; }
+.mq-crate-svg { height: 100%; overflow: visible; }
+
+.crate-name { font-size: 1.3em; color: white; margin: 6px 0 4px; }
+
+.crate-blurb {
+  font-family: Arial, sans-serif;
+  color: #9a9ac0;
+  font-size: 0.85em;
+  min-height: 52px;
+  line-height: 1.4;
+}
+
+.crate-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 10px 0 14px; }
+
+.crate-chip {
+  font-family: Arial, sans-serif;
+  font-size: 0.72em;
+  border: 1.5px solid #3a3a6a;
+  border-radius: 20px;
+  padding: 3px 9px;
+  color: #b8b8d8;
+}
+
+.crate-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+.crate-buy {
+  border: none;
+  border-radius: 14px;
+  padding: 11px 16px;
+  background: var(--primary);
+  color: white;
+  font-family: 'Fredoka One', cursive;
+  font-size: 0.95em;
+  cursor: pointer;
+  box-shadow: 0 5px 0 var(--primary-dark);
+}
+
+.crate-buy:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--primary-dark); }
+.crate-buy.cant { background: #4a4a66; box-shadow: 0 5px 0 #33334a; color: #b0b0c8; }
+.crate-buy:disabled { opacity: 0.6; cursor: default; }
+
+.crate-odds {
+  border: 2px solid #3a3a6a;
+  background: transparent;
+  color: #c8c8ff;
+  border-radius: 14px;
+  padding: 9px 14px;
+  font-family: 'Fredoka One', cursive;
+  cursor: pointer;
+}
+
+.crate-odds:hover { border-color: #6c63ff; }
+
+.loadout {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: #0f0f1f;
+  border: 2px solid #2f2f5a;
+  border-radius: 22px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+#loadoutCanvas { width: 260px; height: 290px; background: rgba(255,255,255,0.03); border-radius: 16px; }
+.loadout-info h3 { margin: 0 0 12px; color: #ffd84d; font-size: 1.3em; }
+.loadout-row { font-family: Arial, sans-serif; margin: 8px 0; color: #9a9ac0; font-size: 0.95em; }
+.loadout-row span { font-family: 'Fredoka One', cursive; font-size: 1.15em; }
+.loadout-row small { font-family: Arial, sans-serif; opacity: 0.8; }
+.loadout-note { font-family: Arial, sans-serif; color: #7a7aa0; font-size: 0.8em; margin-top: 14px; max-width: 280px; line-height: 1.5; }
+
+.inv-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+
+.inv-filter {
+  border: 2px solid #3a3a6a;
+  background: transparent;
+  color: #c8c8ff;
+  border-radius: 20px;
+  padding: 7px 16px;
+  font-family: 'Fredoka One', cursive;
+  cursor: pointer;
+}
+
+.inv-filter.active { background: var(--primary); border-color: var(--primary); color: white; }
+.inv-count { margin-left: auto; font-family: Arial, sans-serif; color: #9a9ac0; }
+.inv-check { font-family: Arial, sans-serif; color: #9a9ac0; font-size: 0.9em; cursor: pointer; }
+
+.inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+
+.inv-card {
+  position: relative;
+  background: #0f0f1f;
+  border: 3px solid var(--rc);
+  border-radius: 18px;
+  padding: 10px;
+  text-align: center;
+}
+
+.inv-card.locked { border-color: #2f2f5a; }
+.inv-card.locked .inv-name { color: #77779a; }
+.inv-card.equipped { box-shadow: 0 0 0 3px rgba(255,216,77,0.55), 0 0 22px var(--rg); }
+.inv-card canvas { width: 150px; height: 170px; max-width: 100%; }
+
+.inv-rarity {
+  position: absolute;
+  top: 9px;
+  left: 12px;
+  font-size: 0.68em;
+  color: var(--rc);
+  font-family: Arial, sans-serif;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  z-index: 2;
+}
+
+.inv-lock { position: absolute; top: 68px; left: 0; right: 0; font-size: 2em; pointer-events: none; }
+.inv-name { color: white; font-size: 1em; margin-top: 2px; }
+.inv-type { font-family: Arial, sans-serif; font-size: 0.72em; color: #8a8ab0; margin-bottom: 8px; }
+
+.inv-equip {
+  border: none;
+  border-radius: 12px;
+  padding: 8px 14px;
+  background: var(--primary);
+  color: white;
+  font-family: 'Fredoka One', cursive;
+  cursor: pointer;
+  width: 100%;
+}
+
+.inv-equip.on { background: #2f8f5a; cursor: default; }
+.inv-hint { font-family: Arial, sans-serif; font-size: 0.75em; color: #66668a; padding: 8px 0; }
+.inv-empty { color: #8a8ab0; font-family: Arial, sans-serif; }
+
+.mq-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(8,8,24,0.78);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.mq-modal.open { display: flex; }
+
+.mq-modal-card {
+  position: relative;
+  background: #14142c;
+  border: 3px solid #34346a;
+  border-radius: 26px;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 26px;
+  color: #e0e0ff;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+.mq-x {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  border: none;
+  background: rgba(255,255,255,0.1);
+  color: white;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1em;
+}
+
+.mq-odds-title { margin: 0 34px 6px 0; color: #ffd84d; font-size: 1.4em; }
+.mq-odds-sub { font-family: Arial, sans-serif; color: #9a9ac0; font-size: 0.85em; margin: 0 0 16px; }
+
+.mq-odds-group {
+  border-left: 5px solid var(--rc);
+  background: rgba(255,255,255,0.04);
+  border-radius: 0 14px 14px 0;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.mq-odds-head { display: flex; justify-content: space-between; color: var(--rc); margin-bottom: 6px; }
+.mq-odds-row { display: flex; justify-content: space-between; font-family: Arial, sans-serif; font-size: 0.92em; padding: 3px 0; color: #dcdcf5; }
+.mq-odds-pct { color: white; font-weight: bold; }
+.mq-odds-foot { font-family: Arial, sans-serif; font-size: 0.78em; color: #8a8ab0; margin: 14px 0 0; line-height: 1.5; }
+
+.mq-open { position: relative; min-height: 400px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+.mq-open-stage { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+.mq-crate-wrap { width: 220px; }
+.mq-crate-wrap .mq-crate-svg { width: 100%; height: auto; }
+.mq-crate-wrap.shaking { animation: mqShake 0.35s infinite; }
+.mq-crate-wrap.shaking .mq-crate-glow { animation: mqPulse 0.5s infinite; }
+.mq-crate-wrap.opening { animation: mqGrow 0.5s forwards; }
+.mq-crate-wrap.opening .mq-crate-lid { transform-origin: 30px 74px; animation: mqLid 0.5s forwards; }
+
+@keyframes mqShake {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  20% { transform: translate(-6px, 2px) rotate(-4deg); }
+  40% { transform: translate(6px, -2px) rotate(4deg); }
+  60% { transform: translate(-5px, 1px) rotate(-3deg); }
+  80% { transform: translate(5px, -1px) rotate(3deg); }
+}
+
+@keyframes mqPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+@keyframes mqLid { to { transform: translateY(-18px) rotate(-22deg); } }
+@keyframes mqGrow { to { transform: scale(1.25); filter: brightness(1.7); } }
+
+.mq-open-hint { font-family: Arial, sans-serif; color: #9a9ac0; margin-top: 10px; }
+
+.mq-open-flash { position: absolute; inset: 0; background: radial-gradient(circle, var(--rc), transparent 70%); opacity: 0; pointer-events: none; }
+.mq-open-flash.go { animation: mqFlash 0.9s ease-out; }
+@keyframes mqFlash { 0% { opacity: 0.95; } 100% { opacity: 0; } }
+
+.mq-open-reveal { flex-direction: column; align-items: center; position: relative; animation: mqPop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes mqPop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.mq-rarity-banner { font-size: 1.6em; color: var(--rc); letter-spacing: 3px; text-shadow: 0 0 18px var(--rc); }
+#mqRevealCanvas { width: 240px; height: 270px; }
+.mq-item-name { font-size: 1.6em; color: white; text-align: center; }
+.mq-item-type { font-family: Arial, sans-serif; color: #9a9ac0; margin-bottom: 8px; }
+.mq-item-status { font-family: Arial, sans-serif; font-weight: bold; margin-bottom: 14px; text-align: center; }
+.mq-item-status.new { color: #5ddf8a; }
+.mq-item-status.dup { color: #ffd84d; }
+.mq-reveal-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.mq-conf { position: absolute; left: 50%; top: 42%; width: 9px; height: 9px; border-radius: 2px; opacity: 0; animation: mqConf 1.1s ease-out forwards; pointer-events: none; }
+@keyframes mqConf {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) rotate(540deg); opacity: 0; }
+}
+
+#mqToast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #14142c;
+  color: white;
+  border: 2px solid #ffd84d;
+  padding: 12px 22px;
+  border-radius: 30px;
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.25s;
+  z-index: 1100;
+  font-family: Arial, sans-serif;
+  max-width: 90vw;
+  text-align: center;
+}
+
+#mqToast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+
 .raid-tutorial {
   margin: 22px 22px 0;
   background: #12122a;
@@ -1657,6 +1994,11 @@ textarea.community-input {
   </button>
 
   <button class="nav-button"
+          onclick="showSection('shop', this)">
+    🛒 Shop
+  </button>
+
+  <button class="nav-button"
           onclick="showSection('designStudio', this)">
     🎨 Design
   </button>
@@ -1670,6 +2012,8 @@ textarea.community-input {
           onclick="showSection('create', this)">
     ✏️ Create
   </button>
+
+  <div class="sidebar-coins">🪙 <span class="mq-coin-value">0</span></div>
 
 </aside>
 
@@ -1860,6 +2204,54 @@ textarea.community-input {
         </div>
       </div>
     </div>
+  </div>
+
+</section>
+
+
+<!-- =====================================================
+     SHOP (crates, skins, inventory)
+===================================================== -->
+
+<section id="shop" class="section">
+
+  <div class="home-header">
+    <h1>🛒 Item Shop</h1>
+    <p>Beat raid bosses to earn coins - the harder the fight, the more you get - then open crates for player and gun skins.</p>
+  </div>
+
+  <div class="shop-topbar">
+    <div class="shop-coins">🪙 <span class="mq-coin-value">0</span></div>
+    <div class="shop-tabs">
+      <button id="shopTabCrates" class="shop-tab active" onclick="mqSetTab('crates')">📦 Crates</button>
+      <button id="shopTabInv" class="shop-tab" onclick="mqSetTab('inv')">🎒 My Items</button>
+    </div>
+  </div>
+
+  <div id="shopCrates" class="shop-panel">
+    <div id="crateGrid" class="crate-grid"></div>
+  </div>
+
+  <div id="shopInventory" class="shop-panel" style="display:none;">
+    <div class="loadout">
+      <canvas id="loadoutCanvas" width="260" height="290"></canvas>
+      <div class="loadout-info">
+        <h3>Your Loadout</h3>
+        <div class="loadout-row">Player skin<br><span id="loadoutSkin"></span></div>
+        <div class="loadout-row">Gun skin<br><span id="loadoutGun"></span></div>
+        <div class="loadout-note">Skins are cosmetic only. Your loadout shows up in every raid - other players see it too.</div>
+      </div>
+    </div>
+
+    <div class="inv-toolbar">
+      <button id="invF_all" class="inv-filter active" onclick="mqSetFilter('all')">All</button>
+      <button id="invF_skin" class="inv-filter" onclick="mqSetFilter('skin')">🧍 Player Skins</button>
+      <button id="invF_gun" class="inv-filter" onclick="mqSetFilter('gun')">🔫 Gun Skins</button>
+      <label class="inv-check"><input type="checkbox" id="invHideLocked" onchange="mqToggleHideLocked(this.checked)"> Hide locked</label>
+      <span class="inv-count" id="invCount"></span>
+    </div>
+
+    <div id="invGrid" class="inv-grid"></div>
   </div>
 
 </section>
@@ -2272,6 +2664,7 @@ function showSection(name, clickedButton = null) {
       if (canvas) canvas.focus();
     }, 100);
   }
+  if (name === 'shop' && typeof mqOnShopOpen === 'function') mqOnShopOpen();
 }
 
 function goToPractice() {
@@ -3050,7 +3443,10 @@ function resetRaidState() {
   raidLocal.shieldTimer = 0;
   raidLocal.dashCooldown = 0;
   raidLocal.dashTimer = 0;
-  raidAmmo = 3;
+  raidAmmo = raidMaxAmmo;
+  raidReloadTimer = 0;
+  raidFireCooldown = 0;
+  raidLocal.recoil = 0;
   raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
   raidShieldRegenTimer = 0;
   raidShowMathUI = false;
@@ -3201,11 +3597,14 @@ let countdownActive = false;
 let countdownValue = 3;
 let countdownInterval = null;
 
-// Ammo system
-let raidAmmo = 3;
-const raidMaxAmmo = 5;
-let ammoRegenTimer = 0;
-const ammoRegenDelay = 120;
+// Ammo system: a 20-round magazine that must be reloaded whenever it runs dry (or with R).
+const raidMaxAmmo = 20;
+let raidAmmo = raidMaxAmmo;
+const RAID_RELOAD_FRAMES = 100;
+const RAID_FIRE_DELAY = 7;
+let raidReloadTimer = 0; // frames left while reloading; 0 = not reloading
+let raidFireCooldown = 0;
+let raidShotsRef = null;
 
 // Game state
 const raidG = {
@@ -3239,7 +3638,10 @@ const raidLocal = {
   input: { left: false, right: false, up: false, space: false },
   facing: 1,
   dashCooldown: 0,
-  dashTimer: 0
+  dashTimer: 0,
+  recoil: 0,
+  skin: 'skin_classic',
+  gun: 'gun_standard'
 };
 
 let raidMathShieldCharges = 1;
@@ -3295,6 +3697,7 @@ function startRaidWithLobby(lobbyId, bossType) {
   raidGameStateRef = raidRoomRef.child('gameState');
   raidPresenceRef = raidRoomRef.child('presence');
   raidMathHitsRef = raidRoomRef.child('mathHits');
+  raidShotsRef = raidRoomRef.child('shots');
 
   listenToLobby(lobbyId);
 
@@ -3321,6 +3724,10 @@ function cleanupRaid() {
   if (raidMathHitsRef) {
     raidMathHitsRef.off();
     raidMathHitsRef = null;
+  }
+  if (raidShotsRef) {
+    raidShotsRef.off();
+    raidShotsRef = null;
   }
   if (countdownInterval) {
     clearInterval(countdownInterval);
@@ -3357,6 +3764,9 @@ function raidSendLocalState() {
     shield: raidLocal.shield,
     invincible: raidLocal.invincible,
     facing: raidLocal.facing,
+    reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / RAID_RELOAD_FRAMES : 0,
+    skin: raidLocal.skin || 'skin_classic',
+    gun: raidLocal.gun || 'gun_standard',
     lastUpdate: Date.now()
   });
 }
@@ -3583,6 +3993,9 @@ function raidPickAttack(b, options) {
 // avoided by walking, dashing or jumping. Attacks only start once the previous
 // animation has finished (raidBossUpdate), so moves never overlap.
 
+// How long a boss stays stunned (dizzy, taking double damage) after its big moves: 2 seconds.
+const BOSS_STUN_FRAMES = 120;
+
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function clampX(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
@@ -3684,12 +4097,12 @@ function updateGrinmawAnimation(b) {
     if (t >= 1) {
       grinmawShockwaves(b);
       a.state = 'dazed'; a.timer = 0;
-      b.exposed = 80;
+      b.exposed = BOSS_STUN_FRAMES;
     }
   } else if (a.state === 'dazed') {
     b.animOffsetY = 10 + Math.sin(a.timer * 0.2) * 1.5;
     b.animScale = 0.97;
-    if (a.timer >= 80) { a.state = 'settle'; a.timer = 0; }
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'settle') {
     const t = Math.min(a.timer / 18, 1);
     b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
@@ -3785,12 +4198,12 @@ function updateWardenAnimation(b) {
       });
       raidG.slamAnimations.push({ x: a.targetX, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
     }
-    if (a.timer >= 10) { a.state = 'dazed'; a.timer = 0; b.exposed = 70; }
+    if (a.timer >= 10) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
   } else if (a.state === 'dazed') {
     b.x = a.targetX;
     b.y = a.targetY + 8;
     b.animScale = 0.97;
-    if (a.timer >= 70) { a.state = 'return'; a.timer = 0; }
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'return'; a.timer = 0; }
   } else if (a.state === 'return') {
     const e = easeInOut(Math.min(a.timer / 40, 1));
     b.x = lerp(a.targetX, a.homeX, e);
@@ -3918,12 +4331,12 @@ function updateWyrmAnimation(b) {
       });
       raidG.slamAnimations.push({ x: a.targetX, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
       a.state = 'crash'; a.timer = 0;
-      b.exposed = 75;
+      b.exposed = BOSS_STUN_FRAMES;
     }
   } else if (a.state === 'crash') {
     b.x = a.targetX;
     b.y = raidGROUND_Y - 75 + Math.sin(a.timer * 0.3) * 1.5;
-    if (a.timer >= 75) { a.state = 'climb'; a.timer = 0; }
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'climb'; a.timer = 0; }
   } else if (a.state === 'climb') {
     const e = easeInOut(Math.min(a.timer / 50, 1));
     const p = wyrmPathPos();
@@ -4053,11 +4466,11 @@ function updateGluttonAnimation(b) {
     const t = Math.min(a.timer / 12, 1);
     b.animScale = 1.5 - 0.1 * t;
     b.animAlpha = 1;
-    if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = 70; }
+    if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
   } else if (a.state === 'dazed') {
-    b.animScale = 1.4 - 0.08 * Math.min(a.timer / 70, 1);
+    b.animScale = 1.4 - 0.08 * Math.min(a.timer / BOSS_STUN_FRAMES, 1);
     b.animAlpha = 1;
-    if (a.timer >= 70) { a.state = 'retreat'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'retreat'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
   } else if (a.state === 'retreat') {
     const e = easeInOut(Math.min(a.timer / 48, 1));
     b.x = lerp(a.startX, a.homeX, e);
@@ -4456,7 +4869,8 @@ function raidBossUpdate() {
           raidG.mathEvent = null;
           raidLocal.health = 5;
           raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
-          raidAmmo = 3;
+          raidAmmo = raidMaxAmmo;
+          raidReloadTimer = 0;
           raidSendBossState();
           if (raidPlayerRef) {
             raidPlayerRef.once('value', (snap) => {
@@ -4482,28 +4896,71 @@ function raidBossUpdate() {
   }
 }
 
+// Where the gun's muzzle is, in canvas coordinates (shared by drawing and shot spawning).
+const RAID_GUN_OFFSET_X = 30;
+const RAID_GUN_PIVOT_Y = 22;
+const RAID_GUN_LENGTH = 38;
+function raidGunMuzzle() {
+  return {
+    x: raidLocal.x + raidLocal.w / 2 + raidLocal.facing * RAID_GUN_OFFSET_X,
+    y: raidLocal.y + RAID_GUN_PIVOT_Y - RAID_GUN_LENGTH
+  };
+}
+
+function raidStartReload() {
+  if (raidG.gameOver || raidG.victory || countdownActive) return;
+  if (raidReloadTimer > 0 || raidAmmo >= raidMaxAmmo) return;
+  raidReloadTimer = RAID_RELOAD_FRAMES;
+  raidUpdateUI();
+}
+
 function raidShootProjectile() {
   if (raidG.gameOver || raidG.victory) return;
-  if (raidAmmo <= 0) return;
   if (countdownActive) return;
-  
+  if (raidReloadTimer > 0 || raidFireCooldown > 0) return;
+  if (raidAmmo <= 0) { raidStartReload(); return; }
+
   raidAmmo--;
-  const speed = 6;
-  const damage = 3;
-  
-  raidG.playerProjectiles.push({
-    x: raidLocal.x + raidLocal.w/2 - 4,
-    y: raidLocal.y - 8,
+  raidFireCooldown = RAID_FIRE_DELAY;
+  raidLocal.recoil = 1;
+  const muzzle = raidGunMuzzle();
+  const shot = {
+    x: muzzle.x,
+    y: muzzle.y,
     vx: (Math.random() - 0.5) * 0.5,
-    vy: -speed,
+    vy: -6,
     r: 6,
     life: 120,
-    damage: damage,
-    owner: raidMyId
-  });
-  
-  raidSendBossState();
+    damage: 3,
+    owner: raidMyId,
+    gun: raidLocal.gun || 'gun_standard'
+  };
+
+  if (raidIsHost) {
+    raidG.playerProjectiles.push(shot);
+    raidSendBossState();
+  } else if (raidShotsRef) {
+    // Only the host simulates bullets, so other players send their shots to the host.
+    shot.t = Date.now();
+    raidShotsRef.push(shot);
+  }
+
+  if (raidAmmo <= 0) raidStartReload();
   raidUpdateUI();
+}
+
+function raidListenToShots() {
+  if (!raidShotsRef) return;
+  raidShotsRef.on('child_added', (snap) => {
+    // Only the host consumes (and deletes) relayed shots; everyone else leaves them alone.
+    if (!raidIsHost) return;
+    const shot = snap.val();
+    snap.ref.remove();
+    if (!shot) return;
+    if (Date.now() - (shot.t || 0) > 4000) return;
+    delete shot.t;
+    raidG.playerProjectiles.push(shot);
+  });
 }
 
 function raidUpdateLocal() {
@@ -4555,11 +5012,14 @@ function raidUpdateLocal() {
     raidShieldRegenTimer = 0;
   }
 
-  ammoRegenTimer++;
-  if (ammoRegenTimer >= ammoRegenDelay && raidAmmo < raidMaxAmmo) {
-    raidAmmo++;
-    ammoRegenTimer = 0;
-    raidUpdateUI();
+  if (raidFireCooldown > 0) raidFireCooldown--;
+  if (p.recoil > 0) p.recoil = Math.max(0, p.recoil - 0.12);
+  if (raidReloadTimer > 0) {
+    raidReloadTimer--;
+    if (raidReloadTimer === 0) {
+      raidAmmo = raidMaxAmmo;
+      raidUpdateUI();
+    }
   }
 
   if (raidG.frame % 2 === 0) raidSendLocalState();
@@ -4627,140 +5087,6 @@ function raidSubmitEventAnswer() {
 // ============================================================
 // CUPHEAD-STYLE DRAWING FUNCTIONS
 // ============================================================
-
-function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, invincible, isLocal) {
-  const baseY = y;
-  
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(x + w/2, baseY + h + 4, w/2 + 4, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  
-  ctx.shadowBlur = isLocal ? 15 : 10;
-  ctx.shadowColor = shield ? '#66ccff' : (isLocal ? '#4488ff' : '#224466');
-  
-  const bodyGrad = ctx.createLinearGradient(x, baseY, x, baseY + h);
-  if (shield) {
-    bodyGrad.addColorStop(0, '#66ddff');
-    bodyGrad.addColorStop(1, '#3399dd');
-  } else if (invincible > 0 && invincible % 6 < 3) {
-    bodyGrad.addColorStop(0, '#ffaa88');
-    bodyGrad.addColorStop(1, '#dd6644');
-  } else {
-    bodyGrad.addColorStop(0, isLocal ? '#ffcc88' : '#88aaff');
-    bodyGrad.addColorStop(1, isLocal ? '#dd8844' : '#446688');
-  }
-  ctx.fillStyle = bodyGrad;
-  
-  const r = 8;
-  ctx.beginPath();
-  ctx.moveTo(x + r, baseY + 4);
-  ctx.lineTo(x + w - r, baseY + 4);
-  ctx.quadraticCurveTo(x + w, baseY + 4, x + w, baseY + 8);
-  ctx.lineTo(x + w, baseY + h - 4);
-  ctx.quadraticCurveTo(x + w, baseY + h, x + w - r, baseY + h);
-  ctx.lineTo(x + r, baseY + h);
-  ctx.quadraticCurveTo(x, baseY + h, x, baseY + h - 4);
-  ctx.lineTo(x, baseY + 8);
-  ctx.quadraticCurveTo(x, baseY + 4, x + r, baseY + 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = '#1a1a33';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  ctx.shadowBlur = isLocal ? 10 : 5;
-  ctx.shadowColor = '#222255';
-  const headGrad = ctx.createRadialGradient(x + w/2 - 4, baseY - 16, 2, x + w/2, baseY - 8, 22);
-  headGrad.addColorStop(0, '#ffddbb');
-  headGrad.addColorStop(1, '#cc9966');
-  ctx.fillStyle = headGrad;
-  ctx.beginPath();
-  ctx.arc(x + w/2, baseY - 8, 22, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = '#1a1a33';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-  
-  ctx.shadowBlur = 0;
-  const eyeX = facing > 0 ? 4 : -4;
-  
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
-  ctx.ellipse(x + w/2 - 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(x + w/2 + 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  
-  ctx.fillStyle = '#222';
-  ctx.beginPath();
-  ctx.arc(x + w/2 - 6 + eyeX, baseY - 12, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x + w/2 + 10 + eyeX, baseY - 12, 5, 0, Math.PI * 2);
-  ctx.fill();
-  
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
-  ctx.arc(x + w/2 - 4 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x + w/2 + 12 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2);
-  ctx.fill();
-  
-  ctx.strokeStyle = '#884422';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(x + w/2, baseY, 8, 0.1 * Math.PI, 0.9 * Math.PI);
-  ctx.stroke();
-  
-  ctx.fillStyle = '#ff4444';
-  ctx.shadowBlur = 5;
-  ctx.shadowColor = '#ff0000';
-  ctx.beginPath();
-  ctx.arc(x + w/2, baseY - 30, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#ff8888';
-  ctx.beginPath();
-  ctx.arc(x + w/2 - 1, baseY - 31, 2, 0, Math.PI * 2);
-  ctx.fill();
-  
-  if (shield) {
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = '#66ddff';
-    ctx.strokeStyle = 'rgba(100, 220, 255, 0.6)';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.arc(x + w/2, baseY + 8, 40, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    for (let i = 0; i < 8; i++) {
-      const angle = Date.now() / 1000 + i * 0.8;
-      const sx = x + w/2 + Math.cos(angle) * 36;
-      const sy = baseY + 8 + Math.sin(angle) * 36;
-      ctx.fillStyle = `rgba(200, 240, 255, ${0.3 + 0.3 * Math.sin(angle * 2)})`;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#1a1a33';
-  ctx.fillRect(x - 4, baseY - 42, w + 8, 6);
-  const healthPercent = health / maxHealth;
-  ctx.fillStyle = healthPercent > 0.6 ? '#44dd88' : (healthPercent > 0.3 ? '#ffcc44' : '#ff3b6f');
-  ctx.fillRect(x - 4, baseY - 42, (w + 8) * healthPercent, 6);
-  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x - 4, baseY - 42, w + 8, 6);
-}
 
 function drawBossDispatch(ctx, boss) {
   const scale = boss.animScale !== undefined ? boss.animScale : 1;
@@ -5715,35 +6041,22 @@ function raidDraw() {
   });
   raidCtx.shadowBlur = 0;
 
-  raidG.playerProjectiles.forEach(p => {
-    raidCtx.shadowBlur = 20;
-    raidCtx.shadowColor = '#44ddff';
-    const grad = raidCtx.createRadialGradient(p.x-3, p.y-3, 2, p.x, p.y, p.r);
-    grad.addColorStop(0, '#88eeff');
-    grad.addColorStop(0.5, '#44ddff');
-    grad.addColorStop(1, '#0088cc');
-    raidCtx.fillStyle = grad;
-    raidCtx.beginPath();
-    raidCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    raidCtx.fill();
-    raidCtx.fillStyle = 'rgba(68, 221, 255, 0.2)';
-    raidCtx.beginPath();
-    raidCtx.arc(p.x, p.y, p.r * 2, 0, Math.PI * 2);
-    raidCtx.fill();
-  });
+  raidG.playerProjectiles.forEach(p => drawPlayerBullet(raidCtx, p));
   raidCtx.shadowBlur = 0;
 
   Object.keys(raidG.players).forEach(id => {
     if (id === raidMyId) return;
     const p = raidG.players[id];
     if (!p) return;
-    drawPlayerCuphead(raidCtx, p.x - 18, p.y - 24, 36, 48, p.facing || 1, 
-               p.health || 5, 5, p.shield || false, p.invincible || 0, false);
+    drawPlayerCuphead(raidCtx, p.x, p.y, 36, 48, p.facing || 1,
+               p.health || 5, 5, p.shield || false, p.invincible || 0, false,
+               { skin: p.skin, gun: p.gun, reload: p.reload || 0, recoil: 0 });
   });
 
   const lp = raidLocal;
   drawPlayerCuphead(raidCtx, lp.x, lp.y, lp.w, lp.h, lp.facing,
-             lp.health, lp.maxHealth, lp.shield, lp.invincible, true);
+             lp.health, lp.maxHealth, lp.shield, lp.invincible, true,
+             { skin: lp.skin, gun: lp.gun, reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / RAID_RELOAD_FRAMES : 0, recoil: lp.recoil });
 
   raidFx.floaters.forEach(f => {
     raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
@@ -5850,10 +6163,18 @@ function raidDraw() {
     raidCtx.fillText('🏆 VICTORY!', 500, 260);
     raidCtx.fillStyle = '#aaffaa';
     raidCtx.font = '28px sans-serif';
-    raidCtx.fillText('Boss defeated! Math + might = glory', 500, 340);
+    raidCtx.fillText('Boss defeated! Great teamwork!', 500, 340);
+    if (raidLastReward) {
+      raidCtx.fillStyle = '#ffd84d';
+      raidCtx.font = 'bold 34px sans-serif';
+      raidCtx.fillText('+' + raidLastReward.coins + ' 🪙 coins', 500, 392);
+      raidCtx.fillStyle = '#c9c9ff';
+      raidCtx.font = '18px sans-serif';
+      raidCtx.fillText(raidLastReward.difficulty.toUpperCase() + ' fight: ' + raidLastReward.base + '  +  ' + raidLastReward.bonus + ' for ' + raidLastReward.hearts + ' hearts left   |   Balance: ' + raidLastReward.balance + ' 🪙', 500, 428);
+    }
     raidCtx.fillStyle = '#8888ff';
     raidCtx.font = '20px sans-serif';
-    raidCtx.fillText('Restarting in 3 seconds...', 500, 390);
+    raidCtx.fillText('Restarting in 3 seconds...', 500, 470);
   }
   raidCtx.shadowBlur = 0;
   raidCtx.textAlign = 'left';
@@ -5881,7 +6202,7 @@ function raidUpdateUI() {
   raidHealthSpan.textContent = raidLocal.health;
   raidShieldSpan.textContent = raidMathShieldCharges;
   raidBossHpSpan.textContent = Math.round((raidG.boss.hp / raidG.boss.maxHp) * 100);
-  raidAmmoSpan.textContent = raidAmmo;
+  raidAmmoSpan.textContent = raidReloadTimer > 0 ? 'RELOADING' : raidAmmo + '/' + raidMaxAmmo;
   if (raidDashSpan) {
     raidDashSpan.textContent = raidLocal.dashCooldown > 0 ? Math.ceil(raidLocal.dashCooldown / 60) + 's' : 'READY';
   }
@@ -5891,6 +6212,7 @@ function raidGameLoop() {
   if (!raidLoopRunning) return;
   raidG.frame++;
   raidUpdateLocal();
+  mqCheckRaidReward();
   if (raidIsHost) {
     raidBossUpdate();
   }
@@ -5913,8 +6235,14 @@ function raidInit() {
   raidLocal.id = raidMyId;
   raidLocal.health = 5;
   raidLocal.facing = 1;
-  raidAmmo = 3;
-  ammoRegenTimer = 0;
+  raidAmmo = raidMaxAmmo;
+  raidReloadTimer = 0;
+  raidFireCooldown = 0;
+  raidLocal.recoil = 0;
+  // Cosmetics come from the shop profile (see the shop script).
+  const eq = (typeof mqEquippedIds === 'function') ? mqEquippedIds() : { skin: 'skin_classic', gun: 'gun_standard' };
+  raidLocal.skin = eq.skin;
+  raidLocal.gun = eq.gun;
 
   raidConnectedRef = raidDbRef.ref('.info/connected');
   raidConnectedRef.on('value', (snap) => {
@@ -5944,6 +6272,9 @@ function raidInit() {
       shield: false,
       invincible: 0,
       facing: 1,
+      reload: 0,
+      skin: raidLocal.skin || 'skin_classic',
+      gun: raidLocal.gun || 'gun_standard',
       lastUpdate: Date.now()
     });
   }
@@ -5952,6 +6283,7 @@ function raidInit() {
   raidListenToPlayers();
   raidListenToPresence();
   raidListenToMathHits();
+  raidListenToShots();
 
   setTimeout(raidCheckHost, 1500);
 
@@ -6021,6 +6353,10 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     raidTryDash();
+  }
+
+  if (key === 'r' || key === 'R') {
+    raidStartReload();
   }
 
   if (raidShowMathUI) {
@@ -6590,6 +6926,1513 @@ window.raidG = raidG;
 window.raidLocal = raidLocal;
 window.questionSets = questionSets;
 window.firebaseConfig = firebaseConfig;
+
+</script>
+
+<script>
+// ============================================================
+// COSMETICS: RARITIES, PLAYER SKINS, GUN SKINS
+// ============================================================
+// Purely visual. Skins are drawn with canvas paths (no image assets) by drawPlayerCuphead,
+// guns by mqDrawGun and bullets by drawPlayerBullet. The same functions render the shop previews.
+
+const MQ_RARITY = {
+  common:    { name: 'Common',    color: '#b8c2d6', glow: 'rgba(184,194,214,0.35)', refund: 10 },
+  uncommon:  { name: 'Uncommon',  color: '#5ddf8a', glow: 'rgba(93,223,138,0.38)',  refund: 25 },
+  rare:      { name: 'Rare',      color: '#4aa8ff', glow: 'rgba(74,168,255,0.42)',  refund: 60 },
+  epic:      { name: 'Epic',      color: '#b56bff', glow: 'rgba(181,107,255,0.5)',  refund: 150 },
+  legendary: { name: 'Legendary', color: '#ffc93c', glow: 'rgba(255,201,60,0.6)',   refund: 350 }
+};
+const MQ_RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+
+function mqLeaf(ctx, x, y, angle, len) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(len * 0.5, -len * 0.5, len, 0);
+  ctx.quadraticCurveTo(len * 0.5, len * 0.5, 0, 0);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(2, 0);
+  ctx.lineTo(len * 0.8, 0);
+  ctx.globalAlpha = 0.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function mqStar(ctx, x, y, outer, inner, points, rot) {
+  ctx.beginPath();
+  for (let k = 0; k < points * 2; k++) {
+    const r = k % 2 === 0 ? outer : inner;
+    const a = (k / (points * 2)) * Math.PI * 2 - Math.PI / 2 + (rot || 0);
+    if (k === 0) ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    else ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+  }
+  ctx.closePath();
+}
+
+// Four-pointed twinkle used for sparkles.
+function mqSparkle(ctx, x, y, size, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - size);
+  ctx.quadraticCurveTo(x, y, x + size, y);
+  ctx.quadraticCurveTo(x, y, x, y + size);
+  ctx.quadraticCurveTo(x, y, x - size, y);
+  ctx.quadraticCurveTo(x, y, x, y - size);
+  ctx.fill();
+  ctx.restore();
+}
+
+// Clip to the player's rounded body so patterns stay inside it.
+function mqClipBody(ctx, c) {
+  const { x, y, w, h } = c;
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y + 4);
+  ctx.lineTo(x + w - r, y + 4);
+  ctx.quadraticCurveTo(x + w, y + 4, x + w, y + 8);
+  ctx.lineTo(x + w, y + h - 4);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - 4);
+  ctx.lineTo(x, y + 8);
+  ctx.quadraticCurveTo(x, y + 4, x + r, y + 4);
+  ctx.closePath();
+  ctx.clip();
+}
+
+function mqHeadClip(ctx, c) {
+  ctx.beginPath();
+  ctx.arc(c.cx, c.y - 8, 22, 0, Math.PI * 2);
+  ctx.clip();
+}
+
+// ---- Player skins ----------------------------------------------------------
+// Hooks (all optional), each called with a context object c = {x, y, w, h, cx, facing, t}:
+//   back      drawn behind the player (auras, wings, capes, trails)
+//   bodyDeco  drawn on the body after the base fill
+//   preFace   drawn on the head before eyes/mouth (masks, visors)
+//   deco      drawn last on top (hats, helmets, hair)
+// noFace: skip the default eyes/mouth (skin draws its own). topper: false hides the red pom-pom.
+
+const MQ_SKINS = [
+  {
+    id: 'skin_classic', name: 'Classic Cup', rarity: 'common', isDefault: true,
+    blurb: 'The original. Orange for you, blue for teammates.'
+  },
+  {
+    id: 'skin_sprout', name: 'Sprout', rarity: 'common',
+    body: ['#9be89a', '#3f9c4f'], head: ['#ffe6c8', '#dcae7c'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(c.x + 9 + (i % 2) * 17, c.y + 18 + i * 8, 4, 2.4, 0.5, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      const sway = Math.sin(c.t * 0.08) * 3;
+      ctx.strokeStyle = '#1d4d26'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(c.cx, c.y - 28); ctx.quadraticCurveTo(c.cx + sway * 0.4, c.y - 38, c.cx + sway, c.y - 43); ctx.stroke();
+      ctx.fillStyle = '#6fe07a';
+      mqLeaf(ctx, c.cx + sway, c.y - 43, -0.75 + sway * 0.04, 17);
+      ctx.fillStyle = '#4fc65e';
+      mqLeaf(ctx, c.cx + sway, c.y - 43, Math.PI + 0.75 - sway * 0.04, 17);
+      ctx.fillStyle = 'rgba(255,120,140,0.5)';
+      ctx.beginPath(); ctx.ellipse(c.cx - 14, c.y - 2, 4.5, 3, 0, 0, Math.PI * 2); ctx.ellipse(c.cx + 14, c.y - 2, 4.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  },
+  {
+    id: 'skin_bubblegum', name: 'Bubblegum', rarity: 'common',
+    body: ['#ffb3d9', '#e0559a'], head: ['#ffe9dc', '#e2b193'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.translate(c.cx, c.y + 27);
+      ctx.beginPath();
+      ctx.moveTo(0, 8); ctx.bezierCurveTo(-14, -2, -8, -12, 0, -4); ctx.bezierCurveTo(8, -12, 14, -2, 0, 8); ctx.fill();
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      const bx = c.cx - c.facing * 13, by = c.y - 27;
+      ctx.fillStyle = '#ff4fa3'; ctx.strokeStyle = '#7a1651'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 14, by - 9); ctx.lineTo(bx - 13, by + 8); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 14, by - 9); ctx.lineTo(bx + 13, by + 8); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ff85c2';
+      ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,100,150,0.5)';
+      ctx.beginPath(); ctx.ellipse(c.cx - 14, c.y - 2, 4.5, 3, 0, 0, Math.PI * 2); ctx.ellipse(c.cx + 14, c.y - 2, 4.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  },
+  {
+    id: 'skin_bumblebee', name: 'Bumblebee', rarity: 'common',
+    body: ['#ffe45c', '#f0a91a'], head: ['#fff0c9', '#e3b56c'], topper: false,
+    back(ctx, c) {
+      const flap = Math.sin(c.t * 0.9) * 0.25;
+      ctx.fillStyle = 'rgba(210,240,255,0.55)'; ctx.strokeStyle = 'rgba(80,120,160,0.7)'; ctx.lineWidth = 2;
+      [-1, 1].forEach(s => {
+        ctx.save(); ctx.translate(c.cx + s * 8, c.y + 14); ctx.rotate(s * (0.7 + flap));
+        ctx.beginPath(); ctx.ellipse(s * 12, -10, 9, 17, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      });
+    },
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = '#2b2118';
+      [c.y + 16, c.y + 28, c.y + 40].forEach(yy => ctx.fillRect(c.x - 2, yy, c.w + 4, 6));
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      const sway = Math.sin(c.t * 0.12) * 3;
+      ctx.strokeStyle = '#2b2118'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.fillStyle = '#2b2118';
+      [-1, 1].forEach(s => {
+        ctx.beginPath(); ctx.moveTo(c.cx + s * 7, c.y - 28); ctx.quadraticCurveTo(c.cx + s * 12, c.y - 40, c.cx + s * 15 + sway * s, c.y - 44); ctx.stroke();
+        ctx.beginPath(); ctx.arc(c.cx + s * 15 + sway * s, c.y - 45, 3.6, 0, Math.PI * 2); ctx.fill();
+      });
+    }
+  },
+  {
+    id: 'skin_pirate', name: 'Buccaneer', rarity: 'uncommon',
+    body: ['#d84a3c', '#84201a'], head: ['#ffddbb', '#cc9966'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for (let i = 0; i < 4; i++) ctx.fillRect(c.x - 2, c.y + 12 + i * 10, c.w + 4, 4);
+      ctx.fillStyle = '#2a1a10'; ctx.fillRect(c.x - 2, c.y + c.h - 12, c.w + 4, 7);
+      ctx.fillStyle = '#e3b23c'; ctx.fillRect(c.cx - 4, c.y + c.h - 12, 8, 7);
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      ctx.save();
+      ctx.fillStyle = '#c1272d'; ctx.strokeStyle = '#3a0a0c'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 22.5, Math.PI * 1.06, Math.PI * 1.94);
+      ctx.quadraticCurveTo(c.cx, c.y - 13, c.cx - 22, c.y - 13); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      [[-12, -27], [0, -30], [12, -27], [-6, -21], [7, -21]].forEach(p => { ctx.beginPath(); ctx.arc(c.cx + p[0], c.y + p[1] + 1, 1.8, 0, Math.PI * 2); ctx.fill(); });
+      const fl = Math.sin(c.t * 0.25) * 3, s = -c.facing;
+      ctx.fillStyle = '#c1272d';
+      ctx.beginPath(); ctx.moveTo(c.cx + s * 20, c.y - 17); ctx.quadraticCurveTo(c.cx + s * 30, c.y - 20 + fl, c.cx + s * 36, c.y - 12 + fl); ctx.lineTo(c.cx + s * 27, c.y - 13); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(c.cx + s * 20, c.y - 15); ctx.quadraticCurveTo(c.cx + s * 29, c.y - 8 - fl, c.cx + s * 33, c.y - 2 - fl); ctx.lineTo(c.cx + s * 25, c.y - 9); ctx.closePath(); ctx.fill(); ctx.stroke();
+      // eyepatch on the far-side eye
+      const ex = c.cx - 8 + (c.facing > 0 ? 4 : -4);
+      ctx.fillStyle = '#15151c'; ctx.strokeStyle = '#15151c'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(c.cx - 20, c.y - 24); ctx.lineTo(c.cx + 20, c.y - 5); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(ex, c.y - 14, 9.5, 10.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(c.cx + 22 * c.facing, c.y - 2, 4.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  },
+  {
+    id: 'skin_frost', name: 'Frost Sprite', rarity: 'uncommon', tags: ['ice'],
+    body: ['#d4f4ff', '#5aa9d6'], head: ['#f0fbff', '#b6dcee'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(c.x - 4 + i * 16, c.y + c.h); ctx.lineTo(c.x + 14 + i * 16, c.y + 6); ctx.stroke(); }
+      ctx.translate(c.cx, c.y + 27); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.4;
+      for (let k = 0; k < 3; k++) { ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.stroke(); }
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      ctx.strokeStyle = '#2b6a8f'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+      for (let i = -2; i <= 2; i++) {
+        const hgt = 20 - Math.abs(i) * 4.5;
+        const bx = c.cx + i * 8.6;
+        ctx.fillStyle = 'rgba(190,240,255,0.95)';
+        ctx.beginPath(); ctx.moveTo(bx - 4.5, c.y - 27 + Math.abs(i)); ctx.lineTo(bx, c.y - 27 - hgt + Math.abs(i)); ctx.lineTo(bx + 4.5, c.y - 27 + Math.abs(i)); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.beginPath(); ctx.moveTo(bx - 1, c.y - 28); ctx.lineTo(bx, c.y - 25 - hgt); ctx.lineTo(bx + 1.2, c.y - 28); ctx.fill();
+      }
+      for (let i = 0; i < 6; i++) {
+        const ph = (c.t * 0.02 + i * 0.37) % 1;
+        const sx = c.cx + Math.sin(i * 2.1 + c.t * 0.03) * 30;
+        mqSparkle(ctx, sx, c.y - 40 + ph * 80, 2.6, '#ffffff', 0.85 * (1 - ph));
+      }
+    }
+  },
+  {
+    id: 'skin_ninja', name: 'Shadow Ninja', rarity: 'uncommon',
+    body: ['#3d3d52', '#14141c'], head: ['#ffddbb', '#cc9966'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = '#d6202f'; ctx.fillRect(c.x - 2, c.y + 26, c.w + 4, 8);
+      ctx.fillStyle = '#a0141f';
+      ctx.beginPath(); ctx.moveTo(c.cx + 2, c.y + 30); ctx.lineTo(c.cx + 12, c.y + 40); ctx.lineTo(c.cx + 5, c.y + 41); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    },
+    back(ctx, c) {
+      const fl = Math.sin(c.t * 0.3) * 4, s = -c.facing;
+      ctx.strokeStyle = '#d6202f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(c.cx + s * 18, c.y - 16); ctx.quadraticCurveTo(c.cx + s * 32, c.y - 20 + fl, c.cx + s * 44, c.y - 10 + fl * 1.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(c.cx + s * 18, c.y - 14); ctx.quadraticCurveTo(c.cx + s * 30, c.y - 6 - fl, c.cx + s * 40, c.y + 2 - fl * 1.5); ctx.stroke();
+    },
+    preFace(ctx, c) {
+      ctx.save(); mqHeadClip(ctx, c);
+      ctx.fillStyle = '#20202c'; ctx.fillRect(c.cx - 24, c.y - 32, 48, 42);
+      const g = ctx.createLinearGradient(0, c.y - 24, 0, c.y - 2);
+      g.addColorStop(0, '#ffddbb'); g.addColorStop(1, '#d6a678');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(c.cx - 20, c.y - 25, 40, 19, 8) : ctx.rect(c.cx - 20, c.y - 25, 40, 19); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 22, 0, Math.PI * 2); ctx.stroke();
+    },
+    deco(ctx, c) {
+      ctx.fillStyle = '#d6202f'; ctx.strokeStyle = '#5a0a12'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.rect(c.cx - 22, c.y - 28, 44, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#c0c8d6';
+      ctx.beginPath(); ctx.rect(c.cx - 7, c.y - 28, 14, 6); ctx.fill(); ctx.stroke();
+    }
+  },
+  {
+    id: 'skin_astronaut', name: 'Astronaut', rarity: 'rare', tags: ['cosmic'],
+    body: ['#ffffff', '#b8c3d8'], head: ['#ffe2c6', '#d6a679'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = '#ff8a2a'; ctx.fillRect(c.x - 2, c.y + c.h - 13, c.w + 4, 7);
+      ctx.fillStyle = '#3c4660'; ctx.beginPath(); ctx.rect(c.cx - 12, c.y + 12, 24, 16); ctx.fill();
+      ctx.fillStyle = '#ff4f5e'; ctx.beginPath(); ctx.arc(c.cx - 6, c.y + 20, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5ddf8a'; ctx.beginPath(); ctx.arc(c.cx, c.y + 20, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4aa8ff'; ctx.beginPath(); ctx.arc(c.cx + 6, c.y + 20, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(180,225,255,0.2)';
+      ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#e8eefc'; ctx.lineWidth = 4.5; ctx.stroke();
+      ctx.strokeStyle = '#8b9ab8'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 28.2, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 19, Math.PI * 1.15, Math.PI * 1.45); ctx.stroke();
+      ctx.fillStyle = '#c9d2e6'; ctx.strokeStyle = '#66738f'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(c.cx, c.y + 17, 19, 5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  },
+  {
+    id: 'skin_wizard', name: 'Star Wizard', rarity: 'rare',
+    body: ['#9a66e6', '#4a2a94'], head: ['#ffe2c6', '#d6a679'], topper: false,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = '#ffd84d';
+      [[c.x + 9, c.y + 18, 4], [c.x + 26, c.y + 28, 3.2], [c.x + 12, c.y + 38, 3.2], [c.x + 27, c.y + 12, 2.6]].forEach(p => { mqStar(ctx, p[0], p[1], p[2], p[2] * 0.45, 5); ctx.fill(); });
+      ctx.fillStyle = '#ffd84d'; ctx.fillRect(c.x - 2, c.y + 4, c.w + 4, 4);
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      const sway = Math.sin(c.t * 0.07) * 2.5;
+      // beard
+      ctx.fillStyle = '#f4f4fb'; ctx.strokeStyle = '#8b8ba8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(c.cx - 17, c.y - 1); ctx.quadraticCurveTo(c.cx - 14, c.y + 16, c.cx, c.y + 22); ctx.quadraticCurveTo(c.cx + 14, c.y + 16, c.cx + 17, c.y - 1);
+      ctx.quadraticCurveTo(c.cx, c.y + 6, c.cx - 17, c.y - 1); ctx.fill(); ctx.stroke();
+      // hat
+      ctx.fillStyle = '#6a3fc4'; ctx.strokeStyle = '#25104f'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(c.cx - 21, c.y - 22); ctx.quadraticCurveTo(c.cx - 6, c.y - 44, c.cx + 6 + sway, c.y - 72);
+      ctx.quadraticCurveTo(c.cx + 14 + sway, c.y - 46, c.cx + 21, c.y - 22); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffd84d'; ctx.fillRect(c.cx - 20, c.y - 29, 40, 5);
+      ctx.fillStyle = '#5a30aa';
+      ctx.beginPath(); ctx.ellipse(c.cx, c.y - 22, 30, 6, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffd84d';
+      mqStar(ctx, c.cx + 2, c.y - 42, 4.5, 2, 5); ctx.fill();
+      mqStar(ctx, c.cx + 9 + sway * 0.5, c.y - 57, 3, 1.3, 5); ctx.fill();
+    }
+  },
+  {
+    id: 'skin_robot', name: 'Robo-Bot', rarity: 'rare', tags: ['tech'],
+    body: ['#d3dbe6', '#7b899b'], head: ['#e6ecf3', '#98a5b6'], topper: false, noFace: true,
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.strokeStyle = 'rgba(40,55,80,0.55)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(c.x, c.y + 20); ctx.lineTo(c.x + c.w, c.y + 20); ctx.moveTo(c.cx, c.y + 20); ctx.lineTo(c.cx, c.y + c.h); ctx.stroke();
+      const on = 0.6 + 0.4 * Math.sin(c.t * 0.15);
+      ctx.fillStyle = `rgba(70,240,255,${on})`; ctx.shadowColor = '#46f0ff'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(c.cx, c.y + 30, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#54627a';
+      [[c.x + 4, c.y + 10], [c.x + c.w - 4, c.y + 10], [c.x + 4, c.y + c.h - 6], [c.x + c.w - 4, c.y + c.h - 6]].forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 1.8, 0, Math.PI * 2); ctx.fill(); });
+      ctx.restore();
+    },
+    preFace(ctx, c) {
+      ctx.fillStyle = '#1a2233'; ctx.strokeStyle = '#0d1220'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(c.cx - 17, c.y - 21, 34, 17, 6) : ctx.rect(c.cx - 17, c.y - 21, 34, 17); ctx.fill(); ctx.stroke();
+      const blink = (Math.floor(c.t / 70) % 6 === 0) ? 1.5 : 6;
+      ctx.fillStyle = '#4ff0ff'; ctx.shadowColor = '#4ff0ff'; ctx.shadowBlur = 8;
+      const sh = c.facing > 0 ? 2 : -2;
+      ctx.fillRect(c.cx - 11 + sh, c.y - 15, 7, blink); ctx.fillRect(c.cx + 4 + sh, c.y - 15, 7, blink);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#54627a'; ctx.lineWidth = 2;
+      for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(c.cx + i * 4, c.y + 2); ctx.lineTo(c.cx + i * 4, c.y + 7); ctx.stroke(); }
+    },
+    deco(ctx, c) {
+      ctx.strokeStyle = '#54627a'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(c.cx, c.y - 29); ctx.lineTo(c.cx, c.y - 42); ctx.stroke();
+      const on = Math.floor(c.t / 25) % 2 === 0;
+      ctx.fillStyle = on ? '#ff4f5e' : '#7a2a33'; ctx.shadowColor = '#ff4f5e'; ctx.shadowBlur = on ? 10 : 0;
+      ctx.beginPath(); ctx.arc(c.cx, c.y - 44, 4, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#8a97aa'; ctx.strokeStyle = '#3c465a'; ctx.lineWidth = 2;
+      [-1, 1].forEach(s => { ctx.beginPath(); ctx.rect(c.cx + s * 22 - 3, c.y - 14, 6, 12); ctx.fill(); ctx.stroke(); });
+    }
+  },
+  {
+    id: 'skin_inferno', name: 'Inferno', rarity: 'epic', tags: ['fire'],
+    body: ['#ffb13c', '#b3200f'], head: ['#ffd9b0', '#e08a4c'], topper: false,
+    back(ctx, c) {
+      const g = ctx.createRadialGradient(c.cx, c.y + 8, 4, c.cx, c.y + 8, 52);
+      g.addColorStop(0, 'rgba(255,150,40,0.45)'); g.addColorStop(1, 'rgba(255,90,20,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.cx, c.y + 8, 52, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 7; i++) {
+        const ph = (c.t * 0.025 + i * 0.29) % 1;
+        const ex = c.cx + Math.sin(i * 1.9 + c.t * 0.04) * 22;
+        ctx.fillStyle = `rgba(255,${150 + i * 12},40,${0.85 * (1 - ph)})`;
+        ctx.beginPath(); ctx.arc(ex, c.y + 30 - ph * 70, 2.6 * (1 - ph * 0.5), 0, Math.PI * 2); ctx.fill();
+      }
+    },
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 2; ctx.shadowColor = '#ffb13c'; ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(c.x + 6, c.y + 8); ctx.lineTo(c.x + 14, c.y + 20); ctx.lineTo(c.x + 9, c.y + 30); ctx.lineTo(c.x + 18, c.y + 44);
+      ctx.moveTo(c.x + 30, c.y + 10); ctx.lineTo(c.x + 24, c.y + 24); ctx.lineTo(c.x + 30, c.y + 38);
+      ctx.stroke();
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      for (let i = -2; i <= 2; i++) {
+        const fl = Math.sin(c.t * 0.28 + i * 1.3);
+        const hgt = 22 - Math.abs(i) * 4 + fl * 4;
+        const bx = c.cx + i * 7.5;
+        const g = ctx.createLinearGradient(0, c.y - 26, 0, c.y - 26 - hgt);
+        g.addColorStop(0, '#ff5a1f'); g.addColorStop(0.55, '#ffb13c'); g.addColorStop(1, '#fff2a0');
+        ctx.fillStyle = g; ctx.strokeStyle = '#7a1607'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(bx - 6, c.y - 24 + Math.abs(i) * 1.5);
+        ctx.quadraticCurveTo(bx - 7 + fl * 2, c.y - 34 - hgt * 0.4, bx + fl * 2.5, c.y - 26 - hgt);
+        ctx.quadraticCurveTo(bx + 7 + fl * 2, c.y - 34 - hgt * 0.4, bx + 6, c.y - 24 + Math.abs(i) * 1.5);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+  },
+  {
+    id: 'skin_galaxy', name: 'Galaxy Walker', rarity: 'epic', tags: ['cosmic'],
+    body: ['#5a3fc4', '#120c44'], head: ['#e9e0ff', '#a99ad6'], topper: false,
+    back(ctx, c) {
+      const s = -c.facing;
+      for (let i = 0; i < 7; i++) {
+        const ph = i / 7;
+        mqSparkle(ctx, c.cx + s * (16 + i * 9), c.y + 20 + Math.sin(c.t * 0.1 + i) * 5, 4.5 * (1 - ph * 0.7), i % 2 ? '#ffe9a0' : '#b9a6ff', 0.75 * (1 - ph));
+      }
+    },
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      const g1 = ctx.createRadialGradient(c.x + 10, c.y + 20, 2, c.x + 10, c.y + 20, 26);
+      g1.addColorStop(0, 'rgba(255,110,200,0.65)'); g1.addColorStop(1, 'rgba(255,110,200,0)');
+      ctx.fillStyle = g1; ctx.fillRect(c.x, c.y, c.w, c.h);
+      const g2 = ctx.createRadialGradient(c.x + 28, c.y + 38, 2, c.x + 28, c.y + 38, 24);
+      g2.addColorStop(0, 'rgba(90,210,255,0.6)'); g2.addColorStop(1, 'rgba(90,210,255,0)');
+      ctx.fillStyle = g2; ctx.fillRect(c.x, c.y, c.w, c.h);
+      for (let i = 0; i < 9; i++) {
+        const tw = 0.4 + 0.6 * Math.abs(Math.sin(c.t * 0.05 + i * 1.7));
+        ctx.fillStyle = `rgba(255,255,255,${tw})`;
+        ctx.beginPath(); ctx.arc(c.x + 4 + (i * 13) % 30, c.y + 9 + (i * 17) % 36, 1 + (i % 3) * 0.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      const cy = c.y - 38;
+      ctx.strokeStyle = 'rgba(190,170,255,0.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(c.cx, cy, 26, 7, 0, 0, Math.PI * 2); ctx.stroke();
+      for (let i = 0; i < 5; i++) {
+        const a = c.t * 0.05 + i * (Math.PI * 2 / 5);
+        const sx = c.cx + Math.cos(a) * 26, sy = cy + Math.sin(a) * 7;
+        ctx.fillStyle = i % 2 ? '#ffe9a0' : '#c9b8ff'; ctx.shadowColor = '#b9a6ff'; ctx.shadowBlur = 8;
+        mqStar(ctx, sx, sy, 5, 2.2, 5, a); ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+  },
+  {
+    id: 'skin_golden', name: 'Golden Champion', rarity: 'legendary',
+    body: ['#fff3a6', '#d49a12'], head: ['#fff0c4', '#e3b355'], topper: false,
+    back(ctx, c) {
+      const g = ctx.createRadialGradient(c.cx, c.y + 8, 6, c.cx, c.y + 8, 62);
+      g.addColorStop(0, 'rgba(255,214,90,0.55)'); g.addColorStop(1, 'rgba(255,214,90,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.cx, c.y + 8, 62, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 6; i++) {
+        const a = c.t * 0.03 + i * 1.05;
+        const tw = 0.5 + 0.5 * Math.sin(c.t * 0.12 + i * 2);
+        mqSparkle(ctx, c.cx + Math.cos(a) * (32 + (i % 2) * 8), c.y + 8 + Math.sin(a) * (40 + (i % 3) * 5), 4 + tw * 3, '#fff6c2', 0.4 + 0.6 * tw);
+      }
+    },
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      const sweep = ((c.t * 0.02) % 1.6) - 0.3;
+      const g = ctx.createLinearGradient(c.x - 10 + sweep * (c.w + 30), c.y, c.x + 10 + sweep * (c.w + 30), c.y + c.h);
+      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.75)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(c.x, c.y, c.w, c.h);
+      ctx.strokeStyle = 'rgba(122,74,0,0.55)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(c.x + 6, c.y + 14); ctx.lineTo(c.cx, c.y + 24); ctx.lineTo(c.x + c.w - 6, c.y + 14); ctx.stroke();
+      mqStar(ctx, c.cx, c.y + 34, 6, 2.6, 5); ctx.fillStyle = '#c4290f'; ctx.fill(); ctx.stroke();
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#7a4a00'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c.cx - 19, c.y - 27);
+      ctx.lineTo(c.cx - 22, c.y - 46); ctx.lineTo(c.cx - 10, c.y - 37); ctx.lineTo(c.cx, c.y - 52);
+      ctx.lineTo(c.cx + 10, c.y - 37); ctx.lineTo(c.cx + 22, c.y - 46); ctx.lineTo(c.cx + 19, c.y - 27);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff1a1'; ctx.fillRect(c.cx - 19, c.y - 32, 38, 5);
+      ctx.strokeRect(c.cx - 19, c.y - 32, 38, 5);
+      [['#ff4f5e', c.cx], ['#4aa8ff', c.cx - 11], ['#5ddf8a', c.cx + 11]].forEach(j => {
+        ctx.fillStyle = j[0]; ctx.beginPath(); ctx.arc(j[1], c.y - 29.5, 2.6, 0, Math.PI * 2); ctx.fill();
+      });
+      [[c.cx - 22, c.y - 46], [c.cx, c.y - 52], [c.cx + 22, c.y - 46]].forEach(p => {
+        ctx.fillStyle = '#fff7c9'; ctx.beginPath(); ctx.arc(p[0], p[1], 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      });
+    }
+  },
+  {
+    id: 'skin_rainbow', name: 'Prism Phantom', rarity: 'legendary',
+    bodyDyn(t) { return ['hsl(' + ((t * 3) % 360) + ',95%,72%)', 'hsl(' + ((t * 3 + 80) % 360) + ',85%,52%)']; },
+    head: ['#fff6ff', '#d9c9ee'], topper: false,
+    back(ctx, c) {
+      const s = -c.facing;
+      for (let k = 0; k < 6; k++) {
+        ctx.strokeStyle = 'hsla(' + ((k * 60 + c.t * 3) % 360) + ',95%,62%,0.85)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(c.cx + s * 10, c.y + 10 + k * 3.4);
+        for (let i = 1; i <= 8; i++) ctx.lineTo(c.cx + s * (10 + i * 8), c.y + 10 + k * 3.4 + Math.sin(c.t * 0.18 - i * 0.7) * (3 + i * 0.7));
+        ctx.stroke();
+      }
+    },
+    bodyDeco(ctx, c) {
+      ctx.save(); mqClipBody(ctx, c);
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.beginPath(); ctx.moveTo(c.x, c.y + 8); ctx.lineTo(c.x + 14, c.y + 8); ctx.lineTo(c.x + 4, c.y + c.h); ctx.lineTo(c.x, c.y + c.h); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    },
+    deco(ctx, c) {
+      for (let i = 0; i < 7; i++) {
+        const a = c.t * 0.05 + i * (Math.PI * 2 / 7);
+        const tw = 0.5 + 0.5 * Math.sin(c.t * 0.15 + i);
+        mqSparkle(ctx, c.cx + Math.cos(a) * 30, c.y - 8 + Math.sin(a) * 34, 3.5 + tw * 3, 'hsl(' + ((i * 50 + c.t * 4) % 360) + ',100%,80%)', 0.5 + 0.5 * tw);
+      }
+      ctx.lineWidth = 3;
+      for (let k = 0; k < 5; k++) {
+        ctx.strokeStyle = 'hsla(' + ((k * 45 + c.t * 3) % 360) + ',95%,65%,0.9)';
+        ctx.beginPath(); ctx.arc(c.cx, c.y - 8, 26 + k * 0.1, Math.PI * 1.15 + k * 0.09, Math.PI * 1.55 + k * 0.09); ctx.stroke();
+      }
+    }
+  }
+];
+
+// ---- Gun skins -------------------------------------------------------------
+// Drawn pointing up (guns fire straight up). Shapes: blaster, cannon, wand, ray, rail.
+// bullet: {kind, core, mid, edge, trail, size}
+
+const MQ_GUNS = [
+  { id: 'gun_standard', name: 'Standard Blaster', rarity: 'common', isDefault: true, shape: 'blaster',
+    body: ['#a9b6c9', '#5d6b80'], trim: '#3a4356', glow: '#44ddff', muzzle: '#aef4ff',
+    bullet: { kind: 'orb', core: '#c9f6ff', mid: '#44ddff', edge: '#0088cc', trail: 'glow', size: 1 } },
+  { id: 'gun_candy', name: 'Candy Blaster', rarity: 'common', shape: 'blaster',
+    body: ['#ffd0e8', '#ff6fb3'], trim: '#ffffff', glow: '#ff8ccb', muzzle: '#fff0f8',
+    bullet: { kind: 'orb', core: '#ffffff', mid: '#ff7fc0', edge: '#d63d92', trail: 'glow', size: 1 } },
+  { id: 'gun_bubble', name: 'Bubble Popper', rarity: 'common', shape: 'cannon',
+    body: ['#bfeaff', '#4fb4e8'], trim: '#e9f9ff', glow: '#8fdcff', muzzle: '#ffffff',
+    bullet: { kind: 'bubble', core: '#ffffff', mid: '#bfeaff', edge: '#4fb4e8', trail: 'bubbles', size: 1.15 } },
+  { id: 'gun_lime', name: 'Lime Zapper', rarity: 'common', shape: 'ray',
+    body: ['#d4ff7a', '#4fb52a'], trim: '#1f5a10', glow: '#a6ff4d', muzzle: '#f0ffc9',
+    bullet: { kind: 'orb', core: '#f4ffd6', mid: '#a6ff4d', edge: '#3f9a12', trail: 'glow', size: 1 } },
+  { id: 'gun_toyray', name: 'Rocket Ray', rarity: 'uncommon', shape: 'ray',
+    body: ['#ffd96a', '#ff7a2a'], trim: '#c4290f', glow: '#ffb13c', muzzle: '#fff2c4',
+    bullet: { kind: 'star', core: '#fff6c4', mid: '#ffb13c', edge: '#e0530f', trail: 'spark', size: 1.1 } },
+  { id: 'gun_pixel', name: 'Pixel Pistol', rarity: 'uncommon', shape: 'blaster',
+    body: ['#3a4a5e', '#161e2b'], trim: '#5dff9a', glow: '#5dff9a', muzzle: '#c9ffe0',
+    bullet: { kind: 'square', core: '#e6fff0', mid: '#5dff9a', edge: '#1f9a58', trail: 'pixels', size: 1 } },
+  { id: 'gun_petal', name: 'Petal Wand', rarity: 'uncommon', shape: 'wand',
+    body: ['#ffd1e6', '#e8659f'], trim: '#5aa83c', glow: '#ff9ccb', muzzle: '#fff3f9',
+    bullet: { kind: 'petal', core: '#fff4a8', mid: '#ff9ccb', edge: '#d63d92', trail: 'petals', size: 1.1 } },
+  { id: 'gun_frost', name: 'Frost Cannon', rarity: 'rare', shape: 'cannon',
+    body: ['#e6f9ff', '#5aa9d6'], trim: '#2b6a8f', glow: '#9fe6ff', muzzle: '#ffffff',
+    bullet: { kind: 'diamond', core: '#ffffff', mid: '#9fe6ff', edge: '#3f8fc0', trail: 'snow', size: 1.15 } },
+  { id: 'gun_ember', name: 'Ember Rifle', rarity: 'rare', shape: 'blaster',
+    body: ['#ff9a4a', '#8a1c0b'], trim: '#ffcf5a', glow: '#ff7a2a', muzzle: '#ffe9a0',
+    bullet: { kind: 'fire', core: '#fff2a0', mid: '#ff9a2a', edge: '#c4290f', trail: 'fire', size: 1.2 } },
+  { id: 'gun_stardust', name: 'Stardust Wand', rarity: 'rare', tags: ['cosmic'], shape: 'wand',
+    body: ['#b9a6ff', '#4a2a94'], trim: '#ffe27a', glow: '#c9b8ff', muzzle: '#fff6c9',
+    bullet: { kind: 'star', core: '#ffffff', mid: '#ffe27a', edge: '#b9a6ff', trail: 'stardust', size: 1.2 } },
+  { id: 'gun_void', name: 'Void Pulse', rarity: 'epic', tags: ['cosmic'], shape: 'ray',
+    body: ['#4a3a6a', '#0f0a22'], trim: '#b56bff', glow: '#b56bff', muzzle: '#e6ccff',
+    bullet: { kind: 'void', core: '#f2dcff', mid: '#8c3cff', edge: '#1a0838', trail: 'void', size: 1.25 } },
+  { id: 'gun_solar', name: 'Solar Flare', rarity: 'epic', tags: ['cosmic', 'fire'], shape: 'cannon',
+    body: ['#fff0a0', '#e07a12'], trim: '#c4290f', glow: '#ffc93c', muzzle: '#ffffff',
+    bullet: { kind: 'solar', core: '#ffffff', mid: '#ffd23f', edge: '#ff6a1f', trail: 'fire', size: 1.35 } },
+  { id: 'gun_sunbreaker', name: 'Sunbreaker', rarity: 'legendary', tags: ['cosmic'], shape: 'rail',
+    body: ['#fff3a6', '#c98a0f'], trim: '#7a4a00', glow: '#ffd23f', muzzle: '#ffffff',
+    bullet: { kind: 'streak', core: '#ffffff', mid: '#ffe27a', edge: '#e0a012', trail: 'gold', size: 1.3 } },
+  { id: 'gun_prism', name: 'Prism Railgun', rarity: 'legendary', shape: 'rail', dynamic: true,
+    body: ['#f4f0ff', '#8a7ac8'], trim: '#ffffff', glow: '#ffffff', muzzle: '#ffffff',
+    bullet: { kind: 'rainbow', core: '#ffffff', mid: '#ffffff', edge: '#ffffff', trail: 'rainbow', size: 1.3 } }
+];
+
+// Tall hats/hair push the floating health bar and reload ring up so they do not overlap.
+const MQ_BAR_LIFT = { skin_wizard: 34, skin_golden: 12, skin_inferno: 14, skin_frost: 8, skin_sprout: 4, skin_bumblebee: 6, skin_robot: 8, skin_astronaut: 6 };
+MQ_SKINS.forEach(s => { s.type = 'skin'; s.barLift = MQ_BAR_LIFT[s.id] || 0; });
+MQ_GUNS.forEach(g => { g.type = 'gun'; });
+const MQ_ITEMS = MQ_SKINS.concat(MQ_GUNS);
+const MQ_ITEM_MAP = {};
+MQ_ITEMS.forEach(i => { MQ_ITEM_MAP[i.id] = i; });
+const MQ_SKIN_MAP = {};
+MQ_SKINS.forEach(s => { MQ_SKIN_MAP[s.id] = s; });
+const MQ_GUN_MAP = {};
+MQ_GUNS.forEach(g => { MQ_GUN_MAP[g.id] = g; });
+
+
+// ============================================================
+// GUN, BULLET AND PLAYER DRAWING
+// ============================================================
+
+function mqGunColors(def, t) {
+  if (def.dynamic) {
+    const h = (t * 3) % 360;
+    return { body: ['hsl(' + h + ',90%,80%)', 'hsl(' + ((h + 70) % 360) + ',80%,58%)'], trim: 'hsl(' + ((h + 180) % 360) + ',100%,82%)', glow: 'hsl(' + h + ',100%,70%)' };
+  }
+  return { body: def.body, trim: def.trim, glow: def.glow };
+}
+
+function mqGunGrad(ctx, col, x0, x1) {
+  const g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, col.body[0]);
+  g.addColorStop(1, col.body[1]);
+  return g;
+}
+
+// Every shape is drawn with the barrel pointing straight up, grip at the origin.
+const MQ_GUN_SHAPES = {
+  blaster(ctx, col) {
+    ctx.fillStyle = mqGunGrad(ctx, col, -4, 4); ctx.beginPath(); ctx.roundRect(-3.8, -38, 7.6, 15, 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = mqGunGrad(ctx, col, -8, 8); ctx.beginPath(); ctx.roundRect(-8, -27, 16, 30, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.trim; ctx.fillRect(-8, -15, 16, 3.4);
+    ctx.beginPath(); ctx.roundRect(-5.5, -40, 11, 4.4, 1.6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.glow; ctx.shadowColor = col.glow; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.arc(0, -21, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+  },
+  cannon(ctx, col) {
+    ctx.fillStyle = mqGunGrad(ctx, col, -10, 10); ctx.beginPath(); ctx.roundRect(-10.5, -27, 21, 30, 6); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6.5, -27); ctx.lineTo(-10, -39); ctx.lineTo(10, -39); ctx.lineTo(6.5, -27); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.trim; ctx.fillRect(-10.5, -17, 21, 3.6); ctx.fillRect(-10.5, -7, 21, 3);
+    ctx.beginPath(); ctx.roundRect(-10.6, -41, 21.2, 4.4, 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.glow; ctx.shadowColor = col.glow; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.ellipse(0, -39.6, 6, 1.7, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+  },
+  wand(ctx, col) {
+    ctx.fillStyle = mqGunGrad(ctx, col, -3, 3); ctx.beginPath(); ctx.roundRect(-2.9, -31, 5.8, 36, 2.9); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = col.trim; ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-3, -6 - i * 7); ctx.lineTo(3, -10 - i * 7); ctx.stroke(); }
+    ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+    const g = ctx.createRadialGradient(-2, -39, 1, 0, -37, 10);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.4, col.glow); g.addColorStop(1, col.body[1]);
+    ctx.fillStyle = g; ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(0, -37, 8, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+    ctx.fillStyle = col.trim;
+    ctx.beginPath(); ctx.moveTo(-8, -33); ctx.lineTo(-11, -40); ctx.lineTo(-5, -37); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(8, -33); ctx.lineTo(11, -40); ctx.lineTo(5, -37); ctx.closePath(); ctx.fill();
+  },
+  ray(ctx, col) {
+    ctx.fillStyle = col.trim;
+    ctx.beginPath(); ctx.moveTo(-7, -8); ctx.lineTo(-17, 3); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(7, -8); ctx.lineTo(17, 3); ctx.lineTo(7, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = mqGunGrad(ctx, col, -9, 9); ctx.beginPath(); ctx.ellipse(0, -14, 9, 16, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-4.5, -28); ctx.lineTo(0, -41); ctx.lineTo(4.5, -28); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.glow; ctx.shadowColor = col.glow; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.ellipse(0, -16, 4.2, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, -41, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+  },
+  rail(ctx, col) {
+    ctx.fillStyle = col.trim;
+    ctx.beginPath(); ctx.roundRect(-9, -45, 3.4, 27, 1.6); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(5.6, -45, 3.4, 27, 1.6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = mqGunGrad(ctx, col, -5, 5); ctx.beginPath(); ctx.roundRect(-5, -33, 10, 37, 3.5); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = col.glow; ctx.lineWidth = 2.4; ctx.shadowColor = col.glow; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(0, -44); ctx.lineTo(0, -12); ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.fillStyle = col.trim; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-5, -20); ctx.lineTo(-11, -14); ctx.lineTo(-5, -12); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(5, -20); ctx.lineTo(11, -14); ctx.lineTo(5, -12); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+};
+
+const MQ_GUN_MAGS = {
+  blaster(ctx, col) { ctx.fillStyle = col.trim; ctx.beginPath(); ctx.roundRect(-5, 2, 10, 12, 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = col.glow; ctx.fillRect(-3, 5, 6, 2); },
+  cannon(ctx, col) {
+    ctx.fillStyle = col.trim; ctx.beginPath(); ctx.arc(0, 9, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.body[1]; ctx.beginPath(); ctx.arc(0, 9, 4.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = col.glow;
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.beginPath(); ctx.arc(Math.cos(a) * 6.2, 9 + Math.sin(a) * 6.2, 1.1, 0, Math.PI * 2); ctx.fill(); }
+  },
+  wand(ctx, col) { ctx.fillStyle = col.glow; ctx.beginPath(); ctx.moveTo(0, 3); ctx.lineTo(5, 8); ctx.lineTo(0, 14); ctx.lineTo(-5, 8); ctx.closePath(); ctx.fill(); ctx.stroke(); },
+  ray(ctx, col) { ctx.fillStyle = col.trim; ctx.beginPath(); ctx.roundRect(-4.5, 3, 9, 11, 3); ctx.fill(); ctx.stroke(); ctx.fillStyle = col.glow; ctx.fillRect(-2.5, 6, 5, 4); },
+  rail(ctx, col) { ctx.fillStyle = col.trim; ctx.beginPath(); ctx.roundRect(-3.6, 3, 7.2, 12, 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = col.glow; ctx.fillRect(-1.4, 5, 2.8, 8); }
+};
+
+// px,py: the hand position. reload: 0..1 progress (0 = not reloading). recoil: 0..1 kick.
+function mqDrawGun(ctx, gunId, px, py, facing, reload, recoil, t) {
+  const def = MQ_GUN_MAP[gunId] || MQ_GUN_MAP.gun_standard;
+  const col = mqGunColors(def, t);
+  reload = reload || 0;
+  recoil = recoil || 0;
+
+  let rot = 0, magMode = 'seated', magT = 0;
+  if (reload > 0) {
+    if (reload < 0.2) rot = 0.95 * (1 - Math.pow(1 - reload / 0.2, 2));
+    else if (reload < 0.6) rot = 0.95 + Math.sin(reload * 42) * 0.035;
+    else if (reload < 0.85) { const k = (reload - 0.6) / 0.25; rot = 0.95 * (1 - (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2)); }
+    if (reload < 0.3) { magMode = 'drop'; magT = reload / 0.3; }
+    else if (reload < 0.6) { magMode = 'insert'; magT = (reload - 0.3) / 0.3; }
+  }
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.scale(facing, 1);
+  ctx.rotate(rot - recoil * 0.1);
+  ctx.translate(0, recoil * 5);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+  if (def.rarity === 'epic' || def.rarity === 'legendary') { ctx.shadowColor = col.glow; ctx.shadowBlur = 9; }
+  MQ_GUN_SHAPES[def.shape](ctx, col, t);
+  ctx.shadowBlur = 0;
+
+  if (magMode === 'seated') {
+    MQ_GUN_MAGS[def.shape](ctx, col);
+  } else if (magMode === 'insert') {
+    const e = 1 - Math.pow(1 - magT, 3);
+    ctx.save(); ctx.globalAlpha = Math.min(1, magT * 2); ctx.translate(0, (1 - e) * 28);
+    MQ_GUN_MAGS[def.shape](ctx, col); ctx.restore();
+  }
+  // rack: the slide clacks and a spark pops at the end of the reload
+  if (reload > 0.86 && reload < 0.97) {
+    const k = (reload - 0.86) / 0.11;
+    ctx.globalAlpha = 1 - k;
+    ctx.fillStyle = def.muzzle;
+    mqStar(ctx, 0, -20 - k * 6, 6 + k * 4, 2, 4, k * 2); ctx.fill();
+  }
+  if (recoil > 0.55) {
+    const k = (recoil - 0.55) / 0.45;
+    ctx.globalAlpha = k;
+    ctx.fillStyle = def.muzzle; ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
+    mqStar(ctx, 0, -RAID_GUN_LENGTH - 3, 10 + 5 * k, 3.5, 6, t * 0.4); ctx.fill();
+  }
+  ctx.restore();
+
+  if (magMode === 'drop') {
+    ctx.save();
+    ctx.translate(px + facing * (6 + magT * 12), py + 8 + magT * magT * 46);
+    ctx.rotate(facing * magT * 3);
+    ctx.globalAlpha = 1 - magT * 0.85;
+    ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+    MQ_GUN_MAGS[def.shape](ctx, col);
+    ctx.restore();
+  }
+}
+
+// ---- Bullets ----------------------------------------------------------------
+
+function mqBulletColors(def, t) {
+  const b = def.bullet;
+  if (b.kind === 'rainbow') {
+    const h = (t * 6) % 360;
+    return { core: '#ffffff', mid: 'hsl(' + h + ',100%,65%)', edge: 'hsl(' + ((h + 60) % 360) + ',100%,50%)' };
+  }
+  return b;
+}
+
+function mqBulletTrail(ctx, p, def, col, size, t) {
+  const b = def.bullet;
+  let dx = -(p.vx || 0), dy = -(p.vy === undefined ? -6 : p.vy);
+  const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+  for (let k = 1; k <= 6; k++) {
+    const x = p.x + dx * k * 5, y = p.y + dy * k * 5;
+    const f = 1 - k / 7;
+    if (b.trail === 'glow') {
+      ctx.fillStyle = col.mid; ctx.globalAlpha = 0.35 * f; ctx.beginPath(); ctx.arc(x, y, size * f, 0, Math.PI * 2); ctx.fill();
+    } else if (b.trail === 'spark') {
+      ctx.globalAlpha = f; ctx.fillStyle = k % 2 ? col.core : col.mid; ctx.beginPath(); ctx.arc(x + Math.sin(t + k * 3) * 3, y, 1.6, 0, Math.PI * 2); ctx.fill();
+    } else if (b.trail === 'pixels') {
+      ctx.globalAlpha = 0.85 * f; ctx.fillStyle = col.mid; ctx.fillRect(x - 2 + (k % 2 ? 3 : -3), y - 2, 4, 4);
+    } else if (b.trail === 'petals') {
+      ctx.globalAlpha = 0.75 * f; ctx.fillStyle = col.mid; ctx.beginPath(); ctx.ellipse(x + Math.sin(t * 0.3 + k) * 5, y, 3.2, 1.8, k + t * 0.1, 0, Math.PI * 2); ctx.fill();
+    } else if (b.trail === 'bubbles') {
+      ctx.globalAlpha = 0.7 * f; ctx.strokeStyle = col.mid; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(x + Math.sin(k * 2.3) * 5, y, 2 + (k % 3), 0, Math.PI * 2); ctx.stroke();
+    } else if (b.trail === 'snow') {
+      ctx.globalAlpha = f; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x + Math.sin(t * 0.2 + k * 2) * 5, y, 1.8, 0, Math.PI * 2); ctx.fill();
+    } else if (b.trail === 'fire') {
+      ctx.globalAlpha = 0.85 * f; ctx.fillStyle = k < 3 ? col.mid : col.edge; ctx.beginPath(); ctx.arc(x + Math.sin(t * 0.5 + k) * 2, y, size * (1 - k / 8), 0, Math.PI * 2); ctx.fill();
+    } else if (b.trail === 'stardust') {
+      mqSparkle(ctx, x + Math.sin(t * 0.3 + k * 2) * 6, y, 3.4, k % 2 ? col.mid : '#ffffff', f);
+    } else if (b.trail === 'void') {
+      ctx.globalAlpha = 0.7 * f; ctx.fillStyle = col.edge; ctx.strokeStyle = col.mid; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, size * f, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    } else if (b.trail === 'gold') {
+      ctx.globalAlpha = f; mqSparkle(ctx, x + Math.sin(t * 0.4 + k) * 4, y, 3.6, k % 2 ? '#fff6c2' : col.mid, f);
+    } else if (b.trail === 'rainbow') {
+      ctx.globalAlpha = 0.9 * f; ctx.fillStyle = 'hsl(' + ((t * 6 + k * 40) % 360) + ',100%,62%)'; ctx.beginPath(); ctx.arc(x, y, size * f, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPlayerBullet(ctx, p) {
+  const def = MQ_GUN_MAP[p.gun] || MQ_GUN_MAP.gun_standard;
+  const t = p.t !== undefined ? p.t : raidG.frame;
+  const col = mqBulletColors(def, t);
+  const kind = def.bullet.kind;
+  const size = (p.r || 6) * def.bullet.size;
+  ctx.save();
+  mqBulletTrail(ctx, p, def, col, size, t);
+  ctx.shadowColor = col.mid; ctx.shadowBlur = 16;
+  ctx.translate(p.x, p.y);
+  if (kind === 'orb') {
+    const g = ctx.createRadialGradient(-2, -2, 1, 0, 0, size);
+    g.addColorStop(0, col.core); g.addColorStop(0.5, col.mid); g.addColorStop(1, col.edge);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = col.mid + '33'; ctx.beginPath(); ctx.arc(0, 0, size * 2, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'bubble') {
+    ctx.fillStyle = 'rgba(200,240,255,0.35)'; ctx.strokeStyle = col.edge; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.ellipse(-size * 0.35, -size * 0.35, size * 0.28, size * 0.16, -0.6, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'star') {
+    ctx.rotate(t * 0.12);
+    ctx.fillStyle = col.mid; ctx.strokeStyle = col.edge; ctx.lineWidth = 1.6;
+    mqStar(ctx, 0, 0, size * 1.5, size * 0.65, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.core; ctx.beginPath(); ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'square') {
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = col.edge; ctx.fillRect(-size, -size, size * 2, size * 2);
+    ctx.fillStyle = col.mid; ctx.fillRect(-size * 0.7, -size * 0.7, size * 1.4, size * 1.4);
+    ctx.fillStyle = col.core; ctx.fillRect(-size * 0.32, -size * 0.32, size * 0.64, size * 0.64);
+  } else if (kind === 'petal') {
+    ctx.rotate(t * 0.1);
+    ctx.fillStyle = col.mid; ctx.strokeStyle = col.edge; ctx.lineWidth = 1.2;
+    for (let i = 0; i < 5; i++) { ctx.save(); ctx.rotate(i * Math.PI * 2 / 5); ctx.beginPath(); ctx.ellipse(0, -size * 0.9, size * 0.55, size * 0.9, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore(); }
+    ctx.fillStyle = col.core; ctx.beginPath(); ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'diamond') {
+    ctx.fillStyle = col.mid; ctx.strokeStyle = col.edge; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(0, -size * 1.7); ctx.lineTo(size * 0.9, 0); ctx.lineTo(0, size * 1.3); ctx.lineTo(-size * 0.9, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col.core; ctx.beginPath(); ctx.moveTo(0, -size * 1.5); ctx.lineTo(size * 0.35, -size * 0.2); ctx.lineTo(0, size * 0.2); ctx.lineTo(-size * 0.2, -size * 0.3); ctx.closePath(); ctx.fill();
+  } else if (kind === 'fire') {
+    const g = ctx.createRadialGradient(0, 0, 1, 0, 0, size * 1.2);
+    g.addColorStop(0, col.core); g.addColorStop(0.5, col.mid); g.addColorStop(1, col.edge);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(0, -size * 1.5); ctx.quadraticCurveTo(size * 1.3, -size * 0.2, size * 0.6, size * 0.9); ctx.quadraticCurveTo(0, size * 1.5, -size * 0.6, size * 0.9); ctx.quadraticCurveTo(-size * 1.3, -size * 0.2, 0, -size * 1.5); ctx.fill();
+  } else if (kind === 'void') {
+    ctx.fillStyle = col.edge; ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = col.mid; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.stroke();
+    ctx.rotate(t * 0.15); ctx.strokeStyle = col.core; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 0, size * 0.62, 0.3, 2.4); ctx.stroke();
+    ctx.fillStyle = col.core; ctx.beginPath(); ctx.arc(0, 0, size * 0.22, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'solar') {
+    ctx.rotate(t * 0.05);
+    ctx.fillStyle = col.mid + 'aa';
+    for (let i = 0; i < 8; i++) { ctx.save(); ctx.rotate(i * Math.PI / 4); ctx.beginPath(); ctx.moveTo(-size * 0.35, -size * 0.9); ctx.lineTo(0, -size * 2); ctx.lineTo(size * 0.35, -size * 0.9); ctx.closePath(); ctx.fill(); ctx.restore(); }
+    const g = ctx.createRadialGradient(0, 0, 1, 0, 0, size * 1.1);
+    g.addColorStop(0, col.core); g.addColorStop(0.55, col.mid); g.addColorStop(1, col.edge);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, size * 1.1, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === 'streak' || kind === 'rainbow') {
+    const len = size * 2.6;
+    const g = ctx.createLinearGradient(0, -len, 0, len);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.25, col.mid); g.addColorStop(0.55, col.core); g.addColorStop(1, col.edge);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-size * 0.75, -len, size * 1.5, len * 1.9, size * 0.7); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(-size * 0.28, -len * 0.7, size * 0.56, len * 1.4, size * 0.3); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Player -----------------------------------------------------------------
+// look: {skin, gun, reload (0..1), recoil (0..1), t, noBar, noShadow}
+
+function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, invincible, isLocal, look) {
+  look = look || {};
+  const t = look.t !== undefined ? look.t : raidG.frame;
+  const sk = MQ_SKIN_MAP[look.skin] || MQ_SKIN_MAP.skin_classic;
+  const classic = sk.id === 'skin_classic';
+  const cx = x + w / 2;
+  const baseY = y;
+  const c = { x: x, y: y, w: w, h: h, cx: cx, facing: facing, t: t };
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  if (!look.noShadow) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + h + 4, w / 2 + 4, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (sk.back) { ctx.save(); sk.back(ctx, c); ctx.restore(); }
+
+  // Held gun is drawn first when it sits behind the body (facing away is never the case, so it is in front below).
+  ctx.shadowBlur = isLocal ? 15 : 10;
+  ctx.shadowColor = shield ? '#66ccff' : (isLocal ? '#4488ff' : '#224466');
+
+  let top, bottom;
+  if (shield) { top = '#66ddff'; bottom = '#3399dd'; }
+  else if (invincible > 0 && invincible % 6 < 3) { top = '#ffaa88'; bottom = '#dd6644'; }
+  else if (classic) { top = isLocal ? '#ffcc88' : '#88aaff'; bottom = isLocal ? '#dd8844' : '#446688'; }
+  else if (sk.bodyDyn) { const cc = sk.bodyDyn(t); top = cc[0]; bottom = cc[1]; }
+  else { top = sk.body[0]; bottom = sk.body[1]; }
+  const bodyGrad = ctx.createLinearGradient(x, baseY, x, baseY + h);
+  bodyGrad.addColorStop(0, top);
+  bodyGrad.addColorStop(1, bottom);
+  ctx.fillStyle = bodyGrad;
+
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(x + r, baseY + 4);
+  ctx.lineTo(x + w - r, baseY + 4);
+  ctx.quadraticCurveTo(x + w, baseY + 4, x + w, baseY + 8);
+  ctx.lineTo(x + w, baseY + h - 4);
+  ctx.quadraticCurveTo(x + w, baseY + h, x + w - r, baseY + h);
+  ctx.lineTo(x + r, baseY + h);
+  ctx.quadraticCurveTo(x, baseY + h, x, baseY + h - 4);
+  ctx.lineTo(x, baseY + 8);
+  ctx.quadraticCurveTo(x, baseY + 4, x + r, baseY + 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  if (sk.bodyDeco && !shield) { ctx.save(); sk.bodyDeco(ctx, c); ctx.restore(); }
+  ctx.strokeStyle = '#1a1a33';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // head
+  ctx.shadowBlur = isLocal ? 10 : 5;
+  ctx.shadowColor = '#222255';
+  const hc = sk.head || ['#ffddbb', '#cc9966'];
+  const headGrad = ctx.createRadialGradient(cx - 4, baseY - 16, 2, cx, baseY - 8, 22);
+  headGrad.addColorStop(0, hc[0]);
+  headGrad.addColorStop(1, hc[1]);
+  ctx.fillStyle = headGrad;
+  ctx.beginPath();
+  ctx.arc(cx, baseY - 8, 22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#1a1a33';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  if (sk.preFace) { ctx.save(); sk.preFace(ctx, c); ctx.restore(); }
+
+  if (!sk.noFace) {
+    const eyeX = facing > 0 ? 4 : -4;
+    ctx.fillStyle = 'white';
+    ctx.beginPath(); ctx.ellipse(cx - 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(cx - 6 + eyeX, baseY - 12, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 10 + eyeX, baseY - 12, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.beginPath(); ctx.arc(cx - 4 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 12 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#884422';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cx, baseY, 8, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+  }
+
+  if (classic) {
+    ctx.fillStyle = '#ff4444';
+    ctx.shadowBlur = 5;
+    ctx.shadowColor = '#ff0000';
+    ctx.beginPath(); ctx.arc(cx, baseY - 30, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff8888';
+    ctx.beginPath(); ctx.arc(cx - 1, baseY - 31, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  if (sk.deco) { ctx.save(); sk.deco(ctx, c); ctx.restore(); }
+
+  // arm + gun (the gun pivots at the hand; bullets leave from the muzzle - see raidGunMuzzle)
+  if (!look.noGun) {
+    const gx = cx + facing * RAID_GUN_OFFSET_X, gy = baseY + RAID_GUN_PIVOT_Y;
+    ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
+    ctx.strokeStyle = bottom; ctx.lineWidth = 4.6;
+    ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
+    mqDrawGun(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, t);
+    ctx.fillStyle = hc[0]; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(gx, gy + 1, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+
+  if (shield) {
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = '#66ddff';
+    ctx.strokeStyle = 'rgba(100, 220, 255, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.arc(cx, baseY + 8, 40, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    for (let i = 0; i < 8; i++) {
+      const angle = Date.now() / 1000 + i * 0.8;
+      ctx.fillStyle = `rgba(200, 240, 255, ${0.3 + 0.3 * Math.sin(angle * 2)})`;
+      ctx.beginPath(); ctx.arc(cx + Math.cos(angle) * 36, baseY + 8 + Math.sin(angle) * 36, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  ctx.shadowBlur = 0;
+  if (!look.noBar) {
+    ctx.fillStyle = '#1a1a33';
+    ctx.fillRect(x - 4, baseY - 42 - (sk.barLift || 0), w + 8, 6);
+    const healthPercent = health / maxHealth;
+    ctx.fillStyle = healthPercent > 0.6 ? '#44dd88' : (healthPercent > 0.3 ? '#ffcc44' : '#ff3b6f');
+    ctx.fillRect(x - 4, baseY - 42 - (sk.barLift || 0), (w + 8) * healthPercent, 6);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - 4, baseY - 42 - (sk.barLift || 0), w + 8, 6);
+  }
+
+  // reload progress ring above the head
+  if (look.reload > 0) {
+    const ry = baseY - 62 - (sk.barLift || 0);
+    ctx.fillStyle = 'rgba(10,10,30,0.75)';
+    ctx.beginPath(); ctx.arc(cx, ry, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(cx, ry, 9.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#ffd84d'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, ry, 9.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * look.reload); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---- Shop previews ------------------------------------------------------------
+
+function mqDrawItemPreview(canvas, itemId, t, opts) {
+  const item = MQ_ITEM_MAP[itemId];
+  if (!item || !canvas) return;
+  opts = opts || {};
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const rar = MQ_RARITY[item.rarity];
+  const g = ctx.createRadialGradient(W / 2, H * 0.55, 4, W / 2, H * 0.55, W * 0.72);
+  g.addColorStop(0, rar.glow);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  if (item.type === 'skin') {
+    const s = opts.scale || 1.22;
+    ctx.translate(W / 2 - 6, H * 0.71);
+    ctx.scale(s, s);
+    const bob = Math.sin(t * 0.06) * 1.5;
+    const eq = (typeof mqProfile !== 'undefined' && mqProfile.equipped.gun) || 'gun_standard';
+    drawPlayerCuphead(ctx, -18, -24 + bob, 36, 48, 1, 5, 5, false, 0, true,
+      { skin: item.id, gun: opts.gun || eq, t: t, noBar: true, noShadow: true });
+  } else {
+    const s = opts.scale || 1.7;
+    ctx.translate(W / 2 - 8, H * 0.8);
+    ctx.rotate(0.42);
+    ctx.scale(s, s);
+    ctx.translate(0, Math.sin(t * 0.06) * 1.2);
+    mqDrawGun(ctx, item.id, 0, 0, 1, 0, 0, t);
+    ctx.save();
+    ctx.translate(0, -60);
+    drawPlayerBullet(ctx, { x: 0, y: 0, vx: 0, vy: -6, r: 6, gun: item.id, t: t });
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+
+// ============================================================
+// PROFILE: COINS, OWNED ITEMS, EQUIPPED ITEMS (saved in this browser)
+// ============================================================
+
+const MQ_PROFILE_KEY = 'mathquest_raid_profile_v1';
+// Coins for beating a boss; tougher difficulties pay more. Hearts left add a small bonus.
+const MQ_COIN_REWARD = { easy: 60, normal: 120, hard: 250 };
+const MQ_HEART_BONUS = 10;
+
+function mqDefaultProfile() {
+  return {
+    v: 1,
+    coins: 0,
+    owned: { skin_classic: 1, gun_standard: 1 },
+    equipped: { skin: 'skin_classic', gun: 'gun_standard' },
+    stats: { crates: 0, raids: 0 }
+  };
+}
+
+function mqLoadProfile() {
+  const p = mqDefaultProfile();
+  try {
+    const raw = localStorage.getItem(MQ_PROFILE_KEY);
+    if (!raw) return p;
+    const s = JSON.parse(raw);
+    if (typeof s.coins === 'number' && s.coins >= 0) p.coins = Math.floor(s.coins);
+    if (s.owned && typeof s.owned === 'object') {
+      Object.keys(s.owned).forEach(id => { if (MQ_ITEM_MAP[id] && s.owned[id] > 0) p.owned[id] = Math.floor(s.owned[id]); });
+    }
+    if (s.equipped) {
+      if (MQ_SKIN_MAP[s.equipped.skin] && p.owned[s.equipped.skin]) p.equipped.skin = s.equipped.skin;
+      if (MQ_GUN_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
+    }
+    if (s.stats) {
+      p.stats.crates = Math.floor(s.stats.crates) || 0;
+      p.stats.raids = Math.floor(s.stats.raids) || 0;
+    }
+  } catch (e) { /* storage unavailable or corrupt - fall back to a fresh profile */ }
+  return p;
+}
+
+let mqProfile = mqLoadProfile();
+
+function mqSaveProfile() {
+  try { localStorage.setItem(MQ_PROFILE_KEY, JSON.stringify(mqProfile)); } catch (e) { /* ignore */ }
+}
+
+function mqEquippedIds() {
+  return { skin: mqProfile.equipped.skin, gun: mqProfile.equipped.gun };
+}
+
+function mqRefreshCoinUI() {
+  document.querySelectorAll('.mq-coin-value').forEach(el => { el.textContent = mqProfile.coins.toLocaleString(); });
+}
+
+function mqAwardRaidVictory() {
+  const base = MQ_COIN_REWARD[currentDifficulty] || MQ_COIN_REWARD.normal;
+  const hearts = Math.max(0, Math.min(5, raidLocal.health));
+  const bonus = hearts * MQ_HEART_BONUS;
+  const total = base + bonus;
+  mqProfile.coins += total;
+  mqProfile.stats.raids++;
+  mqSaveProfile();
+  mqRefreshCoinUI();
+  return { coins: total, base: base, bonus: bonus, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins };
+}
+
+let raidRewardGiven = false;
+let raidLastReward = null;
+// Called every frame from the raid loop: pays out exactly once per victory.
+function mqCheckRaidReward() {
+  if (raidG.victory) {
+    if (!raidRewardGiven) { raidRewardGiven = true; raidLastReward = mqAwardRaidVictory(); }
+  } else {
+    raidRewardGiven = false;
+    if (!raidG.gameOver) raidLastReward = null;
+  }
+}
+
+// ============================================================
+// CRATES
+// ============================================================
+// Each crate lists rarity weights and an optional type/tag filter. Every item in the crate's
+// pool that matches gets an equal share of its rarity's weight, so the odds shown are exact.
+
+const MQ_CRATES = [
+  { id: 'crate_starter', name: 'Starter Crate', price: 100, emoji: '⭐',
+    blurb: 'A bit of everything. Mostly common finds, with a small shot at something special.',
+    types: ['skin', 'gun'], weights: { common: 64, uncommon: 27, rare: 8, epic: 1 },
+    art: { wood: '#c98a45', wood2: '#8a5424', trim: '#4a2a10', metal: '#e6c47a', glow: '#ffd08a' } },
+  { id: 'crate_hero', name: 'Hero Crate', price: 250, emoji: '🦸',
+    blurb: 'Player skins only. No commons - every drop is uncommon or better.',
+    types: ['skin'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
+    art: { wood: '#4a86e8', wood2: '#23438f', trim: '#0f1f4d', metal: '#bcd4ff', glow: '#8fb8ff' } },
+  { id: 'crate_arsenal', name: 'Arsenal Crate', price: 250, emoji: '🔫',
+    blurb: 'Gun skins only, with bullet styles and trails to match.',
+    types: ['gun'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
+    art: { wood: '#7a8a9e', wood2: '#404c5e', trim: '#151b26', metal: '#d6dde8', glow: '#a9c7ee' } },
+  { id: 'crate_cosmic', name: 'Cosmic Crate', price: 400, emoji: '🌌',
+    blurb: 'Space-themed skins and guns only. A tighter pool means better odds on each item.',
+    tags: ['cosmic'], weights: { rare: 60, epic: 32, legendary: 8 },
+    art: { wood: '#6a45c8', wood2: '#2c1a72', trim: '#120a38', metal: '#e0d0ff', glow: '#b9a6ff' } },
+  { id: 'crate_legend', name: 'Legend Crate', price: 700, emoji: '👑',
+    blurb: 'Only rare or better, and the best odds of a legendary.',
+    types: ['skin', 'gun'], weights: { rare: 46, epic: 39, legendary: 15 },
+    art: { wood: '#f0b429', wood2: '#a86a0a', trim: '#5a3500', metal: '#fff1b0', glow: '#ffe27a' } }
+];
+const MQ_CRATE_MAP = {};
+MQ_CRATES.forEach(c => { MQ_CRATE_MAP[c.id] = c; });
+
+function mqCratePool(crate) {
+  const byRarity = {};
+  MQ_ITEMS.forEach(item => {
+    if (item.isDefault) return;
+    if (crate.types && crate.types.indexOf(item.type) < 0) return;
+    if (crate.tags && !(item.tags || []).some(tg => crate.tags.indexOf(tg) >= 0)) return;
+    if (!(item.rarity in crate.weights)) return;
+    (byRarity[item.rarity] = byRarity[item.rarity] || []).push(item);
+  });
+  let total = 0;
+  Object.keys(byRarity).forEach(r => { total += crate.weights[r]; });
+  const pool = [];
+  MQ_RARITY_ORDER.forEach(r => {
+    if (!byRarity[r]) return;
+    const rp = crate.weights[r] / total;
+    byRarity[r].forEach(item => pool.push({ item: item, prob: rp / byRarity[r].length, rarityProb: rp }));
+  });
+  return pool;
+}
+
+function mqRollCrate(crate) {
+  const pool = mqCratePool(crate);
+  let roll = Math.random();
+  for (let i = 0; i < pool.length; i++) {
+    roll -= pool[i].prob;
+    if (roll <= 0) return pool[i].item;
+  }
+  return pool[pool.length - 1].item;
+}
+
+function mqFmtPct(p) {
+  const v = p * 100;
+  return (v >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, '') + '%';
+}
+
+let mqCrateSvgCount = 0;
+function mqCrateSVG(crate) {
+  const a = crate.art;
+  const n = ++mqCrateSvgCount;
+  return `
+<svg viewBox="0 0 160 150" class="mq-crate-svg" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cw${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a.wood}"/><stop offset="1" stop-color="${a.wood2}"/></linearGradient>
+    <linearGradient id="cl${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a.wood}"/><stop offset="1" stop-color="${a.wood2}"/></linearGradient>
+    <radialGradient id="cg${n}"><stop offset="0" stop-color="${a.glow}" stop-opacity="0.75"/><stop offset="1" stop-color="${a.glow}" stop-opacity="0"/></radialGradient>
+  </defs>
+  <circle cx="80" cy="82" r="70" fill="url(#cg${n})" class="mq-crate-glow"/>
+  <ellipse cx="80" cy="138" rx="58" ry="8" fill="rgba(0,0,0,0.35)"/>
+  <rect x="26" y="70" width="108" height="64" rx="8" fill="url(#cw${n})" stroke="${a.trim}" stroke-width="4"/>
+  <path d="M26 92 H134 M26 113 H134" stroke="${a.trim}" stroke-width="2" opacity="0.5"/>
+  <rect x="44" y="70" width="12" height="64" fill="${a.metal}" stroke="${a.trim}" stroke-width="3"/>
+  <rect x="104" y="70" width="12" height="64" fill="${a.metal}" stroke="${a.trim}" stroke-width="3"/>
+  <g class="mq-crate-lid">
+    <path d="M22 74 Q22 34 80 34 Q138 34 138 74 Z" fill="url(#cl${n})" stroke="${a.trim}" stroke-width="4"/>
+    <rect x="44" y="37" width="12" height="37" fill="${a.metal}" stroke="${a.trim}" stroke-width="3"/>
+    <rect x="104" y="37" width="12" height="37" fill="${a.metal}" stroke="${a.trim}" stroke-width="3"/>
+    <path d="M40 52 Q80 40 120 52" stroke="rgba(255,255,255,0.35)" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </g>
+  <rect x="66" y="66" width="28" height="26" rx="5" fill="${a.metal}" stroke="${a.trim}" stroke-width="3.5"/>
+  <circle cx="80" cy="76" r="4.5" fill="${a.trim}"/>
+  <rect x="78" y="77" width="4" height="9" rx="2" fill="${a.trim}"/>
+  <text x="80" y="122" text-anchor="middle" font-size="22">${crate.emoji}</text>
+</svg>`;
+}
+
+// ============================================================
+// SHOP UI
+// ============================================================
+
+let mqShopTab = 'crates';
+let mqInvFilter = 'all';
+let mqHideLocked = false;
+let mqPreviews = [];
+let mqTickTime = 0;
+let mqTickHandle = null;
+
+function mqEl(id) { return document.getElementById(id); }
+
+function mqToast(msg) {
+  let t = mqEl('mqToast');
+  if (!t) { t = document.createElement('div'); t.id = 'mqToast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(mqToast._h);
+  mqToast._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function mqOnShopOpen() {
+  mqRefreshCoinUI();
+  mqSetTab(mqShopTab);
+  mqStartTick();
+}
+
+function mqSetTab(tab) {
+  mqShopTab = tab;
+  mqEl('shopTabCrates').classList.toggle('active', tab === 'crates');
+  mqEl('shopTabInv').classList.toggle('active', tab === 'inv');
+  mqEl('shopCrates').style.display = tab === 'crates' ? 'block' : 'none';
+  mqEl('shopInventory').style.display = tab === 'inv' ? 'block' : 'none';
+  mqPreviews = mqPreviews.filter(p => p.modal);
+  if (tab === 'crates') mqRenderCrates(); else mqRenderInventory();
+}
+
+function mqRegisterPreview(canvas, itemId, extra) {
+  mqPreviews.push(Object.assign({ canvas: canvas, itemId: itemId }, extra || {}));
+  mqDrawItemPreview(canvas, itemId, mqTickTime, extra);
+}
+
+function mqRenderCrates() {
+  const grid = mqEl('crateGrid');
+  const best = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary' };
+  grid.innerHTML = MQ_CRATES.map(crate => {
+    const pool = mqCratePool(crate);
+    const top = pool.reduce((m, e) => Math.max(m, MQ_RARITY_ORDER.indexOf(e.item.rarity)), 0);
+    const kinds = [];
+    if (!crate.types || crate.types.indexOf('skin') >= 0) kinds.push('🧍 Player skins');
+    if (!crate.types || crate.types.indexOf('gun') >= 0) kinds.push('🔫 Gun skins');
+    const afford = mqProfile.coins >= crate.price;
+    return `
+      <div class="crate-card" style="--glow:${crate.art.glow}">
+        <div class="crate-art">${mqCrateSVG(crate)}</div>
+        <div class="crate-name">${crate.name}</div>
+        <div class="crate-blurb">${crate.blurb}</div>
+        <div class="crate-chips">
+          ${kinds.map(k => `<span class="crate-chip">${k}</span>`).join('')}
+          <span class="crate-chip" style="border-color:${MQ_RARITY[MQ_RARITY_ORDER[top]].color};color:${MQ_RARITY[MQ_RARITY_ORDER[top]].color}">Up to ${best[MQ_RARITY_ORDER[top]]}</span>
+          <span class="crate-chip">${pool.length} items</span>
+        </div>
+        <div class="crate-actions">
+          <button class="crate-buy ${afford ? '' : 'cant'}" onclick="mqOpenCrate('${crate.id}')">🪙 ${crate.price} · Open</button>
+          <button class="crate-odds" onclick="mqShowOdds('${crate.id}')">📊 Odds</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function mqEnsureModal() {
+  let m = mqEl('mqModal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'mqModal';
+    m.className = 'mq-modal';
+    m.innerHTML = '<div class="mq-modal-card" id="mqModalCard"></div>';
+    m.addEventListener('mousedown', (e) => { if (e.target === m && !m.dataset.locked) mqCloseModal(); });
+    document.body.appendChild(m);
+  }
+  return m;
+}
+
+function mqCloseModal() {
+  const m = mqEl('mqModal');
+  if (!m) return;
+  m.classList.remove('open');
+  delete m.dataset.locked;
+  mqPreviews = mqPreviews.filter(p => !p.modal);
+  clearTimeout(mqOpenTimers.a); clearTimeout(mqOpenTimers.b); clearTimeout(mqOpenTimers.c);
+  mqEl('mqModalCard').innerHTML = '';
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const m = mqEl('mqModal'); if (m && m.classList.contains('open') && !m.dataset.locked) mqCloseModal(); } });
+
+function mqShowOdds(crateId) {
+  const crate = MQ_CRATE_MAP[crateId];
+  const pool = mqCratePool(crate);
+  const m = mqEnsureModal();
+  let html = `<button class="mq-x" onclick="mqCloseModal()">✕</button>
+    <h2 class="mq-odds-title">📊 ${crate.name} - Drop Rates</h2>
+    <p class="mq-odds-sub">Each open costs 🪙 ${crate.price}. Every item's chance is shown below and they add up to 100%.</p>`;
+  MQ_RARITY_ORDER.slice().reverse().forEach(r => {
+    const rows = pool.filter(e => e.item.rarity === r);
+    if (!rows.length) return;
+    const rar = MQ_RARITY[r];
+    html += `<div class="mq-odds-group" style="--rc:${rar.color}">
+      <div class="mq-odds-head"><span class="mq-odds-rar">${rar.name}</span><span class="mq-odds-total">${mqFmtPct(rows[0].rarityProb)} total</span></div>
+      ${rows.map(e => `<div class="mq-odds-row"><span class="mq-odds-name">${e.item.type === 'skin' ? '🧍' : '🔫'} ${e.item.name}</span><span class="mq-odds-pct">${mqFmtPct(e.prob)}</span></div>`).join('')}
+    </div>`;
+  });
+  html += `<p class="mq-odds-foot">Duplicates aren't wasted: they convert to coins - ${MQ_RARITY_ORDER.map(r => MQ_RARITY[r].name + ' ' + MQ_RARITY[r].refund).join(', ')}.</p>`;
+  mqEl('mqModalCard').innerHTML = html;
+  m.classList.add('open');
+}
+
+const mqOpenTimers = { a: 0, b: 0, c: 0 };
+
+function mqOpenCrate(crateId) {
+  const crate = MQ_CRATE_MAP[crateId];
+  if (mqProfile.coins < crate.price) {
+    mqToast('Not enough coins - you need ' + (crate.price - mqProfile.coins) + ' more. Beat a raid boss to earn some!');
+    return;
+  }
+  mqProfile.coins -= crate.price;
+  const item = mqRollCrate(crate);
+  const dup = (mqProfile.owned[item.id] || 0) > 0;
+  const refund = dup ? MQ_RARITY[item.rarity].refund : 0;
+  mqProfile.owned[item.id] = (mqProfile.owned[item.id] || 0) + 1;
+  mqProfile.coins += refund;
+  mqProfile.stats.crates++;
+  mqSaveProfile();
+  mqRefreshCoinUI();
+  mqShowOpening(crate, item, dup, refund);
+}
+
+function mqShowOpening(crate, item, dup, refund) {
+  const m = mqEnsureModal();
+  m.dataset.locked = '1';
+  mqPreviews = mqPreviews.filter(p => !p.modal);
+  const rar = MQ_RARITY[item.rarity];
+  mqEl('mqModalCard').innerHTML = `
+    <div class="mq-open" style="--rc:${rar.color};--rg:${rar.glow}">
+      <div class="mq-open-stage" id="mqStage">
+        <div class="mq-crate-wrap shaking" id="mqCrateWrap">${mqCrateSVG(crate)}</div>
+        <div class="mq-open-hint">Opening...</div>
+      </div>
+      <div class="mq-open-flash" id="mqFlash"></div>
+      <div class="mq-open-reveal" id="mqReveal" style="display:none"></div>
+    </div>`;
+  m.classList.add('open');
+
+  const reveal = () => {
+    clearTimeout(mqOpenTimers.a); clearTimeout(mqOpenTimers.b); clearTimeout(mqOpenTimers.c);
+    mqEl('mqStage').style.display = 'none';
+    const fl = mqEl('mqFlash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
+    const rv = mqEl('mqReveal');
+    const canAgain = mqProfile.coins >= crate.price;
+    rv.style.display = 'flex';
+    rv.innerHTML = `
+      <div class="mq-rarity-banner">${rar.name.toUpperCase()}${item.rarity === 'legendary' ? ' ✦' : ''}</div>
+      <canvas id="mqRevealCanvas" width="240" height="270"></canvas>
+      <div class="mq-item-name">${item.name}</div>
+      <div class="mq-item-type">${item.type === 'skin' ? 'Player Skin' : 'Gun Skin'}</div>
+      <div class="mq-item-status ${dup ? 'dup' : 'new'}">${dup ? 'Duplicate - converted to +' + refund + ' 🪙' : '✨ NEW! Added to your items'}</div>
+      <div class="mq-reveal-actions">
+        <button class="crate-buy" onclick="mqEquipItem('${item.id}'); this.textContent='Equipped ✓'; this.disabled=true;">Equip</button>
+        <button class="crate-buy ${canAgain ? '' : 'cant'}" onclick="mqCloseModal(); mqOpenCrate('${crate.id}')">Open Another · 🪙 ${crate.price}</button>
+        <button class="crate-odds" onclick="mqCloseModal(); mqAfterOpen()">Done</button>
+      </div>`;
+    const canvas = mqEl('mqRevealCanvas');
+    mqRegisterPreview(canvas, item.id, { modal: true, scale: item.type === 'skin' ? 1.85 : 2.5 });
+    mqBurst(rv, item.rarity);
+    delete m.dataset.locked;
+  };
+
+  mqEl('mqStage').addEventListener('click', reveal);
+  mqOpenTimers.a = setTimeout(() => { const w = mqEl('mqCrateWrap'); if (w) { w.classList.remove('shaking'); w.classList.add('opening'); } }, 1500);
+  mqOpenTimers.b = setTimeout(reveal, 2000);
+}
+
+function mqAfterOpen() {
+  if (mqShopTab === 'crates') mqRenderCrates(); else mqRenderInventory();
+}
+
+function mqBurst(host, rarity) {
+  const n = { common: 0, uncommon: 8, rare: 14, epic: 26, legendary: 44 }[rarity];
+  const color = MQ_RARITY[rarity].color;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('span');
+    s.className = 'mq-conf';
+    const ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 190;
+    s.style.setProperty('--dx', Math.cos(ang) * dist + 'px');
+    s.style.setProperty('--dy', Math.sin(ang) * dist - 40 + 'px');
+    s.style.background = i % 3 === 0 ? '#ffffff' : color;
+    s.style.animationDelay = (Math.random() * 0.15) + 's';
+    host.appendChild(s);
+  }
+}
+
+function mqEquipItem(itemId) {
+  const item = MQ_ITEM_MAP[itemId];
+  if (!item || !mqProfile.owned[itemId]) return;
+  mqProfile.equipped[item.type] = itemId;
+  mqSaveProfile();
+  if (mqShopTab === 'inv') mqRenderInventory();
+}
+
+function mqRenderInventory() {
+  mqPreviews = mqPreviews.filter(p => p.modal);
+  const ownedCount = MQ_ITEMS.filter(i => mqProfile.owned[i.id]).length;
+  mqEl('invCount').textContent = ownedCount + ' / ' + MQ_ITEMS.length + ' collected';
+  ['all', 'skin', 'gun'].forEach(f => mqEl('invF_' + f).classList.toggle('active', mqInvFilter === f));
+  mqEl('invHideLocked').checked = mqHideLocked;
+
+  const eqSkin = MQ_SKIN_MAP[mqProfile.equipped.skin], eqGun = MQ_GUN_MAP[mqProfile.equipped.gun];
+  mqEl('loadoutSkin').innerHTML = `<span style="color:${MQ_RARITY[eqSkin.rarity].color}">${eqSkin.name}</span> <small>${MQ_RARITY[eqSkin.rarity].name}</small>`;
+  mqEl('loadoutGun').innerHTML = `<span style="color:${MQ_RARITY[eqGun.rarity].color}">${eqGun.name}</span> <small>${MQ_RARITY[eqGun.rarity].name}</small>`;
+
+  const items = MQ_ITEMS.filter(i => (mqInvFilter === 'all' || i.type === mqInvFilter) && (!mqHideLocked || mqProfile.owned[i.id]))
+    .sort((a, b) => (a.type === b.type ? 0 : a.type === 'skin' ? -1 : 1) || MQ_RARITY_ORDER.indexOf(b.rarity) - MQ_RARITY_ORDER.indexOf(a.rarity));
+  const grid = mqEl('invGrid');
+  grid.innerHTML = items.map(item => {
+    const owned = mqProfile.owned[item.id] || 0;
+    const rar = MQ_RARITY[item.rarity];
+    const eq = mqProfile.equipped[item.type] === item.id;
+    return `<div class="inv-card ${owned ? '' : 'locked'} ${eq ? 'equipped' : ''}" style="--rc:${rar.color};--rg:${rar.glow}" data-item="${item.id}">
+      <div class="inv-rarity">${rar.name}${owned > 1 ? ' · x' + owned : ''}</div>
+      <canvas width="150" height="170" data-item="${item.id}"></canvas>
+      ${owned ? '' : '<div class="inv-lock">🔒</div>'}
+      <div class="inv-name">${item.name}</div>
+      <div class="inv-type">${item.type === 'skin' ? 'Player Skin' : 'Gun Skin'}</div>
+      ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? 'Equipped ✓' : 'Equip'}</button>` : '<div class="inv-hint">Find in crates</div>'}
+    </div>`;
+  }).join('') || '<p class="inv-empty">Nothing here yet - open some crates!</p>';
+  grid.querySelectorAll('canvas').forEach(cv => mqRegisterPreview(cv, cv.dataset.item, { locked: !mqProfile.owned[cv.dataset.item] }));
+  mqRegisterLoadout();
+}
+
+function mqSetFilter(f) { mqInvFilter = f; mqRenderInventory(); }
+function mqToggleHideLocked(v) { mqHideLocked = v; mqRenderInventory(); }
+
+// The big animated loadout preview: idle, fire a few shots, then reload - looping.
+function mqRegisterLoadout() {
+  mqPreviews = mqPreviews.filter(p => !p.loadout);
+  mqPreviews.push({ canvas: mqEl('loadoutCanvas'), loadout: true });
+}
+
+function mqDrawLoadout(canvas, t) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const skin = mqProfile.equipped.skin, gun = mqProfile.equipped.gun;
+  const rar = MQ_RARITY[MQ_SKIN_MAP[skin].rarity];
+  const g = ctx.createRadialGradient(W / 2, H * 0.6, 6, W / 2, H * 0.6, W * 0.75);
+  g.addColorStop(0, rar.glow); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.beginPath(); ctx.ellipse(W / 2, H - 34, 70, 10, 0, 0, Math.PI * 2); ctx.fill();
+
+  const cycle = 300, f = t % cycle;
+  const shots = [30, 52, 74, 96];
+  let recoil = 0;
+  shots.forEach(s => { if (f >= s && f < s + 8) recoil = Math.max(recoil, 1 - (f - s) / 8); });
+  const reload = f >= 150 && f < 250 ? (f - 150) / 100 : 0;
+
+  ctx.save();
+  ctx.translate(W / 2 - 6, H - 40);
+  ctx.scale(2.3, 2.3);
+  drawPlayerCuphead(ctx, -18, -48, 36, 48, 1, 5, 5, false, 0, true, { skin: skin, gun: gun, reload: reload, recoil: recoil, t: t, noBar: true, noShadow: true });
+  // bullets fly up from the muzzle
+  const mx = RAID_GUN_OFFSET_X, my = -48 + RAID_GUN_PIVOT_Y - RAID_GUN_LENGTH;
+  shots.forEach(s => {
+    const age = f - s;
+    if (age >= 0 && age < 40) drawPlayerBullet(ctx, { x: mx, y: my - age * 5, vx: 0, vy: -6, r: 6, gun: gun, t: t });
+  });
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(reload > 0 ? 'RELOADING...' : (f < 150 ? 'FIRING' : 'READY'), W / 2, 22);
+  ctx.textAlign = 'left';
+}
+
+function mqStartTick() {
+  if (mqTickHandle) return;
+  const loop = () => {
+    const shop = mqEl('shop');
+    const modalOpen = mqEl('mqModal') && mqEl('mqModal').classList.contains('open');
+    if (!shop || (!shop.classList.contains('active') && !modalOpen)) { mqTickHandle = null; return; }
+    mqTickTime++;
+    if (mqTickTime % 2 === 0) {
+      mqPreviews = mqPreviews.filter(p => p.canvas && document.body.contains(p.canvas));
+      mqPreviews.forEach(p => {
+        if (p.loadout) mqDrawLoadout(p.canvas, mqTickTime);
+        else {
+          mqDrawItemPreview(p.canvas, p.itemId, mqTickTime, p);
+          if (p.locked) {
+            const cx = p.canvas.getContext('2d');
+            cx.fillStyle = 'rgba(12,12,28,0.72)';
+            cx.fillRect(0, 0, p.canvas.width, p.canvas.height);
+          }
+        }
+      });
+    }
+    mqTickHandle = requestAnimationFrame(loop);
+  };
+  mqTickHandle = requestAnimationFrame(loop);
+}
+
+mqRefreshCoinUI();
 
 </script>
 
