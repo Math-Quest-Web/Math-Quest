@@ -83,3 +83,7 @@ desktop.ini
 # Temporary files
 *.tmp
 *.cache
+
+# Playwright output
+test-results/
+playwright-report/
