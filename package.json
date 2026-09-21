@@ -1,0 +1,12 @@
+{
+  "name": "math-quest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Math Quest - tests for the single-file game (see docs/spec.md)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

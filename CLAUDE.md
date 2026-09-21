@@ -23,10 +23,33 @@ hosted on Firebase. The full product description lives in **`docs/spec.md`**.
 
 ## Tests
 
-- Create a test case **before** writing any new function or code, then validate the code against it
-  (also a global rule). The project's self-tests are the `TestSuite` in `index.html` and
-  `test.html`. Note that one older test ("Attack timer resets after attack") already fails and is
-  unrelated - do not treat it as a regression, and do not add to it silently.
+The automated suite lives in `tests/` (Playwright) and runs the real `index.html` in a browser with
+Firebase replaced by an in-memory stub (`tests/support/firebase-stub.js`), so it never touches the
+live project. It runs on **every pull request** via `.github/workflows/tests.yml`.
+
+- Run it: `npm ci` once, then `npm test`. Locally you can reuse an installed Chrome with
+  `PW_CHANNEL=chrome npm test`; CI uses Chromium, so before opening a PR also run
+  `npx playwright install chromium` and `CI=1 npm test` to see what CI will see.
+- **Test first.** Create a test case **before** writing any new function or code, watch it fail,
+  then write the code until it passes (also a global rule).
+- **Tests follow the spec.** Start each test title with the requirement ID(s) it checks, e.g.
+  `test('BOS-11 after its big move ...')`. `tests/spec-coverage.spec.js` fails the build if a
+  Done/Off requirement in `docs/spec.md` has no test, or if a test names an ID that is not in the
+  spec. So: new or changed requirement = spec row + test in the same PR.
+- Where things go: `app.spec.js` (shell, practice, design, community), `lobby.spec.js`,
+  `raid.spec.js` (mechanics, difficulty, rewards), `boss-rules.spec.js` (rules every boss follows),
+  `boss-attacks.spec.js` (each boss's moves), `shop.spec.js` (crates, items, saves),
+  `static.spec.js` (config files), `infra.spec.js` (the test setup).
+- Raid tests do not use the browser's animation loop. `window.T` (`tests/support/page-helpers.js`)
+  starts a raid and steps frames by hand (`T.setupRaid`, `T.step`, `T.prepBoss`, `T.place`,
+  `T.simulate`, `T.seed` for a repeatable RNG). Read `raidG.boss` fresh each time - the game
+  replaces that object whenever it syncs.
+- If a test fails, decide whether the game or the test is wrong. Fix the game if it breaks the spec;
+  fix the test (and the spec) if the requirement really changed. Never delete or loosen a test just
+  to make it pass, and do not skip tests in CI.
+- The older `TestSuite` inside `index.html` (run by `test.html`) is legacy. One of its tests
+  ("Attack timer resets after attack") already fails and is unrelated - do not treat it as a
+  regression. The Playwright fixture disables its 3-second auto-run.
 - For gameplay/UI work, also verify in a browser (see "Local testing") and check the console for
   new errors.
 
