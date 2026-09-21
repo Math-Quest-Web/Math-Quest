@@ -9,9 +9,11 @@ const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 const json = (f) => JSON.parse(read(f));
 
 test.describe('Architecture and hosting (spec section 2)', () => {
-  test('GEN-01 the app is one HTML file with no image assets or local scripts', () => {
+  test('GEN-01 the app is one HTML file plus one image asset (the boss sheet), with no local scripts or stylesheets', () => {
     const html = read('index.html');
     expect(html).not.toMatch(/<img\b/i);
+    const imageRefs = [...new Set([...html.matchAll(/assets\/[\w.-]+\.(?:png|jpe?g|gif|webp|svg)/g)].map((m) => m[0]))];
+    expect(imageRefs).toEqual(['assets/boss-sheet.webp']);
     const localScripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]).filter((s) => !/^https?:/.test(s));
     expect(localScripts).toEqual([]);
     const localCss = [...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]).filter((s) => !/^https?:/.test(s));
