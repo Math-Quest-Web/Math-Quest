@@ -23,13 +23,14 @@ Target audience: kids and students. Tone: friendly, cartoon, no scary content.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| GEN-01 | The whole app is **one file**, `index.html` (HTML, CSS and JS). No build step, no framework. Game art is drawn with canvas paths and CSS; there are no image or sprite assets. | Done |
+| GEN-01 | The app is **one HTML file**, `index.html` (HTML, CSS and JS), plus **one image asset**: the boss sprite sheet `assets/boss-sheet.webp` (BOS-30). No build step, no framework, no local scripts or stylesheets. All other art (players, guns, crates, backgrounds) is drawn with canvas paths and CSS. | Done |
 | GEN-02 | Hosted on Firebase Hosting, project `mathquest-f54b5`, hosting target `mathquest`, live at `https://math-quest-site.web.app`. | Done |
 | GEN-03 | Every push to `main` deploys automatically via GitHub Actions (`.github/workflows/firebase-hosting-merge.yml`). The workflow deploys **hosting only** - not Firestore or Realtime Database rules. | Done |
 | GEN-04 | `index.html` must be served with `Cache-Control: no-cache, max-age=0, must-revalidate` (set in `firebase.json`) so players never run stale JS after a deploy. | Done |
 | GEN-05 | Backends: Firebase Anonymous Auth (identity), Firestore (community sets), Realtime Database (lobbies and raid sync). | Done |
 | GEN-06 | Player progress (coins, owned items, equipped items) is stored in the browser's `localStorage`, not on a server. | Done |
 | GEN-07 | Changes reach `main` through pull requests. Nothing is merged or deployed until the user says so. | Process |
+| GEN-08 | Dev-only files (`tests/`, `docs/`, `node_modules/`, package files, Playwright config, `CLAUDE.md`, `sprites/`) are listed in `firebase.json` `hosting.ignore` so they are never published to the live site. `assets/` is **not** ignored: it is deployed. | Done |
 
 ## 3. App shell and navigation
 
@@ -134,7 +135,7 @@ lives in section `raid`.
 | BOS-04 | **No overlap.** A boss starts its next attack only after the previous animation has finished. The gap between attacks is measured in idle time only. | Done |
 | BOS-05 | Attack gap = `(190 - 20 x phase)` frames x difficulty multiplier (Normal: 170 / 150 / 130). Each fight starts with about 3 s of quiet. | Done |
 | BOS-06 | Attacks never repeat back-to-back. In phase 3 the boss follows a move, 30% of the time, with a second different one after 60 idle frames. | Done |
-| BOS-07 | Projectiles are slow (roughly 2 px/frame) and use fair hitboxes centred on the player. | Done |
+| BOS-07 | **Aimed** projectiles (candy, fangs, void shots) are slow, at most 3 px/frame. **Lobbed** shots (fireballs, bubbles) fly a short, visible arc of at most about 1.6 s to a landing spot; fireballs erupt into a flame pillar there and bubbles pop. All use fair hitboxes centred on the player (see RAI-05). | Done |
 | BOS-08 | **Phases:** phase 2 below 60% HP, phase 3 below 30%. Each change is a 100-frame beat: the boss pulses, is invulnerable (dashed ring), the arena is cleared, and a PHASE banner plays with screen shake. New attacks unlock in phase 2. | Done |
 | BOS-09 | Bosses are untargetable (shots pass through) while faded out or submerged. | Done |
 | BOS-10 | Each boss has its own animations and arena background; all boss animations run on the host and sync through boss state. | Done |
@@ -151,6 +152,28 @@ lives in section `raid`.
 | **The Chained Warden** | 165 | Purple wraith | Chain lash (1): chain flung from its hands to a floor marker (two chains in 2+). Vanish strike (1): slowly fades, materialises on a floor marker, crashes down. Void orb (2+): orb grows in its hands, is thrown, hovers with growing spikes, bursts into 8 slow shots. | Vanish strike |
 | **Trio, the Three-Headed Wyrm** | 180 | Teal sky serpent | Triple volley (1): each head spits a slow fang. Fire spit (1): 2 arcing fireballs (3 in 2+) land on a marker and erupt as flame pillars. Dive bomb (2+): flies over a target, floor shadow grows, dives and crashes. | Dive bomb |
 | **The Glutton** | 160 | Green swamp beast | Belch (1): inflates, lobs slow bubbles at each player. Chomp (1): sinks and fades, swims as a shadow, slowly surfaces on a rippling floor marker, bites. Bubble fan (2+): a spread of bubbles with gaps. Feast: periodically clamps shut and is invulnerable for a telegraphed window. | Chomp |
+
+### 9.3 Per-boss attack requirements
+
+Frame counts are the durations of each animation state (60 frames = 1 second).
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| BOS-20 | **Grinmaw.** Candy spit: inhale 26 frames (body swells), then one shot per player from the mouth. Throne slam: rise 60 frames, slam 5, then two floor shockwaves (one each way, speed 2.4 + 0.3 x phase) and a stun; a jumping player is not hit. Minion summon (phase 2+): after 30 frames two imps are thrown from the hands, land on the floor and scurry at 1.5 px/frame; jumping clears them. | Done |
+| BOS-21 | **Warden.** Chain lash: a marker on the floor, the chain lands about 62 frames later and only hurts standing players; one chain, two (30 frames apart) from phase 2. Vanish strike: fade 50, unseen 40, materialise 45 on a floor marker, strike (hurts within 62 px, grounded), stun, return 40. Void orb (phase 2+): grows 40 frames in the hands, thrown, hovers until frame 135, then 8 evenly spaced slow shots from the orb. | Done |
+| BOS-22 | **Wyrm.** Triple volley: coil, then one fang per head at frames 24, 44 and 64. Fire spit: fireballs at frames 26 and 60 (plus 94 from phase 2) that land on a spot and erupt into a pillar that hurts only after a 32-frame marker and only grounded players within 38 px (a high jump clears it). Dive bomb (phase 2+): fly over the target 45 frames, dive 26 frames, crash (hurts within 78 px, grounded), stun, climb back 50. | Done |
+| BOS-23 | **Glutton.** Belch: inflate 24 frames, then one slow bubble per player that lands on the floor and pops. Chomp: sink and fade 48, swim as a shadow 52, surface on a floor marker 40, bite (hurts within 62 px, grounded), stun, retreat 48. Bubble fan (phase 2+): five bubbles landing more than 100 px apart. Feast: after a warning it clamps shut and is invulnerable for 80 frames; any attack ends the clamp early. | Done |
+
+### 9.4 Boss sprite sheet
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| BOS-30 | Bosses are drawn from `assets/boss-sheet.webp`: 2048 x 2048, 256 px cells, 8 columns, two rows per boss (Devil King, Wyrm, Warden, Glutton in that row order), under 1.5 MB. It is built from `sprites/boss-spritesheet-v2.png` by `sprites/build-game-sheet.js` and loaded from JS (`bossSheetLoad`, called when a raid starts). | Done |
+| BOS-31 | Sixteen frames per boss: idle 1-4, windup, telegraph, attack, recover, hurt, hurt recover, enraged 1-2, special, death 1-3 (death frames are in the sheet but not used yet). `bossSpriteFrame(boss)` picks the frame from synced boss state only (stun, glutton feast, phase change, `anim.state` and `anim.timer`, `raidG.frame`), so every client shows the same frame. Idle changes every 15 frames; phase 3 idle uses the enraged frames. | Done |
+| BOS-32 | Attack timelines use the sheet's poses: windup, then telegraph, then attack, then recover, per the state table `BOSS_SPRITE_STATES`. Grinmaw's summon and the Glutton's clamped-shut feast use the `special` frame. Fading, hidden and submerged states keep the idle art because the game already fades or sinks the boss. | Done |
+| BOS-33 | The sprite is placed so the boss position (`boss.x`, `boss.y`, the hitbox centre and projectile origin) sits on the boss's face or body, at a per-boss scale (`BOSS_SPRITE.bosses`). Hitboxes, speeds and attack timings are **not** changed by the art. | Done |
+| BOS-34 | The old canvas-path boss art stays in the code as a **fallback**: it is used until the sheet has loaded, if it fails to load, or when `RAID_BOSS_SPRITES_ENABLED` is false. | Done |
+| BOS-35 | Vulnerability is still shown by animation only (BOS-12): a stunned sprite boss uses the hurt frames, wobbles, sags and has circling stars. No text or icon. | Done |
 
 ## 10. Rewards, shop and cosmetics
 
@@ -215,13 +238,19 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 | RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed shots, math answers (math off). |
 | `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun), `stats`. |
 
+| ID | Requirement | Status |
+|----|-------------|--------|
+| DAT-01 | `database.rules.json` allows public reads of `lobbies` and `bossRaid/<id>` but requires an authenticated user for writes, and denies everything else. (The rules file exists but is not deployed - see section 12.) | Done |
+
 ## 12. Known issues and decisions
 
 - **Realtime Database rules are not deployed.** `database.rules.json` requires auth for writes, but the deploy workflow only deploys hosting, so the live database is effectively open. Deploying the rules is a separate decision.
 - **Coins and items live in the browser** and can be edited by a determined player. Acceptable for cosmetics; move server-side if coins ever gain real value.
 - **One pre-existing self-test fails:** "Attack timer resets after attack" (`testBossAttack`). It is unrelated to current gameplay and shows up in every console.
 - Four legacy `bossRaid` nodes from an old version (`global` and three long ids) remain; current code never uses them.
-- `sprites/` in the working folder is an untracked boss sprite sheet and is not part of the app.
+- `sprites/` in the working folder is untracked dev tooling and is never deployed. It holds the v1 boss sheet, the v2 boss, player-skin and gun sheets (only the boss sheet is used by the game, via `assets/boss-sheet.webp`), `build-sheets.js` / `build-game-sheet.js` to regenerate them and `verify-sheets.js` to check them.
+- **Sprite bosses are drawn bigger and more detailed than the old art but keep the old hitboxes** (120 x 80). Parts of the art outside the hitbox (Wyrm wings and body, Warden robe) cannot be hit. Telegraph glows that used to be drawn inside the old boss art (throat glow, raised chain, orb) are now only in the sheet frames; floor markers and hazards are unchanged.
+- The sheet's death frames are not shown on victory yet, and the player and gun sheets are not used by the game (skins and guns are still drawn with canvas paths).
 - Lobby host (creator) and raid host (simulation owner) are different concepts and can differ.
 - In a hidden headless browser pane `requestAnimationFrame` does not tick, so game-loop tests must drive frames manually.
 
@@ -229,9 +258,12 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| TST-01 | `index.html` contains a self-test suite (`TestSuite`) and `test.html` runs it in an iframe. New features add tests to it. | Done |
+| TST-01 | `index.html` still contains its older in-page self-test suite (`TestSuite`), run by `test.html`. It is legacy; the spec-based suite below is what CI runs. | Done |
 | TST-02 | Before writing any new function or code, write a test case for it first and validate the code against it (global project rule). | Process |
 | TST-03 | Manual verification for gameplay: run the game locally against the live Firebase project, drive each boss and attack, and check for new console errors. Delete any test lobbies you create. | Process |
+| TST-04 | **Automated tests run on every pull request** (and on pushes to `main`) through `.github/workflows/tests.yml`: `npm ci`, install Chromium, `npm test`. A failing test fails the check. | Done |
+| TST-05 | **The tests follow the spec.** Test titles start with the requirement IDs they check. `tests/spec-coverage.spec.js` fails if any Done/Off requirement has no test, or a test names an ID that is not in this spec. New or changed requirements therefore need a test in the same PR. | Done |
+| TST-06 | Tests load the real `index.html` in a browser with Firebase replaced by an in-memory stub (`tests/support/firebase-stub.js`); no test talks to the live project or needs secrets. The stub mimics Firebase behaviours the game depends on (synchronous local events, `undefined` rejected, empty objects dropped). Locally: `npm ci`, then `PW_CHANNEL=chrome npm test` (or install Chromium and run `npm test`). | Done |
 
 ## 14. Change log
 
@@ -247,3 +279,6 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 | 2026-09 | 20-round reloading, coin rewards, shop with 5 crates, 28 skins, shot relay fix, 2 s stun (PR #7). |
 | 2026-09 | Raid data deleted with its lobby and orphans swept (LOB-09, LOB-10). |
 | 2026-09 | Added `docs/spec.md` and `CLAUDE.md`. |
+| 2026-09 | Added the spec-based Playwright test suite and the "Tests" GitHub Action for every PR (TST-04 to TST-06, GEN-08, DAT-01, BOS-20 to BOS-23); corrected BOS-07 (lobbed shots); fixed skins whose hats/hair overlapped the health bar (ITM-03). |
+| 2026-09 | v2 sprite sheets in untracked `sprites/` (boss 4 x 16 frames, 14 player skins, 14 guns). |
+| 2026-09 | Bosses are drawn from `assets/boss-sheet.webp` with the old art as fallback (BOS-30 to BOS-35); GEN-01 now allows this one image asset. |

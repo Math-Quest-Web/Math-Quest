@@ -3720,6 +3720,7 @@ document.getElementById('raidLeaveBtn').addEventListener('click', leaveLobby);
 function startRaidWithLobby(lobbyId, bossType) {
   // Clean up any existing raid listeners
   cleanupRaid();
+  bossSheetLoad();   // start fetching the boss sprite sheet (BOS-30)
 
   raidG.boss.type = BOSS_DEFS[bossType] ? bossType : (currentBossType || 'grinmaw');
 
@@ -5123,6 +5124,114 @@ function raidSubmitEventAnswer() {
 // CUPHEAD-STYLE DRAWING FUNCTIONS
 // ============================================================
 
+// ============================================================
+// BOSS SPRITE SHEET (spec BOS-30 to BOS-35)
+// Bosses are drawn from assets/boss-sheet.webp (built by sprites/build-game-sheet.js). Until it has
+// loaded - or if it fails, or RAID_BOSS_SPRITES_ENABLED is false - the canvas-path art below is used.
+// ============================================================
+
+let RAID_BOSS_SPRITES_ENABLED = true;
+const BOSS_SPRITE_SRC = 'assets/boss-sheet.webp';
+// cell: px per frame in the sheet. Per boss: row of its first frame, k = canvas px per sheet px, and (ax, ay) =
+// the point of the idle frame that sits on the boss position (boss.x, boss.y), i.e. the hitbox centre.
+const BOSS_SPRITE = {
+  cell: 256, cols: 8,
+  frames: ['idle_1', 'idle_2', 'idle_3', 'idle_4', 'windup', 'telegraph', 'attack', 'recover', 'hurt', 'hurt_recover', 'enraged_1', 'enraged_2', 'special', 'death_1', 'death_2', 'death_3'],
+  bosses: {
+    grinmaw: { row: 0, k: 1.03, ax: 127.5, ay: 102.3 },
+    wyrm: { row: 2, k: 1.45, ax: 127.5, ay: 105.3 },
+    warden: { row: 4, k: 0.86, ax: 128, ay: 99.4 },
+    glutton: { row: 6, k: 1, ax: 127, ay: 156.8 }
+  }
+};
+// anim state -> [[last timer frame, sheet frame], ...]. 'idle' = the idle / enraged loop (fades and
+// submerging keep the idle art because the game already fades or sinks the boss).
+const BOSS_SPRITE_STATES = {
+  grinmaw: {
+    spit: [[8, 'windup'], [26, 'telegraph'], [Infinity, 'attack']],
+    summon: [[30, 'telegraph'], [Infinity, 'special']],
+    windup: [[20, 'windup'], [Infinity, 'telegraph']],
+    slam: [[Infinity, 'attack']],
+    dazed: [[Infinity, 'hurt']],
+    settle: [[Infinity, 'recover']]
+  },
+  warden: {
+    raise: [[16, 'windup'], [Infinity, 'telegraph']],
+    cast: [[16, 'windup'], [Infinity, 'telegraph']],
+    fade: [[Infinity, 'idle']],
+    ghost: [[Infinity, 'idle']],
+    materialize: [[Infinity, 'telegraph']],
+    strike: [[Infinity, 'attack']],
+    dazed: [[Infinity, 'hurt']],
+    return: [[Infinity, 'recover']],
+    settle: [[Infinity, 'recover']]
+  },
+  wyrm: {
+    coil: [[12, 'windup'], [Infinity, 'telegraph']],
+    lunge: [[Infinity, 'attack']],
+    hold: [[Infinity, 'attack']],
+    aim: [[Infinity, 'telegraph']],
+    dive: [[Infinity, 'attack']],
+    crash: [[Infinity, 'attack']],
+    climb: [[Infinity, 'recover']],
+    settle: [[Infinity, 'recover']]
+  },
+  glutton: {
+    inflate: [[10, 'windup'], [Infinity, 'telegraph']],
+    deflate: [[Infinity, 'attack']],
+    sink: [[Infinity, 'idle']],
+    swim: [[Infinity, 'idle']],
+    rise: [[Infinity, 'telegraph']],
+    bite: [[Infinity, 'attack']],
+    dazed: [[Infinity, 'hurt']],
+    retreat: [[Infinity, 'recover']]
+  }
+};
+
+let bossSheetImg = null, bossSheetReady = false;
+
+function bossSheetLoad() {
+  if (bossSheetImg) return;
+  bossSheetImg = new Image();
+  bossSheetImg.onload = () => { bossSheetReady = true; };
+  bossSheetImg.onerror = () => { bossSheetReady = false; };
+  bossSheetImg.src = BOSS_SPRITE_SRC;
+}
+
+// Which sheet frame the boss should show right now (pure: reads only the boss and raidG.frame).
+function bossSpriteFrame(b) {
+  const f = raidG.frame || 0;
+  const idle = () => (b.phase >= 3 ? 'enraged_' + (1 + (Math.floor(f / 12) % 2)) : 'idle_' + (1 + (Math.floor(f / 15) % 4)));
+  if (b.exposed > 0) return (Math.floor(f / 24) % 2) ? 'hurt_recover' : 'hurt';   // stunned: animation only (BOS-12)
+  if (b.type === 'glutton') {
+    if (b.feastTimer > 0) return 'special';   // clamped shut
+    if (b.feastWarning) return 'telegraph';
+  }
+  if (b.transition > 0 && (!b.anim || b.anim.state === 'idle')) return b.phase >= 3 ? idle() : 'telegraph';
+  const a = b.anim || { state: 'idle', timer: 0 };
+  const table = (BOSS_SPRITE_STATES[b.type] || {})[a.state];
+  if (table) {
+    for (let i = 0; i < table.length; i++) {
+      if (a.timer <= table[i][0]) return table[i][1] === 'idle' ? idle() : table[i][1];
+    }
+  }
+  return idle();
+}
+
+// Draws the boss from the sheet; returns false (and draws nothing) when the caller should use the fallback art.
+function drawBossSprite(ctx, b) {
+  if (!RAID_BOSS_SPRITES_ENABLED) return false;
+  if (!bossSheetImg) bossSheetLoad();
+  const d = BOSS_SPRITE.bosses[b.type];
+  if (!bossSheetReady || !d) return false;
+  const idx = BOSS_SPRITE.frames.indexOf(bossSpriteFrame(b));
+  if (idx < 0) return false;
+  const c = BOSS_SPRITE.cell;
+  const col = idx % BOSS_SPRITE.cols, row = d.row + Math.floor(idx / BOSS_SPRITE.cols);
+  ctx.drawImage(bossSheetImg, col * c, row * c, c, c, b.x - d.ax * d.k, b.y - d.ay * d.k, c * d.k, c * d.k);
+  return true;
+}
+
 function drawBossDispatch(ctx, boss) {
   const scale = boss.animScale !== undefined ? boss.animScale : 1;
   const alpha = boss.animAlpha !== undefined ? boss.animAlpha : 1;
@@ -5139,7 +5248,8 @@ function drawBossDispatch(ctx, boss) {
   ctx.scale(scale, scale * breath);
   ctx.translate(-boss.x, -boss.y);
   ctx.globalAlpha = alpha;
-  if (boss.type === 'warden') drawWarden(ctx, boss);
+  if (drawBossSprite(ctx, boss)) { /* drawn from the sprite sheet */ }
+  else if (boss.type === 'warden') drawWarden(ctx, boss);
   else if (boss.type === 'wyrm') drawWyrm(ctx, boss);
   else if (boss.type === 'glutton') drawGlutton(ctx, boss);
   else drawGrinmaw(ctx, boss);
@@ -7515,7 +7625,7 @@ const MQ_GUNS = [
 ];
 
 // Tall hats/hair push the floating health bar and reload ring up so they do not overlap.
-const MQ_BAR_LIFT = { skin_wizard: 34, skin_golden: 12, skin_inferno: 14, skin_frost: 8, skin_sprout: 4, skin_bumblebee: 6, skin_robot: 8, skin_astronaut: 6 };
+const MQ_BAR_LIFT = { skin_wizard: 42, skin_golden: 24, skin_inferno: 20, skin_frost: 16, skin_sprout: 26, skin_bumblebee: 18, skin_robot: 18, skin_astronaut: 6, skin_galaxy: 18, skin_rainbow: 12 };
 MQ_SKINS.forEach(s => { s.type = 'skin'; s.barLift = MQ_BAR_LIFT[s.id] || 0; });
 MQ_GUNS.forEach(g => { g.type = 'gun'; });
 const MQ_ITEMS = MQ_SKINS.concat(MQ_GUNS);
