@@ -3,6 +3,9 @@
 // (tests/support/firebase-stub.js), so no test ever talks to the live project.
 const { defineConfig } = require('@playwright/test');
 
+// PORT can be overridden so several checkouts (or a running dev server) never collide.
+const PORT = Number(process.env.PORT) || 4173;
+
 module.exports = defineConfig({
   testDir: 'tests',
   testMatch: '**/*.spec.js',
@@ -12,13 +15,13 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: `http://127.0.0.1:${PORT}`,
     channel: process.env.PW_CHANNEL || undefined,
     trace: 'retain-on-failure'
   },
   webServer: {
     command: 'node tests/support/serve.js',
-    url: 'http://127.0.0.1:4173/index.html',
+    url: `http://127.0.0.1:${PORT}/index.html`,
     reuseExistingServer: !process.env.CI
   }
 });

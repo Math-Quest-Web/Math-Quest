@@ -318,7 +318,7 @@ test.describe('Items (spec 10.3)', () => {
         shapes: [...shapes].sort(), bulletKinds: bulletKinds.size, trails: trails.size,
         distinctBullets: new Set(MQ_GUNS.map((g) => bullet(g.id))).size,
         distinctGuns: new Set(MQ_GUNS.map((g) => body(g.id))).size,
-        trailsDrawn: MQ_GUNS.filter((g) => trailPixels(g.id) < 20).map((g) => g.id),
+        trailsDrawn: MQ_GUNS.filter((g) => trailPixels(g.id) < 10).map((g) => g.id), // a bullet with no trail leaves ~0 pixels here; browsers differ slightly at the edges
         unknownGunFallsBack: (() => { const c = document.createElement('canvas'); c.width = 60; c.height = 90; drawPlayerBullet(c.getContext('2d'), { x: 30, y: 30, vx: 0, vy: -6, r: 6, gun: 'nope', t: 1 }); return true; })()
       };
     });

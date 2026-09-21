@@ -280,6 +280,8 @@ test.describe('Boss design rules (spec 9.1)', () => {
       out.noAttackDuring = (() => { T.recordAttacks(); raidG.boss.attackTimer = 1; T.step(50); return T.attackLog.length; })();
       T.step(60);
       out.transitionEnded = raidG.boss.transition;
+      // the boss may have started a (random) attack by now - park it so the shot below is not aimed at a faded boss
+      raidG.boss.anim = { state: 'idle', timer: 0 }; raidG.boss.attackTimer = 99999; raidG.boss.animAlpha = 1;
       // and afterwards shots hurt again
       const hp1 = raidG.boss.hp;
       raidG.playerProjectiles = [{ x: raidG.boss.x, y: raidG.boss.y, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }];
