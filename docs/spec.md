@@ -106,10 +106,11 @@ lives in section `raid`.
 | RAI-13 | **Reloading:** the magazine reloads automatically when it hits 0 (R reloads early). A reload takes 100 frames (about 1.7 s) during which the player cannot shoot. There is no passive ammo regeneration. | Done |
 | RAI-14 | **Reload animation:** the gun tilts out, the old magazine drops, a new one slides in, the gun snaps back with a spark; a progress ring above the head shows reload progress to everyone. The HUD shows `n/20` or `RELOADING`. | Done |
 | RAI-15 | **Shield:** blocks damage for 90 frames. Starts with 2 charges, max 3, and recharges +1 every 420 frames (7 s). | Done |
-| RAI-16 | **Dash:** C gives a burst of speed and 14 frames of invincibility, 180-frame (3 s) cooldown. | Done |
+| RAI-16 | **Dash:** C gives a committed 10-frame burst at speed 12 (bypassing the normal accel/friction/max-speed-7 handling so the burst isn't immediately clamped back down) plus 14 frames of invincibility, leaving a short trail of afterimages; 180-frame (3 s) cooldown, shortened by the Swift Boots utility item (WPN-03). | Done |
 | RAI-17 | **Movement:** acceleration, friction, max speed 7. **Jump (Hollow Knight-style, variable height):** a tap rises about 210px under normal gravity (`RAID_GRAVITY` 0.4, initial velocity `RAID_JUMP_VY` -13); holding the jump key keeps reduced gravity (`RAID_JUMP_HOLD_GRAVITY` 0.16) applied for up to `RAID_JUMP_HOLD_FRAMES` (18) frames or until the apex, reaching roughly 320-340px. A jump (of either height) clears low ground hazards. | Done |
 | RAI-18 | **Boss hit area** (the box a player's shot must land in to damage the boss) is sized per boss type (`BOSS_HITBOX`), not one fixed box for every boss - the Wyrm in particular is wider (its three heads spread further than its body is tall), so its hit area is wider too. An untargetable boss (BOS-09) still can't be hit, regardless of its hit area's size. | Done |
 | RAI-19 | **Impact frame on taking a hit:** a small knockback away from the hit (opposite the player's facing), a bright white flash for the first ~6 of the player's 30 invincibility frames (fading to the ongoing orange flicker after), and a brief hit-stop (full engine freeze, a handful of frames) - felt on whichever client the hit player is on, host or not. | Done |
+| RAI-20 | **Movement animation:** while grounded, the player bobs (a small idle sway, a bigger/faster bob while running) and leans slightly into the direction of travel; none of it while airborne. Driven by the shared frame counter and the player's synced `vx`/`onGround`, so it plays the same for every client watching a teammate. | Done |
 
 ### 8.3 Difficulty
 
@@ -124,6 +125,27 @@ lives in section `raid`.
 | ID | Requirement | Status |
 |----|-------------|--------|
 | RAI-40 | Math prompts (shield-recharge math, weak-point strike, ultimate interrupt) are **removed from gameplay for now**. They are gated behind `RAID_MATH_ENABLED = false` so they can be turned back on. While off, shields recharge on a timer (RAI-15) and the tutorial does not mention math. | Off |
+
+### 8.5 Equipment: weapons and utility
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| WPN-01 | **Weapon slot:** equipping a gun or a sword changes what the X/Space attack button does - shoot (RAI-12) with a gun, swing (WPN-02) with a sword. Guns and swords are otherwise both just "the weapon slot" - stored under the same `equipped.gun` profile key and the same `raidLocal.gun` field - so nothing else about equipping or syncing needs to know which kind is active. | Done |
+| WPN-02 | **Sword combat:** X/Space swings instead of shooting - no ammo or reload. A 14-frame swing animation (crescent slash trail) plays, and if the boss is within reach (80px horizontal, 95px vertical of the player, generous enough to hit an aerial boss from a jump) it takes 4 damage, 26-frame cooldown between swings. The hit is relayed and resolved through the same host-authoritative pipeline as bullets (`playerProjectiles`, `raidShotsRef` for non-hosts) and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) - no boss-side code differs between being shot and being cut. | Done |
+| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). Effects: | Done |
+
+| Item | Rarity | Effect |
+|------|--------|--------|
+| Swift Boots | Common | Dash cooldown -25% |
+| Lucky Charm | Common | +10% coins from every win |
+| Quick Hands | Uncommon | Reload 20% faster |
+| Feather Cloak | Rare | Hold jump 30% longer for extra height |
+| Vital Core | Epic | +1 max heart |
+| Warding Sigil | Legendary | Absorbs the first hit taken each raid |
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| WPN-20 | **Character redesign:** the whole player silhouette is drawn about 15% smaller, anchored at the feet so it doesn't sink into or float off the ground (the health bar and reload ring above the head keep their original size and position, unaffected by the scale-down). The face is Hollow Knight-styled: big flat black eyes and no visible mouth, with small horns instead of the old red pom-pom (a skin can still cover the horns with its own headwear via `noHorns`). | Done |
 
 ## 9. Boss design rules and bosses
 
@@ -196,38 +218,41 @@ Frame counts are the durations of each animation state (60 frames = 1 second).
 | SHP-03 | Each crate has an **Odds** button showing every item's exact percentage, grouped by rarity with rarity totals; each crate's odds sum to 100%. | Done |
 | SHP-04 | Opening a crate deducts the price, plays an animation (shake, lid pops, flash), then reveals the item with a rarity banner and confetti that scales with rarity. Insufficient coins shows a message and does nothing. | Done |
 | SHP-05 | **Duplicates convert to coins:** Common 10, Uncommon 25, Rare 60, Epic 150, Legendary 350. | Done |
-| SHP-06 | **My Items** shows an animated loadout preview (fires, then reloads), filters (All / Player Skins / Gun Skins), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, and an Equip button per owned item. | Done |
-| SHP-07 | One player skin and one gun skin can be equipped at a time. The default skin and gun are always owned. | Done |
-| SHP-08 | Equipped items are used in every raid and shown to all players (skin, gun, bullet style, trail, reload animation). | Done |
-| SHP-09 | Skins are cosmetic only - no stat effects. | Done |
+| SHP-06 | **My Items** shows a 3-row loadout (Player skin, Slot 1: Weapon, Slot 2: Utility) with an animated preview (fires/reloads for a gun, swings for a sword), filters (All / Player Skins / Weapons / Utility), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, each card's blurb, and an Equip button per owned item. | Done |
+| SHP-07 | One player skin and one weapon (a gun or a sword) are always equipped; the utility slot is optional and can be unequipped by clicking it again. Only owned items can be equipped; the default skin, gun and sword are always owned. | Done |
+| SHP-08 | Equipped items are used in every raid and shown to all players (skin, weapon skin, bullet/swing style, trail, reload animation, utility effect). | Done |
+| SHP-09 | Skins are cosmetic only - no stat effects. Utility items are the exception (WPN-03): they have a small real effect, but which one is purely a player choice, not tied to a skin or weapon. | Done |
 
 Crates:
 
 | Crate | Price | Pool | Rarity weights |
 |-------|-------|------|----------------|
-| Starter Crate | 100 | All skins and guns (22 items) | Common 64, Uncommon 27, Rare 8, Epic 1 |
+| Starter Crate | 100 | Skins, guns, swords and utility items (30) | Common 64, Uncommon 27, Rare 8, Epic 1 |
 | Hero Crate | 250 | Player skins only (10) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Arsenal Crate | 250 | Gun skins only (10) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Cosmic Crate | 400 | Items tagged "cosmic" (6): Astronaut, Galaxy Walker, Stardust Wand, Void Pulse, Solar Flare, Sunbreaker | Rare 60, Epic 32, Legendary 8 |
-| Legend Crate | 700 | All skins and guns (14) | Rare 46, Epic 39, Legendary 15 |
+| Arsenal Crate | 250 | Weapon skins only - guns and swords (14) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
+| Cosmic Crate | 400 | Items tagged "cosmic" (7): Astronaut, Galaxy Walker, Stardust Wand, Void Pulse, Solar Flare, Sunbreaker, Voidbone Fang | Rare 60, Epic 32, Legendary 8 |
+| Legend Crate | 700 | Skins, guns, swords and utility items (20) | Rare 46, Epic 39, Legendary 15 |
 
 ### 10.3 Items
 
 Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with more animation and glow).
 
-| Rarity | Player skins | Gun skins |
-|--------|--------------|-----------|
-| Common | Classic Cup (default), Sprout, Bubblegum, Bumblebee | Standard Blaster (default), Candy Blaster, Bubble Popper, Lime Zapper |
-| Uncommon | Buccaneer, Frost Sprite, Shadow Ninja | Rocket Ray, Pixel Pistol, Petal Wand |
-| Rare | Astronaut, Star Wizard, Robo-Bot | Frost Cannon, Ember Rifle, Stardust Wand |
-| Epic | Inferno, Galaxy Walker | Void Pulse, Solar Flare |
-| Legendary | Golden Champion, Prism Phantom | Sunbreaker, Prism Railgun |
+| Rarity | Player skins | Gun skins | Swords |
+|--------|--------------|-----------|--------|
+| Common | Classic Cup (default), Sprout, Bubblegum, Bumblebee | Standard Blaster (default), Candy Blaster, Bubble Popper, Lime Zapper | Training Nail (default) |
+| Uncommon | Buccaneer, Frost Sprite, Shadow Ninja | Rocket Ray, Pixel Pistol, Petal Wand | Moss Blade |
+| Rare | Astronaut, Star Wizard, Robo-Bot | Frost Cannon, Ember Rifle, Stardust Wand | Frostbite Edge |
+| Epic | Inferno, Galaxy Walker | Void Pulse, Solar Flare | Voidbone Fang (cosmic) |
+| Legendary | Golden Champion, Prism Phantom | Sunbreaker, Prism Railgun | Dawnbreaker |
+
+Utility items (WPN-03) aren't cosmetic and are listed in that table instead of here.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| ITM-01 | All skins and guns are drawn with canvas paths and must look polished: outlines, gradients, and animation on higher rarities (flames, sparkles, rainbow, twinkling stars). The same drawing code renders the raid, shop previews and the loadout. | Done |
+| ITM-01 | All skins, guns and swords are drawn with canvas paths and must look polished: outlines, gradients, and animation on higher rarities (flames, sparkles, rainbow, twinkling stars). The same drawing code renders the raid, shop previews and the loadout. | Done |
 | ITM-02 | Gun skins change the gun model (blaster, cannon, wand, ray, rail), the **bullet style** and the bullet trail. | Done |
 | ITM-03 | Tall hats/hair must not overlap the health bar or reload ring (bars are lifted per skin). | Done |
+| ITM-04 | Sword skins change the blade's colors and share one swing shape (out-and-back arc with a fading crescent slash trail) - see WPN-02. | Done |
 
 ## 11. Data model (Firebase)
 
@@ -236,9 +261,9 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 | Firestore `publicSets/<id>` | Community question sets (`ownerId`, `name`, `questions`, ...). |
 | RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `raidStart`, `players`. |
 | RTDB `bossRaid/<code>/gameState` | Host-published boss, projectiles, hazards, slam effects, `gameOver`, `victory`. |
-| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, health, shield, facing, reload, skin, gun). |
-| RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed shots, math answers (math off). |
-| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun), `stats`. |
+| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, reload, swing, skin, weapon (`gun` field - a gun or sword id), utility, `wardUsed`). |
+| RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed shots and melee hits, math answers (math off). |
+| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility), `stats`. |
 
 | ID | Requirement | Status |
 |----|-------------|--------|
@@ -285,3 +310,4 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 | 2026-09 | v2 sprite sheets in untracked `sprites/` (boss 4 x 16 frames, 14 player skins, 14 guns). |
 | 2026-09 | Bosses are drawn from `assets/boss-sheet.webp` with the old art as fallback (BOS-30 to BOS-35); GEN-01 now allows this one image asset. |
 | 2026-09 | Hollow Knight-style controls (Z jump, X attack, C dash; RAI-10, RAI-16); variable-height jump (RAI-17); impact frames on every hit - knockback, flash and hit-stop for the player (RAI-19) and hurt pose/flash/hit-stop for the boss (BOS-13); per-boss hit area, fixing the Wyrm's undersized one (RAI-18). |
+| 2026-09 | Fixed the dash burst being clamped away almost immediately (RAI-16); added a weapon slot (guns or swords, WPN-01/WPN-02) and a utility slot with 6 effects (WPN-03), 5 new swords and 6 new utility items, obtainable from the Starter/Arsenal/Legend crates (SHP-02/06/07); character redesign - ~15% smaller, Hollow Knight-style face and horns (WPN-20) - plus idle/run movement animation (RAI-20). |
