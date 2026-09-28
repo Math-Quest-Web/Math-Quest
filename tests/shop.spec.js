@@ -63,16 +63,18 @@ test.describe('Shop and crates (spec 10.2)', () => {
     expect(r.crate_cosmic).toMatchObject({ name: 'Cosmic Crate', price: 400, weights: { rare: 60, epic: 32, legendary: 8 } });
     expect(r.crate_legend).toMatchObject({ name: 'Legend Crate', price: 700, weights: { rare: 46, epic: 39, legendary: 15 } });
 
-    expect(r.crate_starter.pool).toHaveLength(22);
-    expect(r.crate_starter.types).toEqual(['gun', 'skin']);
+    expect(r.crate_starter.pool).toHaveLength(30);
+    expect(r.crate_starter.types).toEqual(['gun', 'skin', 'sword', 'utility']);
     expect(r.crate_starter.rarities).toEqual(['common', 'epic', 'rare', 'uncommon']);
     expect(r.crate_hero.pool).toHaveLength(10);
     expect(r.crate_hero.types).toEqual(['skin']);
     expect(r.crate_hero.rarities).toEqual(['epic', 'legendary', 'rare', 'uncommon']);
-    expect(r.crate_arsenal.pool).toHaveLength(10);
-    expect(r.crate_arsenal.types).toEqual(['gun']);
-    expect(r.crate_cosmic.pool).toEqual(['Astronaut', 'Galaxy Walker', 'Solar Flare', 'Stardust Wand', 'Sunbreaker', 'Void Pulse']);
-    expect(r.crate_legend.pool).toHaveLength(14);
+    expect(r.crate_arsenal.pool).toHaveLength(14);
+    expect(r.crate_arsenal.types).toEqual(['gun', 'sword']);
+    // Voidbone Fang is a cosmic-tagged sword, so it now joins the cosmic gun/skin pool too.
+    expect(r.crate_cosmic.pool).toEqual(['Astronaut', 'Galaxy Walker', 'Solar Flare', 'Stardust Wand', 'Sunbreaker', 'Void Pulse', 'Voidbone Fang']);
+    expect(r.crate_legend.pool).toHaveLength(20);
+    expect(r.crate_legend.types).toEqual(['gun', 'skin', 'sword', 'utility']);
     expect(r.crate_legend.rarities).toEqual(['epic', 'legendary', 'rare']);
     // default items are never in a crate
     Object.values(r).forEach((c) => { expect(c.pool).not.toContain('Classic Cup'); expect(c.pool).not.toContain('Standard Blaster'); });
@@ -167,20 +169,20 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       mqProfile.owned.skin_wizard = 2; mqProfile.owned.gun_frost = 1;
       showSection('shop'); mqOnShopOpen(); mqSetTab('inv');
     });
-    await expect(page.locator('.inv-card')).toHaveCount(28);
-    await expect(page.locator('#invCount')).toHaveText('4 / 28 collected');
-    await expect(page.locator('.inv-card.locked')).toHaveCount(24);
-    await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(4);
+    await expect(page.locator('.inv-card')).toHaveCount(39);
+    await expect(page.locator('#invCount')).toHaveText('5 / 39 collected');
+    await expect(page.locator('.inv-card.locked')).toHaveCount(34);
+    await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(5);
     await expect(page.locator('.inv-card.locked .inv-equip')).toHaveCount(0);
     await expect(page.locator('.inv-card', { hasText: 'Star Wizard' })).toContainText('x2');
 
     await page.locator('#invF_skin').click();
     await expect(page.locator('.inv-card')).toHaveCount(14);
-    await page.locator('#invF_gun').click();
-    await expect(page.locator('.inv-card')).toHaveCount(14);
+    await page.locator('#invF_weapon').click();
+    await expect(page.locator('.inv-card')).toHaveCount(19);
     await page.locator('#invF_all').click();
     await page.locator('#invHideLocked').check();
-    await expect(page.locator('.inv-card')).toHaveCount(4);
+    await expect(page.locator('.inv-card')).toHaveCount(5);
 
     // the loadout preview is a live canvas that fires and then reloads
     const r = await page.evaluate(() => {
@@ -211,11 +213,11 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       out.saved = JSON.parse(localStorage.getItem(MQ_PROFILE_KEY)).equipped;
       return out;
     });
-    expect(r.start).toEqual({ skin: 'skin_classic', gun: 'gun_standard' });
-    expect(r.owned).toEqual(['gun_standard', 'skin_classic']);
+    expect(r.start).toEqual({ skin: 'skin_classic', gun: 'gun_standard', utility: '' });
+    expect(r.owned).toEqual(['gun_standard', 'skin_classic', 'sword_training']);
     expect(r.unowned).toBe('skin_classic');
-    expect(r.golden).toEqual({ skin: 'skin_golden', gun: 'gun_frost' });
-    expect(r.swapped).toEqual({ skin: 'skin_wizard', gun: 'gun_frost' });
+    expect(r.golden).toEqual({ skin: 'skin_golden', gun: 'gun_frost', utility: '' });
+    expect(r.swapped).toEqual({ skin: 'skin_wizard', gun: 'gun_frost', utility: '' });
     expect(r.saved).toEqual(r.swapped);
     // the Equip button in the UI does the same and marks the card
     await page.evaluate(() => { mqProfile.owned.skin_golden = 1; showSection('shop'); mqOnShopOpen(); mqSetTab('inv'); });
@@ -298,8 +300,8 @@ test.describe('Items (spec 10.3)', () => {
     });
     expect(r.skins).toEqual(SPEC_SKINS);
     expect(r.guns).toEqual(SPEC_GUNS);
-    expect(r.items).toBe(28);
-    expect(r.uniqueIds).toBe(28);
+    expect(r.items).toBe(39);
+    expect(r.uniqueIds).toBe(39);
     expect(r.distinctSkins, 'every skin looks different').toBe(14);
     expect(r.errors).toEqual([]);
     expect(r.animatedRare, 'epic and legendary skins are animated').toEqual([true, true, true, true]);
@@ -331,6 +333,21 @@ test.describe('Items (spec 10.3)', () => {
     expect(r.unknownGunFallsBack).toBe(true);
   });
 
+  test('ITM-04 sword skins change the blade colors and share one swing arc with a fading slash trail', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const draw = (sword, swing) => { const c = document.createElement('canvas'); c.width = 80; c.height = 100; const ctx = c.getContext('2d'); ctx.translate(40, 70); mqDrawSword(ctx, sword, 0, 0, 1, swing, 5); return hashCanvas(c); };
+      return {
+        distinctSwords: new Set(MQ_SWORDS.map((s) => draw(s.id, 0))).size,
+        idleVsMidSwing: draw('sword_training', 0) !== draw('sword_training', 0.5),
+        slashTrailPixels: opaque((() => { const c = document.createElement('canvas'); c.width = 80; c.height = 100; const ctx = c.getContext('2d'); ctx.translate(40, 70); mqDrawSword(ctx, 'sword_training', 0, 0, 1, 0.5, 5); return c; })(), 0, 0, 80, 100),
+        noSwingPixels: opaque((() => { const c = document.createElement('canvas'); c.width = 80; c.height = 100; const ctx = c.getContext('2d'); ctx.translate(40, 70); mqDrawSword(ctx, 'sword_training', 0, 0, 1, 0, 5); return c; })(), 0, 0, 80, 100)
+      };
+    });
+    expect(r.distinctSwords, 'every sword has its own colors').toBe(5);
+    expect(r.idleVsMidSwing, 'the swing arc animates').toBe(true);
+    expect(r.slashTrailPixels).toBeGreaterThan(r.noSwingPixels); // the crescent slash trail only shows mid-swing
+  });
+
   test('ITM-03 tall hats and hair do not overlap the floating health bar', async ({ page }) => {
     const r = await page.evaluate(() => {
       const out = {};
@@ -357,7 +374,7 @@ test.describe('Saved progress (GEN-06)', () => {
     await page.reload();
     await page.waitForFunction(() => typeof mqProfile !== 'undefined');
     const r = await page.evaluate(() => ({ coins: mqProfile.coins, ninja: mqProfile.owned.skin_ninja, equipped: mqProfile.equipped, side: document.querySelector('.sidebar-coins .mq-coin-value').textContent, fbCoinWrites: __fb.db.log.filter((l) => /coin|profile/i.test(l.path)).length }));
-    expect(r).toEqual({ coins: 777, ninja: 3, equipped: { skin: 'skin_ninja', gun: 'gun_lime' }, side: '777', fbCoinWrites: 0 });
+    expect(r).toEqual({ coins: 777, ninja: 3, equipped: { skin: 'skin_ninja', gun: 'gun_lime', utility: '' }, side: '777', fbCoinWrites: 0 });
   });
 
   test('GEN-06 a corrupt or tampered save falls back safely', async ({ page }) => {
@@ -368,10 +385,10 @@ test.describe('Saved progress (GEN-06)', () => {
       return { bad, junk };
     });
     expect(r.bad.coins).toBe(0);
-    expect(r.bad.equipped).toEqual({ skin: 'skin_classic', gun: 'gun_standard' });
+    expect(r.bad.equipped).toEqual({ skin: 'skin_classic', gun: 'gun_standard', utility: '' });
     expect(r.junk.coins).toBe(0);
-    expect(Object.keys(r.junk.owned).sort()).toEqual(['gun_standard', 'skin_classic', 'skin_golden']);
-    expect(r.junk.equipped).toEqual({ skin: 'skin_classic', gun: 'gun_standard' }); // equipped items must be owned
+    expect(Object.keys(r.junk.owned).sort()).toEqual(['gun_standard', 'skin_classic', 'skin_golden', 'sword_training']);
+    expect(r.junk.equipped).toEqual({ skin: 'skin_classic', gun: 'gun_standard', utility: '' }); // equipped items must be owned
     expect(r.junk.stats.crates).toBe(0);
   });
 });

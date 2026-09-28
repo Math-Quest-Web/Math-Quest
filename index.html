@@ -1107,6 +1107,7 @@ body {
 .inv-lock { position: absolute; top: 68px; left: 0; right: 0; font-size: 2em; pointer-events: none; }
 .inv-name { color: white; font-size: 1em; margin-top: 2px; }
 .inv-type { font-family: Arial, sans-serif; font-size: 0.72em; color: #8a8ab0; margin-bottom: 8px; }
+.inv-blurb { font-family: Arial, sans-serif; font-size: 0.72em; color: #b6b6d6; margin: 2px 10px 6px; line-height: 1.3; }
 
 .inv-equip {
   border: none;
@@ -2238,15 +2239,17 @@ textarea.community-input {
       <div class="loadout-info">
         <h3>Your Loadout</h3>
         <div class="loadout-row">Player skin<br><span id="loadoutSkin"></span></div>
-        <div class="loadout-row">Gun skin<br><span id="loadoutGun"></span></div>
-        <div class="loadout-note">Skins are cosmetic only. Your loadout shows up in every raid - other players see it too.</div>
+        <div class="loadout-row">Slot 1: Weapon<br><span id="loadoutGun"></span></div>
+        <div class="loadout-row">Slot 2: Utility<br><span id="loadoutUtility"></span></div>
+        <div class="loadout-note">Skins are cosmetic only. Utility items have a small real effect (see their card). Your loadout shows up in every raid - other players see it too.</div>
       </div>
     </div>
 
     <div class="inv-toolbar">
       <button id="invF_all" class="inv-filter active" onclick="mqSetFilter('all')">All</button>
       <button id="invF_skin" class="inv-filter" onclick="mqSetFilter('skin')">🧍 Player Skins</button>
-      <button id="invF_gun" class="inv-filter" onclick="mqSetFilter('gun')">🔫 Gun Skins</button>
+      <button id="invF_weapon" class="inv-filter" onclick="mqSetFilter('weapon')">⚔️ Weapons</button>
+      <button id="invF_utility" class="inv-filter" onclick="mqSetFilter('utility')">🧰 Utility</button>
       <label class="inv-check"><input type="checkbox" id="invHideLocked" onchange="mqToggleHideLocked(this.checked)"> Hide locked</label>
       <span class="inv-count" id="invCount"></span>
     </div>
@@ -3469,12 +3472,21 @@ function resetRaidState() {
   raidG.frame = 0;
   raidG.lastUpdate = 0;
 
-  raidLocal.health = 5;
+  raidLocal.maxHealth = raidMaxHealthForLoadout();
+  raidLocal.health = raidLocal.maxHealth;
+  raidLocal.wardUsed = false;
   raidLocal.invincible = 0;
   raidLocal.shield = false;
   raidLocal.shieldTimer = 0;
   raidLocal.dashCooldown = 0;
   raidLocal.dashTimer = 0;
+  raidLocal.dashDir = 1;
+  raidLocal.trail = [];
+  raidLocal.jumpBoosting = false;
+  raidLocal.jumpHoldTimer = 0;
+  raidLocal.moveTimer = 0;
+  raidLocal.swordCooldown = 0;
+  raidLocal.swingTimer = 0;
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
@@ -3490,6 +3502,7 @@ function resetRaidState() {
   raidHostChecked = false;
   raidIsHost = false;
   raidInitialized = false;
+  raidHitStopTimer = 0;
 
   if (countdownInterval) {
     clearInterval(countdownInterval);
@@ -3640,12 +3653,27 @@ let raidReloadTimer = 0; // frames left while reloading; 0 = not reloading
 let raidFireCooldown = 0;
 let raidShotsRef = null;
 
+// Movement/jump tuning (RAI-17). A tap of the jump key rises ~210px (RAID_JUMP_VY under normal
+// gravity); holding it applies reduced gravity for up to RAID_JUMP_HOLD_FRAMES frames instead,
+// reaching roughly 320-340px.
+const RAID_GRAVITY = 0.4;
+const RAID_JUMP_VY = -13;
+const RAID_JUMP_HOLD_GRAVITY = 0.16;
+const RAID_JUMP_HOLD_FRAMES = 18;
+
+// Dash tuning (RAI-16): a committed burst - see raidUpdateLocal, which is what RAI-16's fix
+// keeps from being immediately undone by the normal running speed cap.
+const RAID_DASH_FRAMES = 10;
+const RAID_DASH_SPEED = 12;
+const RAID_DASH_TRAIL_LIFE = 14; // frames each afterimage stays visible
+
 // Game state
 const raidG = {
   players: {},
   boss: { type: 'grinmaw', x: 500, y: 80, w: 120, h: 80, hp: 100, maxHp: 100, phase: 1,
           attackTimer: 0, attackCooldown: 120, phaseTimer: 0, ultimateTriggered: false,
-          transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0 },
+          transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0,
+          hitFlash: 0 },
   projectiles: [],
   playerProjectiles: [],
   slamAnimations: [],
@@ -3673,9 +3701,18 @@ const raidLocal = {
   facing: 1,
   dashCooldown: 0,
   dashTimer: 0,
+  dashDir: 1,
+  trail: [],
   recoil: 0,
+  swordCooldown: 0,
+  swingTimer: 0,
+  jumpBoosting: false,
+  jumpHoldTimer: 0,
+  moveTimer: 0,
   skin: 'skin_classic',
-  gun: 'gun_standard'
+  gun: 'gun_standard', // the equipped weapon's id - a gun or a sword, see MQ_WEAPON_MAP
+  utility: null,
+  wardUsed: false
 };
 
 let raidMathShieldCharges = 1;
@@ -3795,13 +3832,18 @@ function raidSendLocalState() {
   raidPlayerRef.child(raidMyId).update({
     x: raidLocal.x,
     y: raidLocal.y,
+    vx: raidLocal.vx,
+    onGround: raidLocal.onGround,
     health: raidLocal.health,
+    maxHealth: raidLocal.maxHealth,
     shield: raidLocal.shield,
     invincible: raidLocal.invincible,
     facing: raidLocal.facing,
-    reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / RAID_RELOAD_FRAMES : 0,
+    reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
+    swing: raidLocal.swingTimer > 0 ? 1 - raidLocal.swingTimer / RAID_SWORD_SWING_FRAMES : 0,
     skin: raidLocal.skin || 'skin_classic',
     gun: raidLocal.gun || 'gun_standard',
+    utility: raidLocal.utility || '',
     lastUpdate: Date.now()
   });
 }
@@ -3834,6 +3876,7 @@ function raidListenToGame() {
           raidG.boss = data.boss;
           raidG.boss.hp = damagedHp;
         } else {
+          if (data.boss.hp < currentHp) raidTriggerHitStop(5); // felt by every client, not just whoever landed the hit
           raidG.boss = data.boss;
         }
         raidG.projectiles = data.projectiles || [];
@@ -3882,6 +3925,14 @@ function raidListenToMathHits() {
   });
 }
 
+// Impact frame for the local player: a brief knockback and hit-stop, felt the instant this
+// client sees its own health drop (works the same whether this client is the host or not).
+function raidOnLocalPlayerHit() {
+  raidTriggerHitStop(6);
+  raidLocal.vx = -raidLocal.facing * 6;
+  raidLocal.vy = Math.min(raidLocal.vy, -4);
+}
+
 function raidListenToPlayers() {
   if (!raidPlayerRef) return;
   raidPlayerRef.on('value', (snap) => {
@@ -3893,6 +3944,7 @@ function raidListenToPlayers() {
     if (data[raidMyId] && raidLocal.health > 0) {
       const remote = data[raidMyId];
       if (remote && remote.health !== undefined && remote.health > 0) {
+        if (remote.health < raidLocal.health) raidOnLocalPlayerHit();
         raidLocal.health = remote.health;
         raidLocal.invincible = remote.invincible || 0;
         raidLocal.shield = remote.shield || false;
@@ -3988,6 +4040,12 @@ function startCountdown(callback) {
 
 function raidDamagePlayer(id, p, amount) {
   if (!p || p.shield || p.invincible > 0) return;
+  // Warding Sigil absorbs exactly one hit per raid (WPN-03).
+  const u = MQ_UTILITY_MAP[p.utility];
+  if (u && u.effect === 'first_hit_ward' && !p.wardUsed) {
+    raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
+    return;
+  }
   const newHealth = Math.max(0, (p.health || 5) - (amount || 1));
   raidPlayerRef.child(id).update({ health: newHealth, invincible: 30 });
   if (newHealth <= 0) {
@@ -4012,6 +4070,21 @@ function resetBossFlow(b) {
   b.comboPending = false;
   b.comboTimer = 0;
   b.attackTimer = 200; // breathing room before the first attack of a fight
+  b.hitFlash = 0;
+}
+
+// Half the boss's hit area in each direction from (boss.x, boss.y). Sized to each boss's actual
+// silhouette (RAI-18) - not just its sprite scale, since e.g. the Wyrm's three heads spread much
+// wider than its body is tall. The same box is used whether the sprite or fallback art is shown
+// (BOS-33: hitboxes are not changed by the art).
+const BOSS_HITBOX = {
+  grinmaw: { hw: 58, hh: 58 },
+  warden: { hw: 50, hh: 65 },
+  wyrm: { hw: 105, hh: 55 },
+  glutton: { hw: 58, hh: 58 }
+};
+function raidBossHalfExtent(type) {
+  return BOSS_HITBOX[type] || BOSS_HITBOX.grinmaw;
 }
 
 function raidPickAttack(b, options) {
@@ -4747,6 +4820,7 @@ function raidBossUpdate() {
   raidPhaseSpan.textContent = `PHASE ${b.phase}`;
 
   if (b.exposed > 0) b.exposed--;
+  if (b.hitFlash > 0) b.hitFlash--;
 
   // Phase change beat: the boss stops, roars and is briefly untouchable while the arena
   // is cleared, so a phase feels like a moment rather than a silent number change.
@@ -4846,13 +4920,17 @@ function raidBossUpdate() {
     proj.life--;
 
     if (raidBossUntargetable(b)) return;
-    if (Math.abs(proj.x - b.x) < 50 && Math.abs(proj.y - b.y) < 50) {
+    const bhb = raidBossHalfExtent(b.type);
+    if (Math.abs(proj.x - b.x) < bhb.hw && Math.abs(proj.y - b.y) < bhb.hh) {
       proj.life = 0;
       if (b.invulnerable || b.transition > 0) {
         raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
       } else {
-        b.hp -= (proj.damage || 5) * (b.exposed > 0 ? 2 : 1);
+        const bigHit = b.exposed > 0;
+        b.hp -= (proj.damage || 5) * (bigHit ? 2 : 1);
         if (b.hp < 0) b.hp = 0;
+        b.hitFlash = 10;
+        raidTriggerHitStop(bigHit ? 8 : 5);
         raidG.slamAnimations.push({
           x: proj.x,
           y: proj.y,
@@ -4903,7 +4981,9 @@ function raidBossUpdate() {
           raidG.slamAnimations = [];
           raidG.hazards = [];
           raidG.mathEvent = null;
-          raidLocal.health = 5;
+          raidLocal.maxHealth = raidMaxHealthForLoadout();
+          raidLocal.health = raidLocal.maxHealth;
+          raidLocal.wardUsed = false;
           raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
           raidAmmo = raidMaxAmmo;
           raidReloadTimer = 0;
@@ -4943,11 +5023,74 @@ function raidGunMuzzle() {
   };
 }
 
+// A player's equipped utility item can speed up reloading (WPN-03).
+function raidReloadFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'reload_speed' ? Math.round(RAID_RELOAD_FRAMES * u.value) : RAID_RELOAD_FRAMES;
+}
+
+// The actual duration of the reload in progress, so the UI/sync progress fraction is correct
+// even when Quick Hands shortens it (raidReloadTimer counts down from this, not from the base
+// RAID_RELOAD_FRAMES).
+let raidReloadTotalFrames = RAID_RELOAD_FRAMES;
+
 function raidStartReload() {
   if (raidG.gameOver || raidG.victory || countdownActive) return;
   if (raidReloadTimer > 0 || raidAmmo >= raidMaxAmmo) return;
-  raidReloadTimer = RAID_RELOAD_FRAMES;
+  raidReloadTotalFrames = raidReloadFrames();
+  raidReloadTimer = raidReloadTotalFrames;
   raidUpdateUI();
+}
+
+// The single "attack" action (X/Space): shoots if a gun is equipped, swings if a sword is
+// (WPN-01/WPN-02). Everything else about the keybind stays the same either way.
+function raidAttack() {
+  const weapon = MQ_WEAPON_MAP[raidLocal.gun] || MQ_GUN_MAP.gun_standard;
+  if (weapon.type === 'sword') raidSwordSwing();
+  else raidShootProjectile();
+}
+
+// Melee tuning (WPN-02): no ammo or reload, a shorter cooldown than the gun's fire delay but a
+// longer one than a single shot, and a reach generous enough to hit an aerial boss from a jump
+// (bosses float well above the ground - see RAI-17's variable jump) as well as during the
+// moments a boss comes down near the ground for an attack.
+const RAID_SWORD_SWING_FRAMES = 14; // how long the visible swing animation plays
+const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
+const RAID_SWORD_DAMAGE = 4;
+const RAID_SWORD_RANGE_X = 80;
+const RAID_SWORD_RANGE_Y = 95;
+
+function raidSwordSwing() {
+  if (raidG.gameOver || raidG.victory) return;
+  if (countdownActive) return;
+  const p = raidLocal;
+  if (p.swordCooldown > 0) return;
+  p.swordCooldown = RAID_SWORD_COOLDOWN_FRAMES;
+  p.swingTimer = RAID_SWORD_SWING_FRAMES;
+  raidUpdateUI();
+  raidSendLocalState();
+
+  // Reach check against the boss's actual (synced) position - every client already has this,
+  // host or not. In reach, place the hit exactly on the boss so it trivially passes the normal
+  // per-boss hit area (RAI-18) downstream; out of reach, the swing plays but hits nothing.
+  const boss = raidG.boss;
+  const inReach = Math.abs(raidPx(p) - boss.x) < RAID_SWORD_RANGE_X && Math.abs((p.y + 24) - boss.y) < RAID_SWORD_RANGE_Y;
+  if (!inReach) return;
+
+  // Reuses the exact same boss-hit path a bullet takes (raidBossUpdate's playerProjectiles
+  // loop): a single point, alive for a couple of frames. That path already applies the
+  // exposed 2x, hitFlash and hit-stop (BOS-13) - nothing extra to add for melee to work.
+  const hit = {
+    x: boss.x, y: boss.y,
+    vx: 0, vy: 0, r: 4, life: 2, damage: RAID_SWORD_DAMAGE, kind: 'melee', owner: raidMyId, gun: raidLocal.gun
+  };
+  if (raidIsHost) {
+    raidG.playerProjectiles.push(hit);
+    raidSendBossState();
+  } else if (raidShotsRef) {
+    hit.t = Date.now();
+    raidShotsRef.push(hit);
+  }
 }
 
 function raidShootProjectile() {
@@ -5004,28 +5147,55 @@ function raidUpdateLocal() {
   const p = raidLocal;
   const accel = 0.7;
   const friction = 0.85;
-  if (p.input.left) p.vx -= accel;
-  if (p.input.right) p.vx += accel;
-  p.vx *= friction;
-  if (Math.abs(p.vx) < 0.1) p.vx = 0;
-  if (Math.abs(p.vx) > 7) p.vx = Math.sign(p.vx) * 7;
+  // A dash is a committed burst: fixed velocity for the whole window, immune to the normal
+  // speed cap below (the bug this fixes - vx=12 was clamped straight back to 7 one frame
+  // later, so the "burst" was barely faster than just running).
+  if (p.dashTimer > 0) {
+    p.vx = p.dashDir * RAID_DASH_SPEED;
+    p.trail.push({ x: p.x, y: p.y, facing: p.facing, life: RAID_DASH_TRAIL_LIFE });
+  } else {
+    if (p.input.left) p.vx -= accel;
+    if (p.input.right) p.vx += accel;
+    p.vx *= friction;
+    if (Math.abs(p.vx) < 0.1) p.vx = 0;
+    if (Math.abs(p.vx) > 7) p.vx = Math.sign(p.vx) * 7;
+  }
+  p.trail.forEach(g => g.life--);
+  p.trail = p.trail.filter(g => g.life > 0);
 
   if (p.vx > 0.5) p.facing = 1;
   else if (p.vx < -0.5) p.facing = -1;
 
   p.x += p.vx;
-  p.vy += 0.4;
+
+  // Hollow Knight style variable-height jump: holding Z/Up sustains the rise (reduced gravity)
+  // for up to RAID_JUMP_HOLD_FRAMES frames; letting go early - or hitting the timer or the
+  // apex - cuts it short and normal gravity takes back over. A quick tap still gives the same
+  // ~200px hop as before; holding it the whole time reaches noticeably higher.
+  let gravity = RAID_GRAVITY;
+  if (p.jumpBoosting) {
+    if (p.input.up && p.jumpHoldTimer < raidJumpHoldFrames() && p.vy < 0) {
+      gravity = RAID_JUMP_HOLD_GRAVITY;
+      p.jumpHoldTimer++;
+    } else {
+      p.jumpBoosting = false;
+    }
+  }
+  p.vy += gravity;
   p.y += p.vy;
   if (p.y > raidGROUND_Y - p.h) {
     p.y = raidGROUND_Y - p.h;
     p.vy = 0;
     p.onGround = true;
+    p.jumpBoosting = false;
   } else {
     p.onGround = false;
   }
   if (p.input.up && p.onGround) {
-    p.vy = -13;
+    p.vy = RAID_JUMP_VY;
     p.onGround = false;
+    p.jumpBoosting = true;
+    p.jumpHoldTimer = 0;
   }
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
 
@@ -5036,6 +5206,8 @@ function raidUpdateLocal() {
   }
   if (p.dashCooldown > 0) p.dashCooldown--;
   if (p.dashTimer > 0) p.dashTimer--;
+  if (p.swordCooldown > 0) p.swordCooldown--;
+  if (p.swingTimer > 0) p.swingTimer--;
 
   if (!RAID_MATH_ENABLED && raidMathShieldCharges < raidMaxShieldCharges) {
     raidShieldRegenTimer++;
@@ -5097,12 +5269,31 @@ function raidTryDash() {
   if (countdownActive) return;
   const p = raidLocal;
   if (p.dashCooldown > 0) return;
-  p.dashTimer = 10;
-  p.vx = p.facing * 12;
+  p.dashTimer = RAID_DASH_FRAMES;
+  p.dashDir = p.facing;
+  p.vx = p.dashDir * RAID_DASH_SPEED;
   p.invincible = Math.max(p.invincible, 14);
-  p.dashCooldown = 180;
+  p.dashCooldown = raidDashCooldownFrames();
   raidUpdateUI();
   raidSendLocalState();
+}
+
+// A player's equipped utility item can shorten the dash cooldown (WPN-03).
+function raidDashCooldownFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'dash_cooldown' ? Math.round(180 * u.value) : 180;
+}
+
+// Vital Core's +1 max heart (WPN-03).
+function raidMaxHealthForLoadout() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'max_health' ? 5 + u.value : 5;
+}
+
+// Feather Cloak's longer jump hold (WPN-03).
+function raidJumpHoldFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'jump_hold' ? Math.round(RAID_JUMP_HOLD_FRAMES * u.value) : RAID_JUMP_HOLD_FRAMES;
 }
 
 function raidSubmitEventAnswer() {
@@ -5203,6 +5394,7 @@ function bossSpriteFrame(b) {
   const f = raidG.frame || 0;
   const idle = () => (b.phase >= 3 ? 'enraged_' + (1 + (Math.floor(f / 12) % 2)) : 'idle_' + (1 + (Math.floor(f / 15) % 4)));
   if (b.exposed > 0) return (Math.floor(f / 24) % 2) ? 'hurt_recover' : 'hurt';   // stunned: animation only (BOS-12)
+  if (b.hitFlash > 0) return 'hurt';   // a quick reaction pose on every hit, not just the big stun
   if (b.type === 'glutton') {
     if (b.feastTimer > 0) return 'special';   // clamped shut
     if (b.feastWarning) return 'telegraph';
@@ -5254,6 +5446,18 @@ function drawBossDispatch(ctx, boss) {
   else if (boss.type === 'glutton') drawGlutton(ctx, boss);
   else drawGrinmaw(ctx, boss);
   ctx.restore();
+
+  // Impact frame: a quick white flash on every hit (works for sprite and fallback art alike),
+  // independent of the longer "hurt" pose above.
+  if (boss.hitFlash > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.55 * (boss.hitFlash / 10);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, (boss.w || 120) * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (dazed) {
     // Stars circling above the head - the classic "knocked silly" cue.
@@ -5768,6 +5972,14 @@ function drawMathPrompt(ctx) {
 
 // Local-only juice, derived each frame by watching state that is already synced
 // (boss hp, my health, boss.transition), so it works identically for host and clients.
+// Hit-stop: a brief full freeze of the raid loop (frame counter included, so animations pause
+// too) on a meaningful hit - an "impact frame" that makes hits read as weighty. Purely a local
+// feel effect: harmless if a host's boss sim or a client's rendering pauses for a few frames.
+let raidHitStopTimer = 0;
+function raidTriggerHitStop(frames) {
+  raidHitStopTimer = Math.max(raidHitStopTimer, frames);
+}
+
 const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [] };
 
 function raidFxTick() {
@@ -6194,14 +6406,24 @@ function raidDraw() {
     const p = raidG.players[id];
     if (!p) return;
     drawPlayerCuphead(raidCtx, p.x, p.y, 36, 48, p.facing || 1,
-               p.health || 5, 5, p.shield || false, p.invincible || 0, false,
-               { skin: p.skin, gun: p.gun, reload: p.reload || 0, recoil: 0 });
+               p.health || 5, p.maxHealth || 5, p.shield || false, p.invincible || 0, false,
+               { skin: p.skin, gun: p.gun, reload: p.reload || 0, swing: p.swing || 0, recoil: 0, vx: p.vx || 0, onGround: p.onGround !== false });
   });
 
   const lp = raidLocal;
+  lp.trail.forEach(g => {
+    raidCtx.save();
+    raidCtx.globalAlpha = Math.max(0, (g.life / RAID_DASH_TRAIL_LIFE) * 0.35);
+    drawPlayerCuphead(raidCtx, g.x, g.y, lp.w, lp.h, g.facing,
+               lp.health, lp.maxHealth, false, 0, false,
+               { skin: lp.skin, gun: lp.gun, recoil: 0, vx: 0, onGround: true, noBar: true, noShadow: true });
+    raidCtx.restore();
+  });
   drawPlayerCuphead(raidCtx, lp.x, lp.y, lp.w, lp.h, lp.facing,
              lp.health, lp.maxHealth, lp.shield, lp.invincible, true,
-             { skin: lp.skin, gun: lp.gun, reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / RAID_RELOAD_FRAMES : 0, recoil: lp.recoil });
+             { skin: lp.skin, gun: lp.gun, recoil: lp.recoil, vx: lp.vx, onGround: lp.onGround,
+               reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
+               swing: lp.swingTimer > 0 ? 1 - lp.swingTimer / RAID_SWORD_SWING_FRAMES : 0 });
 
   raidFx.floaters.forEach(f => {
     raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
@@ -6355,11 +6577,15 @@ function raidUpdateUI() {
 
 function raidGameLoop() {
   if (!raidLoopRunning) return;
-  raidG.frame++;
-  raidUpdateLocal();
-  mqCheckRaidReward();
-  if (raidIsHost) {
-    raidBossUpdate();
+  if (raidHitStopTimer > 0) {
+    raidHitStopTimer--;
+  } else {
+    raidG.frame++;
+    raidUpdateLocal();
+    mqCheckRaidReward();
+    if (raidIsHost) {
+      raidBossUpdate();
+    }
   }
   raidUpdateUI();
   raidDraw();
@@ -6378,16 +6604,18 @@ function raidInit() {
   
   raidMyId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   raidLocal.id = raidMyId;
-  raidLocal.health = 5;
   raidLocal.facing = 1;
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
   raidLocal.recoil = 0;
   // Cosmetics come from the shop profile (see the shop script).
-  const eq = (typeof mqEquippedIds === 'function') ? mqEquippedIds() : { skin: 'skin_classic', gun: 'gun_standard' };
+  const eq = (typeof mqEquippedIds === 'function') ? mqEquippedIds() : { skin: 'skin_classic', gun: 'gun_standard', utility: '' };
   raidLocal.skin = eq.skin;
   raidLocal.gun = eq.gun;
+  raidLocal.utility = eq.utility || '';
+  raidLocal.maxHealth = raidMaxHealthForLoadout();
+  raidLocal.health = raidLocal.maxHealth;
 
   raidConnectedRef = raidDbRef.ref('.info/connected');
   raidConnectedRef.on('value', (snap) => {
@@ -6413,13 +6641,19 @@ function raidInit() {
     raidPlayerRef.child(raidMyId).set({
       x: 200 + Math.random() * 600,
       y: raidGROUND_Y - 48,
-      health: 5,
+      vx: 0,
+      onGround: true,
+      health: raidLocal.health,
+      maxHealth: raidLocal.maxHealth,
       shield: false,
       invincible: 0,
       facing: 1,
       reload: 0,
+      swing: 0,
       skin: raidLocal.skin || 'skin_classic',
       gun: raidLocal.gun || 'gun_standard',
+      utility: raidLocal.utility || '',
+      wardUsed: false,
       lastUpdate: Date.now()
     });
   }
@@ -6477,13 +6711,16 @@ document.addEventListener('keydown', (e) => {
   
   if (key === 'ArrowLeft') { raidLocal.input.left = true; }
   if (key === 'ArrowRight') { raidLocal.input.right = true; }
-  if (key === 'ArrowUp') { raidLocal.input.up = true; }
+  // Z is the Hollow Knight-style jump key; ArrowUp still works too.
+  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = true; }
 
-  if (key === ' ' || key === 'Space') {
+  // X is "attack" (Hollow Knight-style); Space still shoots (or swings) too. Which one
+  // actually happens depends on the equipped weapon - see raidAttack.
+  if (key === ' ' || key === 'Space' || key === 'x' || key === 'X') {
     if (raidShowMathUI) {
       return;
     }
-    raidShootProjectile();
+    raidAttack();
   }
 
   if (key === 'e' || key === 'E' || key === 'Shift') {
@@ -6493,7 +6730,8 @@ document.addEventListener('keydown', (e) => {
     raidTryShield();
   }
 
-  if (key === 'x' || key === 'X') {
+  // C is the Hollow Knight-style dash key (X used to dash; it is "attack" now).
+  if (key === 'c' || key === 'C') {
     if (raidShowMathUI) {
       return;
     }
@@ -6547,7 +6785,7 @@ document.addEventListener('keyup', (e) => {
   const key = e.key;
   if (key === 'ArrowLeft') { raidLocal.input.left = false; }
   if (key === 'ArrowRight') { raidLocal.input.right = false; }
-  if (key === 'ArrowUp') { raidLocal.input.up = false; }
+  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = false; }
 });
 
 // ============================================================
@@ -7164,7 +7402,10 @@ function mqHeadClip(ctx, c) {
 //   bodyDeco  drawn on the body after the base fill
 //   preFace   drawn on the head before eyes/mouth (masks, visors)
 //   deco      drawn last on top (hats, helmets, hair)
-// noFace: skip the default eyes/mouth (skin draws its own). topper: false hides the red pom-pom.
+// noFace: skip the default eyes (skin draws its own). noHorns: hide the default small horns
+// (every skin except Classic Cup sets this, so their existing headwear - hats, bandanas,
+// helmets - isn't fought by horns poking out from underneath). topper: false is unused, kept
+// only so existing per-skin data doesn't need touching.
 
 const MQ_SKINS = [
   {
@@ -7173,7 +7414,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_sprout', name: 'Sprout', rarity: 'common',
-    body: ['#9be89a', '#3f9c4f'], head: ['#ffe6c8', '#dcae7c'], topper: false,
+    body: ['#9be89a', '#3f9c4f'], head: ['#ffe6c8', '#dcae7c'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = 'rgba(255,255,255,0.22)';
@@ -7194,7 +7435,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_bubblegum', name: 'Bubblegum', rarity: 'common',
-    body: ['#ffb3d9', '#e0559a'], head: ['#ffe9dc', '#e2b193'], topper: false,
+    body: ['#ffb3d9', '#e0559a'], head: ['#ffe9dc', '#e2b193'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = 'rgba(255,255,255,0.75)';
@@ -7216,7 +7457,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_bumblebee', name: 'Bumblebee', rarity: 'common',
-    body: ['#ffe45c', '#f0a91a'], head: ['#fff0c9', '#e3b56c'], topper: false,
+    body: ['#ffe45c', '#f0a91a'], head: ['#fff0c9', '#e3b56c'], topper: false, noHorns: true,
     back(ctx, c) {
       const flap = Math.sin(c.t * 0.9) * 0.25;
       ctx.fillStyle = 'rgba(210,240,255,0.55)'; ctx.strokeStyle = 'rgba(80,120,160,0.7)'; ctx.lineWidth = 2;
@@ -7242,7 +7483,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_pirate', name: 'Buccaneer', rarity: 'uncommon',
-    body: ['#d84a3c', '#84201a'], head: ['#ffddbb', '#cc9966'], topper: false,
+    body: ['#d84a3c', '#84201a'], head: ['#ffddbb', '#cc9966'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -7274,7 +7515,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_frost', name: 'Frost Sprite', rarity: 'uncommon', tags: ['ice'],
-    body: ['#d4f4ff', '#5aa9d6'], head: ['#f0fbff', '#b6dcee'], topper: false,
+    body: ['#d4f4ff', '#5aa9d6'], head: ['#f0fbff', '#b6dcee'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
@@ -7302,7 +7543,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_ninja', name: 'Shadow Ninja', rarity: 'uncommon',
-    body: ['#3d3d52', '#14141c'], head: ['#ffddbb', '#cc9966'], topper: false,
+    body: ['#3d3d52', '#14141c'], head: ['#ffddbb', '#cc9966'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = '#d6202f'; ctx.fillRect(c.x - 2, c.y + 26, c.w + 4, 8);
@@ -7335,7 +7576,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_astronaut', name: 'Astronaut', rarity: 'rare', tags: ['cosmic'],
-    body: ['#ffffff', '#b8c3d8'], head: ['#ffe2c6', '#d6a679'], topper: false,
+    body: ['#ffffff', '#b8c3d8'], head: ['#ffe2c6', '#d6a679'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = '#ff8a2a'; ctx.fillRect(c.x - 2, c.y + c.h - 13, c.w + 4, 7);
@@ -7361,7 +7602,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_wizard', name: 'Star Wizard', rarity: 'rare',
-    body: ['#9a66e6', '#4a2a94'], head: ['#ffe2c6', '#d6a679'], topper: false,
+    body: ['#9a66e6', '#4a2a94'], head: ['#ffe2c6', '#d6a679'], topper: false, noHorns: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.fillStyle = '#ffd84d';
@@ -7389,7 +7630,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_robot', name: 'Robo-Bot', rarity: 'rare', tags: ['tech'],
-    body: ['#d3dbe6', '#7b899b'], head: ['#e6ecf3', '#98a5b6'], topper: false, noFace: true,
+    body: ['#d3dbe6', '#7b899b'], head: ['#e6ecf3', '#98a5b6'], topper: false, noHorns: true, noFace: true,
     bodyDeco(ctx, c) {
       ctx.save(); mqClipBody(ctx, c);
       ctx.strokeStyle = 'rgba(40,55,80,0.55)'; ctx.lineWidth = 1.6;
@@ -7424,7 +7665,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_inferno', name: 'Inferno', rarity: 'epic', tags: ['fire'],
-    body: ['#ffb13c', '#b3200f'], head: ['#ffd9b0', '#e08a4c'], topper: false,
+    body: ['#ffb13c', '#b3200f'], head: ['#ffd9b0', '#e08a4c'], topper: false, noHorns: true,
     back(ctx, c) {
       const g = ctx.createRadialGradient(c.cx, c.y + 8, 4, c.cx, c.y + 8, 52);
       g.addColorStop(0, 'rgba(255,150,40,0.45)'); g.addColorStop(1, 'rgba(255,90,20,0)');
@@ -7463,7 +7704,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_galaxy', name: 'Galaxy Walker', rarity: 'epic', tags: ['cosmic'],
-    body: ['#5a3fc4', '#120c44'], head: ['#e9e0ff', '#a99ad6'], topper: false,
+    body: ['#5a3fc4', '#120c44'], head: ['#e9e0ff', '#a99ad6'], topper: false, noHorns: true,
     back(ctx, c) {
       const s = -c.facing;
       for (let i = 0; i < 7; i++) {
@@ -7501,7 +7742,7 @@ const MQ_SKINS = [
   },
   {
     id: 'skin_golden', name: 'Golden Champion', rarity: 'legendary',
-    body: ['#fff3a6', '#d49a12'], head: ['#fff0c4', '#e3b355'], topper: false,
+    body: ['#fff3a6', '#d49a12'], head: ['#fff0c4', '#e3b355'], topper: false, noHorns: true,
     back(ctx, c) {
       const g = ctx.createRadialGradient(c.cx, c.y + 8, 6, c.cx, c.y + 8, 62);
       g.addColorStop(0, 'rgba(255,214,90,0.55)'); g.addColorStop(1, 'rgba(255,214,90,0)');
@@ -7543,7 +7784,7 @@ const MQ_SKINS = [
   {
     id: 'skin_rainbow', name: 'Prism Phantom', rarity: 'legendary',
     bodyDyn(t) { return ['hsl(' + ((t * 3) % 360) + ',95%,72%)', 'hsl(' + ((t * 3 + 80) % 360) + ',85%,52%)']; },
-    head: ['#fff6ff', '#d9c9ee'], topper: false,
+    head: ['#fff6ff', '#d9c9ee'], topper: false, noHorns: true,
     back(ctx, c) {
       const s = -c.facing;
       for (let k = 0; k < 6; k++) {
@@ -7624,17 +7865,60 @@ const MQ_GUNS = [
     bullet: { kind: 'rainbow', core: '#ffffff', mid: '#ffffff', edge: '#ffffff', trail: 'rainbow', size: 1.3 } }
 ];
 
+// Melee weapons: no ammo or reload, shorter range, a wide swing instead of a bullet. All deal
+// the same damage on the same cooldown as each other (WPN-02) - only their look differs, same
+// as guns among themselves. isDefault: 'sword_training' so a fresh player who only unlocks
+// swords still has a starting melee option even before finding another one.
+const MQ_SWORDS = [
+  { id: 'sword_training', name: 'Training Nail', rarity: 'common', isDefault: true,
+    body: ['#d8dde6', '#8c96a6'], trim: '#4a5060', glow: '#e8ecf2' },
+  { id: 'sword_moss', name: 'Moss Blade', rarity: 'uncommon',
+    body: ['#bfe08a', '#4f8a3a'], trim: '#2c5a1f', glow: '#9ee66c' },
+  { id: 'sword_frost', name: 'Frostbite Edge', rarity: 'rare',
+    body: ['#dff6ff', '#5aa9d6'], trim: '#2b6a8f', glow: '#9fe6ff' },
+  { id: 'sword_void', name: 'Voidbone Fang', rarity: 'epic', tags: ['cosmic'],
+    body: ['#8c3cff', '#1a0838'], trim: '#4a2a94', glow: '#b56bff' },
+  { id: 'sword_dawn', name: 'Dawnbreaker', rarity: 'legendary',
+    body: ['#fff3a6', '#e0a012'], trim: '#7a4a00', glow: '#ffd23f' }
+];
+
+// Utility items are the one non-cosmetic equip slot (WPN-03): each has a small, self-affecting
+// gameplay effect. Only one can be equipped at a time, and none is required.
+const MQ_UTILITY = [
+  { id: 'util_boots', name: 'Swift Boots', rarity: 'common', effect: 'dash_cooldown', value: 0.75,
+    color: '#a9b6c9', accent: '#44ddff', blurb: 'Dash cooldown -25%.' },
+  { id: 'util_coin', name: 'Lucky Charm', rarity: 'common', effect: 'coin_bonus', value: 1.1,
+    color: '#9ee66c', accent: '#ffd84d', blurb: '+10% coins from every win.' },
+  { id: 'util_hands', name: 'Quick Hands', rarity: 'uncommon', effect: 'reload_speed', value: 0.8,
+    color: '#5dff9a', accent: '#1f9a58', blurb: 'Reload 20% faster.' },
+  { id: 'util_feather', name: 'Feather Cloak', rarity: 'rare', effect: 'jump_hold', value: 1.3,
+    color: '#dff6ff', accent: '#9fe6ff', blurb: 'Hold jump 30% longer for extra height.' },
+  { id: 'util_heart', name: 'Vital Core', rarity: 'epic', effect: 'max_health', value: 1,
+    color: '#ff6b8a', accent: '#ffd84d', blurb: '+1 max heart.' },
+  { id: 'util_ward', name: 'Warding Sigil', rarity: 'legendary', effect: 'first_hit_ward', value: 1,
+    color: '#ffd23f', accent: '#b56bff', blurb: 'The first hit you take each raid is absorbed.' }
+];
+
 // Tall hats/hair push the floating health bar and reload ring up so they do not overlap.
 const MQ_BAR_LIFT = { skin_wizard: 42, skin_golden: 24, skin_inferno: 20, skin_frost: 16, skin_sprout: 26, skin_bumblebee: 18, skin_robot: 18, skin_astronaut: 6, skin_galaxy: 18, skin_rainbow: 12 };
-MQ_SKINS.forEach(s => { s.type = 'skin'; s.barLift = MQ_BAR_LIFT[s.id] || 0; });
-MQ_GUNS.forEach(g => { g.type = 'gun'; });
-const MQ_ITEMS = MQ_SKINS.concat(MQ_GUNS);
+MQ_SKINS.forEach(s => { s.type = 'skin'; s.slot = 'skin'; s.barLift = MQ_BAR_LIFT[s.id] || 0; });
+MQ_GUNS.forEach(g => { g.type = 'gun'; g.slot = 'weapon'; });
+MQ_SWORDS.forEach(s => { s.type = 'sword'; s.slot = 'weapon'; });
+MQ_UTILITY.forEach(u => { u.type = 'utility'; u.slot = 'utility'; });
+const MQ_ITEMS = MQ_SKINS.concat(MQ_GUNS, MQ_SWORDS, MQ_UTILITY);
 const MQ_ITEM_MAP = {};
 MQ_ITEMS.forEach(i => { MQ_ITEM_MAP[i.id] = i; });
 const MQ_SKIN_MAP = {};
 MQ_SKINS.forEach(s => { MQ_SKIN_MAP[s.id] = s; });
 const MQ_GUN_MAP = {};
 MQ_GUNS.forEach(g => { MQ_GUN_MAP[g.id] = g; });
+const MQ_SWORD_MAP = {};
+MQ_SWORDS.forEach(s => { MQ_SWORD_MAP[s.id] = s; });
+// Every equippable weapon, gun or sword - used wherever code just needs "the equipped
+// weapon" (rendering, crate pools, equip validation) without caring which kind it is.
+const MQ_WEAPON_MAP = Object.assign({}, MQ_GUN_MAP, MQ_SWORD_MAP);
+const MQ_UTILITY_MAP = {};
+MQ_UTILITY.forEach(u => { MQ_UTILITY_MAP[u.id] = u; });
 
 
 // ============================================================
@@ -7783,6 +8067,71 @@ function mqDrawGun(ctx, gunId, px, py, facing, reload, recoil, t) {
   }
 }
 
+// ---- Swords (melee weapons) --------------------------------------------------
+// Every sword shares one blade silhouette (guns do the same - several reuse "blaster"); they
+// differ by color/glow, same as the rest of the shop's items. swing: 0 at rest, 1 mid-swing,
+// wrapping back down to 0 as the blade returns - see raidSwordSwing / raidLocal.swingTimer.
+
+function mqDrawSword(ctx, swordId, px, py, facing, swing, t) {
+  const def = MQ_SWORD_MAP[swordId] || MQ_SWORD_MAP.sword_training;
+  swing = swing || 0;
+  // ease out-and-back: 0 -> 1 over the first half of the swing, 1 -> 0 over the second half.
+  const e = swing <= 0.5 ? swing * 2 : (1 - swing) * 2;
+  const angle = -0.7 + e * 2.0; // sweeps from behind the player to well in front
+
+  if (swing > 0) {
+    // The slash trail: a fading crescent following the blade through its arc.
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.scale(facing, 1);
+    for (let i = 0; i < 5; i++) {
+      const a2 = angle - i * 0.09;
+      ctx.strokeStyle = def.glow;
+      ctx.globalAlpha = (1 - i / 5) * 0.55 * (0.4 + e * 0.6);
+      ctx.lineWidth = 5 - i * 0.7;
+      ctx.beginPath();
+      ctx.arc(0, 0, RAID_GUN_LENGTH + 4, -Math.PI / 2 + a2 - 0.35, -Math.PI / 2 + a2 + 0.35);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.scale(facing, 1);
+  ctx.rotate(angle);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+  if (def.rarity === 'epic' || def.rarity === 'legendary') { ctx.shadowColor = def.glow; ctx.shadowBlur = 9; }
+  // hilt
+  ctx.fillStyle = def.trim;
+  ctx.beginPath(); ctx.roundRect(-6, -4, 12, 9, 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(-2, -8, 4, 6, 1.5); ctx.fill(); ctx.stroke();
+  // blade
+  const g = ctx.createLinearGradient(0, -RAID_GUN_LENGTH - 4, 0, -8);
+  g.addColorStop(0, def.body[0]); g.addColorStop(1, def.body[1]);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(-3.4, -8);
+  ctx.lineTo(-2.2, -RAID_GUN_LENGTH + 2);
+  ctx.lineTo(0, -RAID_GUN_LENGTH - 6);
+  ctx.lineTo(2.2, -RAID_GUN_LENGTH + 2);
+  ctx.lineTo(3.4, -8);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = def.glow; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.8;
+  ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, -RAID_GUN_LENGTH); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// Draws whichever weapon is equipped, gun or sword - the only fork the caller needs.
+function mqDrawWeapon(ctx, weaponId, px, py, facing, reload, recoil, swing, t) {
+  if (MQ_SWORD_MAP[weaponId]) mqDrawSword(ctx, weaponId, px, py, facing, swing, t);
+  else mqDrawGun(ctx, weaponId, px, py, facing, reload, recoil, t);
+}
+
 // ---- Bullets ----------------------------------------------------------------
 
 function mqBulletColors(def, t) {
@@ -7830,6 +8179,7 @@ function mqBulletTrail(ctx, p, def, col, size, t) {
 }
 
 function drawPlayerBullet(ctx, p) {
+  if (p.kind === 'melee') return; // a sword hit is a point, not a travelling bullet - no orb to draw
   const def = MQ_GUN_MAP[p.gun] || MQ_GUN_MAP.gun_standard;
   const t = p.t !== undefined ? p.t : raidG.frame;
   const col = mqBulletColors(def, t);
@@ -7898,6 +8248,10 @@ function drawPlayerBullet(ctx, p) {
 // ---- Player -----------------------------------------------------------------
 // look: {skin, gun, reload (0..1), recoil (0..1), t, noBar, noShadow}
 
+// A step toward Hollow Knight's smaller, simpler vessel look (WPN-20): the whole character is
+// drawn at this scale, anchored at the feet - see drawPlayerCuphead.
+const MQ_PLAYER_SCALE = 0.85;
+
 function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, invincible, isLocal, look) {
   look = look || {};
   const t = look.t !== undefined ? look.t : raidG.frame;
@@ -7909,12 +8263,34 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   ctx.save();
   ctx.shadowBlur = 0;
+
+  // Movement animation (RAI-20): a small idle bob, a bigger/faster bob while running, and a
+  // slight lean into the direction of travel - none of it while airborne. Bob phase rides the
+  // shared frame counter rather than per-player state, so this stays simple and self-contained.
+  const mvx = look.vx || 0;
+  const mvGrounded = look.onGround !== false;
+  const mvMoving = Math.abs(mvx) > 0.5;
+  const bob = mvGrounded ? Math.sin(t * (mvMoving ? 0.35 : 0.08)) * (mvMoving ? 3 : 1.6) : 0;
+  const lean = mvGrounded ? Math.max(-0.12, Math.min(0.12, mvx * 0.02)) : 0;
   if (!look.noShadow) {
+    // Drawn before the scale-down/bob transform below, so the shadow stays a constant-size
+    // ground shadow instead of shrinking and bobbing along with the body above it.
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
     ctx.ellipse(cx, baseY + h + 4, w / 2 + 4, 6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // A whole-character scale-down (WPN-20: "a bit smaller"), anchored at the feet so shrinking
+  // doesn't make the character sink into or float off the ground. Scoped to just the body/head
+  // below (restored before the shield ring / health bar / reload ring further down) so those
+  // HUD elements keep their original fixed size and position above the head.
+  ctx.save();
+  ctx.translate(cx, baseY + h);
+  ctx.rotate(lean);
+  ctx.scale(MQ_PLAYER_SCALE, MQ_PLAYER_SCALE);
+  ctx.translate(-cx, -(baseY + h));
+  ctx.translate(0, bob);
 
   if (sk.back) { ctx.save(); sk.back(ctx, c); ctx.restore(); }
 
@@ -7924,6 +8300,7 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   let top, bottom;
   if (shield) { top = '#66ddff'; bottom = '#3399dd'; }
+  else if (invincible > 24) { top = '#ffffff'; bottom = '#ffe0e0'; } // impact frame: bright flash on the hit itself
   else if (invincible > 0 && invincible % 6 < 3) { top = '#ffaa88'; bottom = '#dd6644'; }
   else if (classic) { top = isLocal ? '#ffcc88' : '#88aaff'; bottom = isLocal ? '#dd8844' : '#446688'; }
   else if (sk.bodyDyn) { const cc = sk.bodyDyn(t); top = cc[0]; bottom = cc[1]; }
@@ -7971,30 +8348,33 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   if (sk.preFace) { ctx.save(); sk.preFace(ctx, c); ctx.restore(); }
 
+  // Hollow Knight-style face (WPN-20): big flat black eyes, no visible mouth by default - a
+  // skin can still draw its own (e.g. a mask) via preFace/deco.
   if (!sk.noFace) {
     const eyeX = facing > 0 ? 4 : -4;
     ctx.fillStyle = 'white';
-    ctx.beginPath(); ctx.ellipse(cx - 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx + 8 + eyeX, baseY - 14, 8, 9, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#222';
-    ctx.beginPath(); ctx.arc(cx - 6 + eyeX, baseY - 12, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + 10 + eyeX, baseY - 12, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'white';
-    ctx.beginPath(); ctx.arc(cx - 4 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + 12 + eyeX, baseY - 16, 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#884422';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(cx, baseY, 8, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(cx - 8 + eyeX, baseY - 14, 8, 9.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + 8 + eyeX, baseY - 14, 8, 9.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#181820';
+    ctx.beginPath(); ctx.ellipse(cx - 8 + eyeX, baseY - 13, 6.4, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + 8 + eyeX, baseY - 13, 6.4, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath(); ctx.arc(cx - 6 + eyeX, baseY - 17, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 10 + eyeX, baseY - 17, 1.8, 0, Math.PI * 2); ctx.fill();
   }
 
-  if (classic) {
-    ctx.fillStyle = '#ff4444';
-    ctx.shadowBlur = 5;
-    ctx.shadowColor = '#ff0000';
-    ctx.beginPath(); ctx.arc(cx, baseY - 30, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ff8888';
-    ctx.beginPath(); ctx.arc(cx - 1, baseY - 31, 2, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0;
+  // Small default horns, replacing the old red pom-pom - every skin gets them unless it draws
+  // its own headwear over the top (sk.noHorns), matching the reference vessel silhouette.
+  if (!sk.noHorns) {
+    ctx.fillStyle = hc[1]; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2;
+    [-1, 1].forEach(s => {
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 9, baseY - 27);
+      ctx.quadraticCurveTo(cx + s * 15, baseY - 36, cx + s * 10, baseY - 42);
+      ctx.quadraticCurveTo(cx + s * 13, baseY - 34, cx + s * 6, baseY - 27);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    });
   }
   if (sk.deco) { ctx.save(); sk.deco(ctx, c); ctx.restore(); }
 
@@ -8005,10 +8385,12 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
     ctx.strokeStyle = bottom; ctx.lineWidth = 4.6;
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
-    mqDrawGun(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, t);
+    mqDrawWeapon(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, look.swing || 0, t);
     ctx.fillStyle = hc[0]; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(gx, gy + 1, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
+
+  ctx.restore(); // back to unscaled space for the shield ring / health bar / reload ring below
 
   if (shield) {
     ctx.shadowBlur = 30;
@@ -8074,6 +8456,17 @@ function mqDrawItemPreview(canvas, itemId, t, opts) {
     const eq = (typeof mqProfile !== 'undefined' && mqProfile.equipped.gun) || 'gun_standard';
     drawPlayerCuphead(ctx, -18, -24 + bob, 36, 48, 1, 5, 5, false, 0, true,
       { skin: item.id, gun: opts.gun || eq, t: t, noBar: true, noShadow: true });
+  } else if (item.type === 'sword') {
+    const s = opts.scale || 1.5;
+    ctx.translate(W / 2, H * 0.78);
+    ctx.rotate(-0.15 + Math.sin(t * 0.05) * 0.04);
+    ctx.scale(s, s);
+    mqDrawSword(ctx, item.id, 0, 0, 1, 0, t);
+  } else if (item.type === 'utility') {
+    const s = opts.scale || 1.6;
+    ctx.translate(W / 2, H * 0.55);
+    ctx.scale(s, s);
+    mqDrawUtilityIcon(ctx, item, t);
   } else {
     const s = opts.scale || 1.7;
     ctx.translate(W / 2 - 8, H * 0.8);
@@ -8089,6 +8482,28 @@ function mqDrawItemPreview(canvas, itemId, t, opts) {
   ctx.restore();
 }
 
+// A simple glowing hex badge for utility items - they aren't held/worn like weapons or skins,
+// so they get one shared "trinket" shape, differentiated by color like the rest of the shop.
+function mqDrawUtilityIcon(ctx, item, t) {
+  ctx.save();
+  ctx.translate(0, Math.sin(t * 0.05) * 2);
+  ctx.shadowColor = item.accent; ctx.shadowBlur = 14;
+  ctx.fillStyle = item.color; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = i * Math.PI / 3 - Math.PI / 6;
+    const px = Math.cos(a) * 22, py = Math.sin(a) * 22;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = item.accent;
+  ctx.beginPath(); ctx.arc(0, 0, 8 + Math.sin(t * 0.08) * 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
 
 // ============================================================
 // PROFILE: COINS, OWNED ITEMS, EQUIPPED ITEMS (saved in this browser)
@@ -8099,12 +8514,17 @@ const MQ_PROFILE_KEY = 'mathquest_raid_profile_v1';
 const MQ_COIN_REWARD = { easy: 60, normal: 120, hard: 250 };
 const MQ_HEART_BONUS = 10;
 
+// Maps an item's equip slot to the key it lives under in mqProfile.equipped. Weapons (guns and
+// swords alike) share the "gun" key so existing saved profiles need no migration - it just
+// means "the equipped weapon's id" now, whichever kind it is (WPN-01).
+const MQ_SLOT_KEY = { skin: 'skin', weapon: 'gun', utility: 'utility' };
+
 function mqDefaultProfile() {
   return {
     v: 1,
     coins: 0,
-    owned: { skin_classic: 1, gun_standard: 1 },
-    equipped: { skin: 'skin_classic', gun: 'gun_standard' },
+    owned: { skin_classic: 1, gun_standard: 1, sword_training: 1 },
+    equipped: { skin: 'skin_classic', gun: 'gun_standard', utility: '' },
     stats: { crates: 0, raids: 0 }
   };
 }
@@ -8121,7 +8541,8 @@ function mqLoadProfile() {
     }
     if (s.equipped) {
       if (MQ_SKIN_MAP[s.equipped.skin] && p.owned[s.equipped.skin]) p.equipped.skin = s.equipped.skin;
-      if (MQ_GUN_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
+      if (MQ_WEAPON_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
+      if (s.equipped.utility && MQ_UTILITY_MAP[s.equipped.utility] && p.owned[s.equipped.utility]) p.equipped.utility = s.equipped.utility;
     }
     if (s.stats) {
       p.stats.crates = Math.floor(s.stats.crates) || 0;
@@ -8138,7 +8559,7 @@ function mqSaveProfile() {
 }
 
 function mqEquippedIds() {
-  return { skin: mqProfile.equipped.skin, gun: mqProfile.equipped.gun };
+  return { skin: mqProfile.equipped.skin, gun: mqProfile.equipped.gun, utility: mqProfile.equipped.utility || '' };
 }
 
 function mqRefreshCoinUI() {
@@ -8147,9 +8568,12 @@ function mqRefreshCoinUI() {
 
 function mqAwardRaidVictory() {
   const base = MQ_COIN_REWARD[currentDifficulty] || MQ_COIN_REWARD.normal;
-  const hearts = Math.max(0, Math.min(5, raidLocal.health));
+  const hearts = Math.max(0, Math.min(raidLocal.maxHealth || 5, raidLocal.health));
   const bonus = hearts * MQ_HEART_BONUS;
-  const total = base + bonus;
+  // Lucky Charm's coin bonus (WPN-03).
+  const util = MQ_UTILITY_MAP[mqProfile.equipped.utility];
+  const coinMult = util && util.effect === 'coin_bonus' ? util.value : 1;
+  const total = Math.round((base + bonus) * coinMult);
   mqProfile.coins += total;
   mqProfile.stats.raids++;
   mqSaveProfile();
@@ -8178,23 +8602,23 @@ function mqCheckRaidReward() {
 const MQ_CRATES = [
   { id: 'crate_starter', name: 'Starter Crate', price: 100, emoji: '⭐',
     blurb: 'A bit of everything. Mostly common finds, with a small shot at something special.',
-    types: ['skin', 'gun'], weights: { common: 64, uncommon: 27, rare: 8, epic: 1 },
+    types: ['skin', 'gun', 'sword', 'utility'], weights: { common: 64, uncommon: 27, rare: 8, epic: 1 },
     art: { wood: '#c98a45', wood2: '#8a5424', trim: '#4a2a10', metal: '#e6c47a', glow: '#ffd08a' } },
   { id: 'crate_hero', name: 'Hero Crate', price: 250, emoji: '🦸',
     blurb: 'Player skins only. No commons - every drop is uncommon or better.',
     types: ['skin'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
     art: { wood: '#4a86e8', wood2: '#23438f', trim: '#0f1f4d', metal: '#bcd4ff', glow: '#8fb8ff' } },
   { id: 'crate_arsenal', name: 'Arsenal Crate', price: 250, emoji: '🔫',
-    blurb: 'Gun skins only, with bullet styles and trails to match.',
-    types: ['gun'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
+    blurb: 'Weapon skins only - guns and swords alike. No commons - every drop is uncommon or better.',
+    types: ['gun', 'sword'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
     art: { wood: '#7a8a9e', wood2: '#404c5e', trim: '#151b26', metal: '#d6dde8', glow: '#a9c7ee' } },
   { id: 'crate_cosmic', name: 'Cosmic Crate', price: 400, emoji: '🌌',
     blurb: 'Space-themed skins and guns only. A tighter pool means better odds on each item.',
     tags: ['cosmic'], weights: { rare: 60, epic: 32, legendary: 8 },
     art: { wood: '#6a45c8', wood2: '#2c1a72', trim: '#120a38', metal: '#e0d0ff', glow: '#b9a6ff' } },
   { id: 'crate_legend', name: 'Legend Crate', price: 700, emoji: '👑',
-    blurb: 'Only rare or better, and the best odds of a legendary.',
-    types: ['skin', 'gun'], weights: { rare: 46, epic: 39, legendary: 15 },
+    blurb: 'Only rare or better, and the best odds of a legendary - across every kind of gear.',
+    types: ['skin', 'gun', 'sword', 'utility'], weights: { rare: 46, epic: 39, legendary: 15 },
     art: { wood: '#f0b429', wood2: '#a86a0a', trim: '#5a3500', metal: '#fff1b0', glow: '#ffe27a' } }
 ];
 const MQ_CRATE_MAP = {};
@@ -8317,6 +8741,8 @@ function mqRenderCrates() {
     const kinds = [];
     if (!crate.types || crate.types.indexOf('skin') >= 0) kinds.push('🧍 Player skins');
     if (!crate.types || crate.types.indexOf('gun') >= 0) kinds.push('🔫 Gun skins');
+    if (!crate.types || crate.types.indexOf('sword') >= 0) kinds.push('⚔️ Swords');
+    if (!crate.types || crate.types.indexOf('utility') >= 0) kinds.push('🧰 Utility items');
     const afford = mqProfile.coins >= crate.price;
     return `
       <div class="crate-card" style="--glow:${crate.art.glow}">
@@ -8374,7 +8800,7 @@ function mqShowOdds(crateId) {
     const rar = MQ_RARITY[r];
     html += `<div class="mq-odds-group" style="--rc:${rar.color}">
       <div class="mq-odds-head"><span class="mq-odds-rar">${rar.name}</span><span class="mq-odds-total">${mqFmtPct(rows[0].rarityProb)} total</span></div>
-      ${rows.map(e => `<div class="mq-odds-row"><span class="mq-odds-name">${e.item.type === 'skin' ? '🧍' : '🔫'} ${e.item.name}</span><span class="mq-odds-pct">${mqFmtPct(e.prob)}</span></div>`).join('')}
+      ${rows.map(e => `<div class="mq-odds-row"><span class="mq-odds-name">${MQ_TYPE_ICON[e.item.type] || '🔫'} ${e.item.name}</span><span class="mq-odds-pct">${mqFmtPct(e.prob)}</span></div>`).join('')}
     </div>`;
   });
   html += `<p class="mq-odds-foot">Duplicates aren't wasted: they convert to coins - ${MQ_RARITY_ORDER.map(r => MQ_RARITY[r].name + ' ' + MQ_RARITY[r].refund).join(', ')}.</p>`;
@@ -8466,39 +8892,53 @@ function mqBurst(host, rarity) {
   }
 }
 
+// Utility is the one optional slot: clicking an already-equipped utility item unequips it
+// (skin and weapon always have something equipped, so they only ever swap, never clear).
 function mqEquipItem(itemId) {
   const item = MQ_ITEM_MAP[itemId];
   if (!item || !mqProfile.owned[itemId]) return;
-  mqProfile.equipped[item.type] = itemId;
+  const key = MQ_SLOT_KEY[item.slot];
+  if (item.slot === 'utility' && mqProfile.equipped.utility === itemId) mqProfile.equipped.utility = '';
+  else mqProfile.equipped[key] = itemId;
   mqSaveProfile();
   if (mqShopTab === 'inv') mqRenderInventory();
 }
+
+const MQ_TYPE_LABEL = { skin: 'Player Skin', gun: 'Weapon · Gun', sword: 'Weapon · Sword', utility: 'Utility' };
+const MQ_TYPE_ICON = { skin: '🧍', gun: '🔫', sword: '⚔️', utility: '🧰' };
+const MQ_SLOT_ORDER = { skin: 0, weapon: 1, utility: 2 };
 
 function mqRenderInventory() {
   mqPreviews = mqPreviews.filter(p => p.modal);
   const ownedCount = MQ_ITEMS.filter(i => mqProfile.owned[i.id]).length;
   mqEl('invCount').textContent = ownedCount + ' / ' + MQ_ITEMS.length + ' collected';
-  ['all', 'skin', 'gun'].forEach(f => mqEl('invF_' + f).classList.toggle('active', mqInvFilter === f));
+  ['all', 'skin', 'weapon', 'utility'].forEach(f => mqEl('invF_' + f).classList.toggle('active', mqInvFilter === f));
   mqEl('invHideLocked').checked = mqHideLocked;
 
-  const eqSkin = MQ_SKIN_MAP[mqProfile.equipped.skin], eqGun = MQ_GUN_MAP[mqProfile.equipped.gun];
+  const eqSkin = MQ_SKIN_MAP[mqProfile.equipped.skin], eqGun = MQ_WEAPON_MAP[mqProfile.equipped.gun];
+  const eqUtil = MQ_UTILITY_MAP[mqProfile.equipped.utility];
   mqEl('loadoutSkin').innerHTML = `<span style="color:${MQ_RARITY[eqSkin.rarity].color}">${eqSkin.name}</span> <small>${MQ_RARITY[eqSkin.rarity].name}</small>`;
-  mqEl('loadoutGun').innerHTML = `<span style="color:${MQ_RARITY[eqGun.rarity].color}">${eqGun.name}</span> <small>${MQ_RARITY[eqGun.rarity].name}</small>`;
+  mqEl('loadoutGun').innerHTML = `<span style="color:${MQ_RARITY[eqGun.rarity].color}">${eqGun.name}</span> <small>${MQ_RARITY[eqGun.rarity].name} ${eqGun.type === 'sword' ? '(melee)' : '(ranged)'}</small>`;
+  mqEl('loadoutUtility').innerHTML = eqUtil
+    ? `<span style="color:${MQ_RARITY[eqUtil.rarity].color}">${eqUtil.name}</span> <small>${eqUtil.blurb}</small>`
+    : '<span style="opacity:0.6">None equipped</span> <small>optional</small>';
 
-  const items = MQ_ITEMS.filter(i => (mqInvFilter === 'all' || i.type === mqInvFilter) && (!mqHideLocked || mqProfile.owned[i.id]))
-    .sort((a, b) => (a.type === b.type ? 0 : a.type === 'skin' ? -1 : 1) || MQ_RARITY_ORDER.indexOf(b.rarity) - MQ_RARITY_ORDER.indexOf(a.rarity));
+  const items = MQ_ITEMS.filter(i => (mqInvFilter === 'all' || i.slot === mqInvFilter) && (!mqHideLocked || mqProfile.owned[i.id]))
+    .sort((a, b) => MQ_SLOT_ORDER[a.slot] - MQ_SLOT_ORDER[b.slot] || MQ_RARITY_ORDER.indexOf(b.rarity) - MQ_RARITY_ORDER.indexOf(a.rarity));
   const grid = mqEl('invGrid');
   grid.innerHTML = items.map(item => {
     const owned = mqProfile.owned[item.id] || 0;
     const rar = MQ_RARITY[item.rarity];
-    const eq = mqProfile.equipped[item.type] === item.id;
+    const eq = mqProfile.equipped[MQ_SLOT_KEY[item.slot]] === item.id;
+    const canUnequip = eq && item.slot === 'utility';
     return `<div class="inv-card ${owned ? '' : 'locked'} ${eq ? 'equipped' : ''}" style="--rc:${rar.color};--rg:${rar.glow}" data-item="${item.id}">
       <div class="inv-rarity">${rar.name}${owned > 1 ? ' · x' + owned : ''}</div>
       <canvas width="150" height="170" data-item="${item.id}"></canvas>
       ${owned ? '' : '<div class="inv-lock">🔒</div>'}
       <div class="inv-name">${item.name}</div>
-      <div class="inv-type">${item.type === 'skin' ? 'Player Skin' : 'Gun Skin'}</div>
-      ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? 'Equipped ✓' : 'Equip'}</button>` : '<div class="inv-hint">Find in crates</div>'}
+      <div class="inv-type">${MQ_TYPE_LABEL[item.type]}</div>
+      ${item.blurb ? `<div class="inv-blurb">${item.blurb}</div>` : ''}
+      ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq && !canUnequip ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? (canUnequip ? 'Unequip' : 'Equipped ✓') : 'Equip'}</button>` : '<div class="inv-hint">Find in crates</div>'}
     </div>`;
   }).join('') || '<p class="inv-empty">Nothing here yet - open some crates!</p>';
   grid.querySelectorAll('canvas').forEach(cv => mqRegisterPreview(cv, cv.dataset.item, { locked: !mqProfile.owned[cv.dataset.item] }));
@@ -8526,28 +8966,44 @@ function mqDrawLoadout(canvas, t) {
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.beginPath(); ctx.ellipse(W / 2, H - 34, 70, 10, 0, 0, Math.PI * 2); ctx.fill();
 
-  const cycle = 300, f = t % cycle;
-  const shots = [30, 52, 74, 96];
-  let recoil = 0;
-  shots.forEach(s => { if (f >= s && f < s + 8) recoil = Math.max(recoil, 1 - (f - s) / 8); });
-  const reload = f >= 150 && f < 250 ? (f - 150) / 100 : 0;
+  const isSword = !!MQ_SWORD_MAP[gun];
+  let look, label;
+  if (isSword) {
+    // A sword has no reload - just loop the swing every couple of seconds.
+    const cycle = 130, f = t % cycle;
+    const swing = f < RAID_SWORD_SWING_FRAMES ? f / RAID_SWORD_SWING_FRAMES : 0;
+    look = { skin: skin, gun: gun, swing: swing, t: t, noBar: true, noShadow: true };
+    label = swing > 0 ? 'SWINGING' : 'READY';
+  } else {
+    const cycle = 300, f = t % cycle;
+    const shots = [30, 52, 74, 96];
+    let recoil = 0;
+    shots.forEach(s => { if (f >= s && f < s + 8) recoil = Math.max(recoil, 1 - (f - s) / 8); });
+    const reload = f >= 150 && f < 250 ? (f - 150) / 100 : 0;
+    look = { skin: skin, gun: gun, reload: reload, recoil: recoil, t: t, noBar: true, noShadow: true };
+    label = reload > 0 ? 'RELOADING...' : (f < 150 ? 'FIRING' : 'READY');
+    // bullets fly up from the muzzle - a sword has nothing to draw here, it hits in melee range
+    ctx.save();
+    ctx.translate(W / 2 - 6, H - 40);
+    ctx.scale(2.3, 2.3);
+    const mx = RAID_GUN_OFFSET_X, my = -48 + RAID_GUN_PIVOT_Y - RAID_GUN_LENGTH;
+    shots.forEach(s => {
+      const age = f - s;
+      if (age >= 0 && age < 40) drawPlayerBullet(ctx, { x: mx, y: my - age * 5, vx: 0, vy: -6, r: 6, gun: gun, t: t });
+    });
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.translate(W / 2 - 6, H - 40);
   ctx.scale(2.3, 2.3);
-  drawPlayerCuphead(ctx, -18, -48, 36, 48, 1, 5, 5, false, 0, true, { skin: skin, gun: gun, reload: reload, recoil: recoil, t: t, noBar: true, noShadow: true });
-  // bullets fly up from the muzzle
-  const mx = RAID_GUN_OFFSET_X, my = -48 + RAID_GUN_PIVOT_Y - RAID_GUN_LENGTH;
-  shots.forEach(s => {
-    const age = f - s;
-    if (age >= 0 && age < 40) drawPlayerBullet(ctx, { x: mx, y: my - age * 5, vx: 0, vy: -6, r: 6, gun: gun, t: t });
-  });
+  drawPlayerCuphead(ctx, -18, -48, 36, 48, 1, 5, 5, false, 0, true, look);
   ctx.restore();
 
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = 'bold 13px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(reload > 0 ? 'RELOADING...' : (f < 150 ? 'FIRING' : 'READY'), W / 2, 22);
+  ctx.fillText(label, W / 2, 22);
   ctx.textAlign = 'left';
 }
 

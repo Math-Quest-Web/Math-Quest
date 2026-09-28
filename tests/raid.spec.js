@@ -139,24 +139,31 @@ test.describe('Multiplayer model (spec 8.1)', () => {
 });
 
 test.describe('Player controls and stats (spec 8.2)', () => {
-  test('RAI-10 keyboard: arrows move/jump, Space shoots, Shift/E shields, X dashes, R reloads', async ({ page }) => {
+  test('RAI-10 keyboard: arrows move, Z/Up jump, Space/X attack, Shift/E shields, C dashes, R reloads', async ({ page }) => {
     await page.evaluate(() => T.setupRaid('grinmaw'));
     await keyDown(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(true);
     await keyUp(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(false);
     await keyDown(page, 'ArrowRight'); expect(await page.evaluate(() => raidLocal.input.right)).toBe(true);
     await keyUp(page, 'ArrowRight');
     await keyDown(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
-    await keyUp(page, 'ArrowUp');
+    await keyUp(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
+    await keyDown(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
+    await keyUp(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
 
     await keyDown(page, ' ');
     expect(await page.evaluate(() => raidAmmo)).toBe(19);
+    await page.evaluate(() => { for (let i = 0; i < RAID_FIRE_DELAY; i++) raidUpdateLocal(); }); // clear the fire-rate limit (RAI-12)
+    await keyDown(page, 'x'); // Hollow Knight-style "attack" - fires the gun, same as Space
+    expect(await page.evaluate(() => raidAmmo)).toBe(18);
     await keyDown(page, 'e');
     expect(await page.evaluate(() => raidLocal.shield)).toBe(true);
     await page.evaluate(() => { raidLocal.shield = false; });
     await keyDown(page, 'Shift');
     expect(await page.evaluate(() => raidLocal.shield)).toBe(true);
-    await keyDown(page, 'x');
+    await keyDown(page, 'c'); // Hollow Knight-style dash key (X is "attack" now, not dash)
     expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180);
+    await keyDown(page, 'x'); // attack, not dash, while X means attack
+    expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180); // unchanged - X never dashes
     await keyDown(page, 'r');
     expect(await page.evaluate(() => raidReloadTimer)).toBe(100);
   });
@@ -312,6 +319,26 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r).toEqual({ cooldown: 180, invincible: 14, vx: 12, secondBlocked: true, almost: 1, ready: 0, hud: 'READY' });
   });
 
+  test('RAI-16 the dash burst is not immediately undone by the normal running speed cap, and leaves a trail', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.facing = 1;
+      raidLocal.input = { left: false, right: false, up: false, space: false };
+      raidTryDash();
+      const vxDuringDash = [];
+      for (let i = 0; i < RAID_DASH_FRAMES; i++) { vxDuringDash.push(raidLocal.vx); raidUpdateLocal(); }
+      const trailDuringDash = raidLocal.trail.length;
+      const vxAfterDash = raidLocal.vx;
+      for (let i = 0; i < 5; i++) raidUpdateLocal();
+      return { vxDuringDash, trailDuringDash, vxAfterDash, vxSettled: raidLocal.vx, dashSpeed: RAID_DASH_SPEED };
+    });
+    // every frame of the dash keeps the full burst speed - not clamped back to the run cap of 7
+    expect(r.vxDuringDash.every((v) => v === r.dashSpeed)).toBe(true);
+    expect(r.trailDuringDash).toBeGreaterThan(0);
+    expect(r.vxAfterDash).toBe(r.dashSpeed);
+    expect(Math.abs(r.vxSettled)).toBeLessThanOrEqual(7); // back under normal control once the dash ends
+  });
+
   test('RAI-17 movement tops out at 7 px/frame and a jump rises about 210 px', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
@@ -332,6 +359,262 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.rise).toBeGreaterThan(190);
     expect(r.rise).toBeLessThan(230);
     expect(r.backOnGround).toBe(true);
+  });
+
+  test('RAI-17 holding the jump key rises higher than a quick tap (variable-height jump)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const jump = (holdFrames) => {
+        T.place(500);
+        raidLocal.onGround = true;
+        raidLocal.jumpBoosting = false;
+        raidLocal.jumpHoldTimer = 0;
+        const groundY = raidLocal.y;
+        raidLocal.input.up = true;
+        let minY = groundY;
+        for (let i = 0; i < holdFrames; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.up = false;
+        for (let i = 0; i < 150; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        return groundY - minY;
+      };
+      return {
+        tap: jump(1),
+        fullHold: jump(30),
+        constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
+      };
+    });
+    expect(r.constants).toEqual({ grav: 0.4, vy: -13, holdGrav: 0.16, holdFrames: 18 });
+    // a tap behaves like the old fixed jump (unaffected by the new hold mechanic)
+    expect(r.tap).toBeGreaterThan(190);
+    expect(r.tap).toBeLessThan(230);
+    expect(r.fullHold, 'holding the whole way up rises well beyond a tap').toBeGreaterThan(r.tap + 60);
+    expect(r.fullHold).toBeLessThan(380);
+  });
+
+  test('RAI-18 the boss hit area is sized per boss - the Wyrm is wider than the old fixed 50px box', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('wyrm');
+      const out = { table: JSON.parse(JSON.stringify(BOSS_HITBOX)) };
+      const hitAt = (type, dx, dy) => {
+        T.prepBoss(type, 1);
+        const b = raidG.boss;
+        const hp0 = b.hp;
+        raidG.playerProjectiles = [{ x: b.x + dx, y: b.y + dy, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }];
+        raidBossUpdate();
+        return hp0 - b.hp;
+      };
+      out.wyrmWideEdge = hitAt('wyrm', 80, 0); // outside the old fixed box, inside the Wyrm's wider one
+      out.wyrmBeyond = hitAt('wyrm', 140, 0); // outside even the wider box
+      out.grinmawNear = hitAt('grinmaw', 40, 0);
+      out.grinmawBeyond = hitAt('grinmaw', 80, 0); // same spot that hits the wider Wyrm misses the narrower Grinmaw
+      return out;
+    });
+    expect(r.table).toEqual({
+      grinmaw: { hw: 58, hh: 58 }, warden: { hw: 50, hh: 65 }, wyrm: { hw: 105, hh: 55 }, glutton: { hw: 58, hh: 58 }
+    });
+    expect(r.wyrmWideEdge).toBe(3);
+    expect(r.wyrmBeyond).toBe(0);
+    expect(r.grinmawNear).toBe(3);
+    expect(r.grinmawBeyond).toBe(0);
+  });
+
+  test('RAI-19 taking a hit knocks the player back, flashes white and briefly freezes the game (hit-stop)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidHitStopTimer = 0;
+      raidLocal.facing = 1; raidLocal.vx = 0; raidLocal.vy = 0;
+      // as raidDamagePlayer would on the host, but observed the way every client actually finds
+      // out - through its own player-list listener - so this also covers non-host players.
+      await raidPlayerRef.child(raidMyId).update({ health: 4, invincible: 30 });
+      const out = {};
+      out.knockedBack = raidLocal.vx < 0; // pushed opposite of facing (+1)
+      out.poppedUp = raidLocal.vy < 0;
+      out.hitStop = raidHitStopTimer > 0;
+
+      // the bright flash renders during the first ~6 of the 30 invincibility frames
+      // (40, 76) sits in the lower torso, comfortably inside the body fill and clear of both
+      // the outline stroke and the smaller (WPN-20), feet-anchored head's shadow trail.
+      const flashAt = (invincible) => {
+        const c = document.createElement('canvas'); c.width = 80; c.height = 100;
+        const ctx = c.getContext('2d');
+        drawPlayerCuphead(ctx, 20, 40, 36, 48, 1, 4, 5, false, invincible, true, { noBar: true, noShadow: true, noGun: true, t: 0 });
+        return ctx.getImageData(40, 76, 1, 1).data;
+      };
+      const bright = flashAt(28), late = flashAt(10);
+      out.veryWhite = bright[0] > 245 && bright[1] > 225 && bright[2] > 225;
+      out.laterNotAsWhite = !(late[0] > 245 && late[1] > 225 && late[2] > 225);
+
+      // no reaction on a health increase, or once already dead
+      raidHitStopTimer = 0; raidLocal.vx = 0;
+      await raidPlayerRef.child(raidMyId).update({ health: 5 });
+      out.noReactionOnHeal = raidHitStopTimer === 0 && raidLocal.vx === 0;
+      raidLocal.health = 0;
+      await raidPlayerRef.child(raidMyId).update({ health: 0 });
+      out.noReactionWhenAlreadyDead = raidHitStopTimer === 0 && raidLocal.vx === 0;
+      return out;
+    });
+    expect(r.knockedBack).toBe(true);
+    expect(r.poppedUp).toBe(true);
+    expect(r.hitStop).toBe(true);
+    expect(r.veryWhite).toBe(true);
+    expect(r.laterNotAsWhite).toBe(true);
+    expect(r.noReactionOnHeal).toBe(true);
+    expect(r.noReactionWhenAlreadyDead).toBe(true);
+  });
+
+  test('RAI-20 the player bobs and leans while moving on the ground, but holds still in the air', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const hash = (look, t) => {
+        const c = document.createElement('canvas'); c.width = 80; c.height = 120;
+        const ctx = c.getContext('2d');
+        drawPlayerCuphead(ctx, 20, 30, 36, 48, 1, 5, 5, false, 0, true, Object.assign({ noBar: true, noShadow: true, t }, look));
+        const d = ctx.getImageData(0, 0, 80, 120).data;
+        let h = 7; for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) % 1000000007;
+        return h;
+      };
+      return {
+        idleDiffers: hash({ vx: 0, onGround: true }, 0) !== hash({ vx: 0, onGround: true }, 30),
+        runDiffers: hash({ vx: 6, onGround: true }, 0) !== hash({ vx: 6, onGround: true }, 8),
+        airborneSame: hash({ vx: 6, onGround: false }, 0) === hash({ vx: 6, onGround: false }, 30)
+      };
+    });
+    expect(r.idleDiffers, 'idle bob still animates over time').toBe(true);
+    expect(r.runDiffers, 'running bob/lean animates over time').toBe(true);
+    expect(r.airborneSame, 'no bob or lean while airborne').toBe(true);
+  });
+});
+
+test.describe('Equipment: weapons and utility (spec 8.5)', () => {
+  test('WPN-01 the weapon slot shoots with a gun and swings with a sword', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'gun_standard';
+      raidAmmo = raidMaxAmmo; raidFireCooldown = 0; raidReloadTimer = 0;
+      raidG.playerProjectiles = [];
+      raidAttack();
+      const shot = raidG.playerProjectiles.length === 1 && raidG.playerProjectiles[0].kind !== 'melee';
+
+      raidLocal.gun = 'sword_training';
+      raidLocal.swordCooldown = 0; raidLocal.swingTimer = 0;
+      const ammoBefore = raidAmmo;
+      raidAttack();
+      return { shot, swung: raidLocal.swingTimer > 0, ammoUnchanged: raidAmmo === ammoBefore };
+    });
+    expect(r.shot).toBe(true);
+    expect(r.swung).toBe(true);
+    expect(r.ammoUnchanged, 'a sword swing does not touch the gun magazine').toBe(true);
+  });
+
+  test('WPN-02 a sword swing damages the boss in reach, misses out of reach, respects its cooldown and never draws as a bullet', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      raidLocal.facing = 1;
+
+      // out of reach: grounded, boss is well overhead
+      T.place(500);
+      raidLocal.swordCooldown = 0;
+      let hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      const missPlayed = raidLocal.swingTimer === RAID_SWORD_SWING_FRAMES;
+      const missedHit = raidG.boss.hp === hpBefore;
+
+      // in reach: jump up to the boss's height
+      T.place(raidG.boss.x, raidG.boss.y - 24);
+      raidLocal.swordCooldown = 0;
+      hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      raidBossUpdate(); // resolves the pushed melee "hit" the same way a bullet is resolved
+      const connected = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
+      const cooldownSet = raidLocal.swordCooldown === RAID_SWORD_COOLDOWN_FRAMES;
+
+      // cooldown blocks an immediate second swing
+      hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      raidBossUpdate();
+      const secondBlocked = raidG.boss.hp === hpBefore;
+
+      // the melee "hit" reuses the bullet array but must never render as a floating bullet
+      const c = document.createElement('canvas'); c.width = 40; c.height = 40;
+      const ctx = c.getContext('2d');
+      drawPlayerBullet(ctx, { x: 20, y: 20, r: 6, kind: 'melee', gun: 'sword_training' });
+      const drewNothing = ctx.getImageData(0, 0, 40, 40).data.every((v, i) => i % 4 !== 3 || v === 0);
+
+      return { missPlayed, missedHit, connected, cooldownSet, secondBlocked, drewNothing };
+    });
+    expect(r.missPlayed, 'the swing animation plays even on a miss').toBe(true);
+    expect(r.missedHit, 'out of reach deals no damage').toBe(true);
+    expect(r.connected, 'in reach deals RAID_SWORD_DAMAGE').toBe(true);
+    expect(r.cooldownSet).toBe(true);
+    expect(r.secondBlocked, 'cooldown blocks an immediate second swing').toBe(true);
+    expect(r.drewNothing, 'a melee hit never renders as a bullet').toBe(true);
+  });
+
+  test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+
+      raidLocal.utility = 'util_boots';
+      out.dashCooldown = raidDashCooldownFrames(); // 180 * 0.75
+
+      raidLocal.utility = 'util_heart';
+      out.maxHealth = raidMaxHealthForLoadout(); // 5 + 1
+
+      raidLocal.utility = 'util_feather';
+      out.jumpHold = raidJumpHoldFrames(); // round(18 * 1.3)
+
+      raidLocal.utility = 'util_hands';
+      out.reloadFrames = raidReloadFrames(); // round(100 * 0.8)
+
+      raidLocal.utility = null;
+      out.reloadDefault = raidReloadFrames();
+
+      raidLocal.utility = 'util_ward';
+      const p = Object.assign({}, T.me(), { utility: 'util_ward', wardUsed: false, shield: false, invincible: 0 });
+      raidDamagePlayer(raidMyId, p, 1);
+      const afterWard = await raidPlayerRef.child(raidMyId).once('value');
+      out.wardAbsorbed = afterWard.val().wardUsed === true && afterWard.val().health === p.health;
+      // a second hit (wardUsed already true) goes through normally - past its invincibility too
+      raidDamagePlayer(raidMyId, Object.assign({}, afterWard.val(), { invincible: 0 }), 1);
+      const afterSecond = await raidPlayerRef.child(raidMyId).once('value');
+      out.secondHitLandsAfterWard = afterSecond.val().health === p.health - 1;
+
+      mqProfile.equipped.utility = 'util_coin';
+      currentDifficulty = 'normal';
+      raidLocal.health = raidLocal.maxHealth = 5;
+      out.coinBonus = mqAwardRaidVictory().coins; // (120 + 5*10) * 1.1, rounded
+      return out;
+    });
+    expect(r.dashCooldown).toBe(135);
+    expect(r.maxHealth).toBe(6);
+    expect(r.jumpHold).toBe(23);
+    expect(r.reloadFrames).toBe(80);
+    expect(r.reloadDefault).toBe(100);
+    expect(r.wardAbsorbed, 'the first hit is absorbed and marks wardUsed').toBe(true);
+    expect(r.secondHitLandsAfterWard, 'only the first hit per raid is warded').toBe(true);
+    expect(r.coinBonus).toBe(187);
+  });
+
+  test('WPN-20 the player is drawn smaller, feet-anchored, with a Hollow Knight-style face and horns', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const c = document.createElement('canvas'); c.width = 80; c.height = 120;
+      const ctx = c.getContext('2d');
+      drawPlayerCuphead(ctx, 20, 30, 36, 48, 1, 5, 5, false, 0, true, { noBar: true, noShadow: true, t: 0 });
+      // feet (baseY + h = 78) must stay put regardless of the scale-down, so the character
+      // doesn't sink into or float off the ground.
+      const feetOpaque = ctx.getImageData(38, 77, 1, 1).data[3] > 200;
+      // the body silhouette must be narrower than the full 36px hitbox width it's drawn into
+      // (MQ_PLAYER_SCALE shrinks it), sampled at mid-torso. A high alpha threshold picks out the
+      // solid fill itself, clear of the wide, low-alpha shadowBlur glow around the shape.
+      const edgeOpaque = ctx.getImageData(20, 60, 1, 1).data[3] > 200;
+      // no smiling mouth arc is drawn any more - big flat eyes only
+      const eyeWhite = ctx.getImageData(28, 24, 1, 1).data;
+      return { feetOpaque, edgeOpaque, eyeIsWhite: eyeWhite[0] > 200 && eyeWhite[1] > 200 && eyeWhite[2] > 200 };
+    });
+    expect(r.feetOpaque, 'feet stay anchored to the same ground position').toBe(true);
+    expect(r.edgeOpaque, 'the old, unscaled body edge is now outside the smaller silhouette').toBe(false);
+    expect(r.eyeIsWhite, 'big eye is drawn where the old smiling mouth used to be').toBe(true);
   });
 });
 
