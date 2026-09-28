@@ -488,6 +488,70 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(r.notches).toEqual([true, true]);
   });
 
+  test('BOS-13 every hit (not just the stun) briefly shows the hurt pose, a white flash and a hit-stop', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      T.prepBoss('grinmaw', 1);
+      // raidBossUpdate() -> raidSendBossState() loops back through this host's own
+      // raidListenToGame listener and replaces raidG.boss with a fresh clone - so re-read
+      // raidG.boss after every call instead of holding one reference across several.
+      let b = raidG.boss;
+      b.exposed = 0; b.transition = 0; b.invulnerable = false; b.hitFlash = 0;
+      raidHitStopTimer = 0;
+      raidG.playerProjectiles = [{ x: b.x, y: b.y, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }];
+      const hp0 = b.hp;
+      raidBossUpdate();
+      b = raidG.boss;
+      const out = {};
+      out.damaged = hp0 - b.hp;
+      out.hitFlash = b.hitFlash;
+      out.notExposed = b.exposed === 0; // this is a plain hit, not the big phase-transition/stun window
+      out.poseIsHurt = bossSpriteFrame(b);
+      out.hitStopSet = raidHitStopTimer > 0;
+
+      // The white flash overlay itself, isolated from the "hurt" pose swap it usually comes
+      // with: hold the pose fixed (exposed - already shown to give "hurt" on its own) and only
+      // toggle hitFlash, averaged over a small patch so one already-bright pixel can't decide it.
+      const brightnessAt = (bossX, bossY) => {
+        const d = raidCtx.getImageData(Math.round(bossX) - 3, Math.round(bossY) - 3, 6, 6).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+        return sum;
+      };
+      b.exposed = 50;
+      b.hitFlash = 0; raidDraw();
+      const before = brightnessAt(b.x, b.y);
+      b.hitFlash = 10; raidDraw();
+      const after = brightnessAt(b.x, b.y);
+      out.flashBrighter = after > before;
+      b.exposed = 0;
+
+      // the flash and the reaction pose both fade out again on their own
+      for (let i = 0; i < 10; i++) { raidBossUpdate(); b = raidG.boss; }
+      out.flashGone = b.hitFlash;
+      out.poseBackToIdle = bossSpriteFrame(b).startsWith('idle');
+
+      // hit-stop actually freezes the loop (frame counter, local update and boss sim all pause)
+      raidLoopRunning = true; raidHitStopTimer = 3;
+      const f0 = raidG.frame;
+      raidGameLoop();
+      out.frozenFrame = raidG.frame === f0;
+      out.hitStopCountedDown = raidHitStopTimer === 2;
+      raidLoopRunning = false;
+      return out;
+    });
+    expect(r.damaged).toBe(3);
+    expect(r.hitFlash).toBe(10);
+    expect(r.notExposed).toBe(true);
+    expect(r.poseIsHurt).toBe('hurt');
+    expect(r.hitStopSet).toBe(true);
+    expect(r.flashBrighter).toBe(true);
+    expect(r.flashGone).toBe(0);
+    expect(r.poseBackToIdle).toBe(true);
+    expect(r.frozenFrame).toBe(true);
+    expect(r.hitStopCountedDown).toBe(true);
+  });
+
   test('BOS-14 the boss HP bar is big and fixed at the top - it does not follow the boss', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');

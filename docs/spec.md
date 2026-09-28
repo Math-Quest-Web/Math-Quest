@@ -100,14 +100,16 @@ lives in section `raid`.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| RAI-10 | Controls: Left/Right move, Up jump, Space shoot, Shift or E shield, X dash, R reload. | Done |
+| RAI-10 | **Controls (Hollow Knight-style):** Left/Right move, Z or Up jump, X or Space attack (shoot), Shift or E shield, C dash, R reload. | Done |
 | RAI-11 | Player has 5 hearts. After a hit the player is invincible for 30 frames. If any player reaches 0 hearts the raid is lost (Defeated). | Done |
 | RAI-12 | **Shooting:** 20-round magazine, 7-frame delay between shots, bullets fly straight up from the gun muzzle, 3 damage each, life 120 frames. | Done |
 | RAI-13 | **Reloading:** the magazine reloads automatically when it hits 0 (R reloads early). A reload takes 100 frames (about 1.7 s) during which the player cannot shoot. There is no passive ammo regeneration. | Done |
 | RAI-14 | **Reload animation:** the gun tilts out, the old magazine drops, a new one slides in, the gun snaps back with a spark; a progress ring above the head shows reload progress to everyone. The HUD shows `n/20` or `RELOADING`. | Done |
 | RAI-15 | **Shield:** blocks damage for 90 frames. Starts with 2 charges, max 3, and recharges +1 every 420 frames (7 s). | Done |
-| RAI-16 | **Dash:** X gives a burst of speed and 14 frames of invincibility, 180-frame (3 s) cooldown. | Done |
-| RAI-17 | Movement: acceleration, friction, max speed 7; jump velocity -13 with gravity 0.4 (a jump clears low ground hazards). | Done |
+| RAI-16 | **Dash:** C gives a burst of speed and 14 frames of invincibility, 180-frame (3 s) cooldown. | Done |
+| RAI-17 | **Movement:** acceleration, friction, max speed 7. **Jump (Hollow Knight-style, variable height):** a tap rises about 210px under normal gravity (`RAID_GRAVITY` 0.4, initial velocity `RAID_JUMP_VY` -13); holding the jump key keeps reduced gravity (`RAID_JUMP_HOLD_GRAVITY` 0.16) applied for up to `RAID_JUMP_HOLD_FRAMES` (18) frames or until the apex, reaching roughly 320-340px. A jump (of either height) clears low ground hazards. | Done |
+| RAI-18 | **Boss hit area** (the box a player's shot must land in to damage the boss) is sized per boss type (`BOSS_HITBOX`), not one fixed box for every boss - the Wyrm in particular is wider (its three heads spread further than its body is tall), so its hit area is wider too. An untargetable boss (BOS-09) still can't be hit, regardless of its hit area's size. | Done |
+| RAI-19 | **Impact frame on taking a hit:** a small knockback away from the hit (opposite the player's facing), a bright white flash for the first ~6 of the player's 30 invincibility frames (fading to the ongoing orange flicker after), and a brief hit-stop (full engine freeze, a handful of frames) - felt on whichever client the hit player is on, host or not. | Done |
 
 ### 8.3 Difficulty
 
@@ -141,7 +143,7 @@ lives in section `raid`.
 | BOS-10 | Each boss has its own animations and arena background; all boss animations run on the host and sync through boss state. | Done |
 | BOS-11 | **Stun:** after its big moves a boss is stunned for **120 frames (2 s)** and takes **double damage**. | Done |
 | BOS-12 | **Vulnerability is shown, not told.** A stunned boss tilts, sags and has dizzy stars circling its head. There is no text or icon saying "weak/exposed". | Done |
-| BOS-13 | Feedback: screen shake on hits and phase changes, floating damage numbers, red flash when the local player is hit, phase notches at 60% and 30% on the boss HP bar. | Done |
+| BOS-13 | Feedback: screen shake on hits and phase changes, floating damage numbers, red flash when the local player is hit, phase notches at 60% and 30% on the boss HP bar. **Every hit on the boss** (not just the big stun) briefly shows its hurt pose and a white flash, and triggers a short hit-stop felt by every client (see RAI-19 for the player's own impact frame). | Done |
 | BOS-14 | The boss HP bar is large, fixed at the top of the screen (not attached to the boss). | Done |
 
 ### 9.2 The four bosses
@@ -282,3 +284,4 @@ Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with mo
 | 2026-09 | Added the spec-based Playwright test suite and the "Tests" GitHub Action for every PR (TST-04 to TST-06, GEN-08, DAT-01, BOS-20 to BOS-23); corrected BOS-07 (lobbed shots); fixed skins whose hats/hair overlapped the health bar (ITM-03). |
 | 2026-09 | v2 sprite sheets in untracked `sprites/` (boss 4 x 16 frames, 14 player skins, 14 guns). |
 | 2026-09 | Bosses are drawn from `assets/boss-sheet.webp` with the old art as fallback (BOS-30 to BOS-35); GEN-01 now allows this one image asset. |
+| 2026-09 | Hollow Knight-style controls (Z jump, X attack, C dash; RAI-10, RAI-16); variable-height jump (RAI-17); impact frames on every hit - knockback, flash and hit-stop for the player (RAI-19) and hurt pose/flash/hit-stop for the boss (BOS-13); per-boss hit area, fixing the Wyrm's undersized one (RAI-18). |

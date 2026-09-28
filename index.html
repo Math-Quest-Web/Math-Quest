@@ -3475,6 +3475,8 @@ function resetRaidState() {
   raidLocal.shieldTimer = 0;
   raidLocal.dashCooldown = 0;
   raidLocal.dashTimer = 0;
+  raidLocal.jumpBoosting = false;
+  raidLocal.jumpHoldTimer = 0;
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
@@ -3490,6 +3492,7 @@ function resetRaidState() {
   raidHostChecked = false;
   raidIsHost = false;
   raidInitialized = false;
+  raidHitStopTimer = 0;
 
   if (countdownInterval) {
     clearInterval(countdownInterval);
@@ -3640,12 +3643,21 @@ let raidReloadTimer = 0; // frames left while reloading; 0 = not reloading
 let raidFireCooldown = 0;
 let raidShotsRef = null;
 
+// Movement/jump tuning (RAI-17). A tap of the jump key rises ~210px (RAID_JUMP_VY under normal
+// gravity); holding it applies reduced gravity for up to RAID_JUMP_HOLD_FRAMES frames instead,
+// reaching roughly 320-340px.
+const RAID_GRAVITY = 0.4;
+const RAID_JUMP_VY = -13;
+const RAID_JUMP_HOLD_GRAVITY = 0.16;
+const RAID_JUMP_HOLD_FRAMES = 18;
+
 // Game state
 const raidG = {
   players: {},
   boss: { type: 'grinmaw', x: 500, y: 80, w: 120, h: 80, hp: 100, maxHp: 100, phase: 1,
           attackTimer: 0, attackCooldown: 120, phaseTimer: 0, ultimateTriggered: false,
-          transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0 },
+          transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0,
+          hitFlash: 0 },
   projectiles: [],
   playerProjectiles: [],
   slamAnimations: [],
@@ -3674,6 +3686,8 @@ const raidLocal = {
   dashCooldown: 0,
   dashTimer: 0,
   recoil: 0,
+  jumpBoosting: false,
+  jumpHoldTimer: 0,
   skin: 'skin_classic',
   gun: 'gun_standard'
 };
@@ -3834,6 +3848,7 @@ function raidListenToGame() {
           raidG.boss = data.boss;
           raidG.boss.hp = damagedHp;
         } else {
+          if (data.boss.hp < currentHp) raidTriggerHitStop(5); // felt by every client, not just whoever landed the hit
           raidG.boss = data.boss;
         }
         raidG.projectiles = data.projectiles || [];
@@ -3882,6 +3897,14 @@ function raidListenToMathHits() {
   });
 }
 
+// Impact frame for the local player: a brief knockback and hit-stop, felt the instant this
+// client sees its own health drop (works the same whether this client is the host or not).
+function raidOnLocalPlayerHit() {
+  raidTriggerHitStop(6);
+  raidLocal.vx = -raidLocal.facing * 6;
+  raidLocal.vy = Math.min(raidLocal.vy, -4);
+}
+
 function raidListenToPlayers() {
   if (!raidPlayerRef) return;
   raidPlayerRef.on('value', (snap) => {
@@ -3893,6 +3916,7 @@ function raidListenToPlayers() {
     if (data[raidMyId] && raidLocal.health > 0) {
       const remote = data[raidMyId];
       if (remote && remote.health !== undefined && remote.health > 0) {
+        if (remote.health < raidLocal.health) raidOnLocalPlayerHit();
         raidLocal.health = remote.health;
         raidLocal.invincible = remote.invincible || 0;
         raidLocal.shield = remote.shield || false;
@@ -4012,6 +4036,21 @@ function resetBossFlow(b) {
   b.comboPending = false;
   b.comboTimer = 0;
   b.attackTimer = 200; // breathing room before the first attack of a fight
+  b.hitFlash = 0;
+}
+
+// Half the boss's hit area in each direction from (boss.x, boss.y). Sized to each boss's actual
+// silhouette (RAI-18) - not just its sprite scale, since e.g. the Wyrm's three heads spread much
+// wider than its body is tall. The same box is used whether the sprite or fallback art is shown
+// (BOS-33: hitboxes are not changed by the art).
+const BOSS_HITBOX = {
+  grinmaw: { hw: 58, hh: 58 },
+  warden: { hw: 50, hh: 65 },
+  wyrm: { hw: 105, hh: 55 },
+  glutton: { hw: 58, hh: 58 }
+};
+function raidBossHalfExtent(type) {
+  return BOSS_HITBOX[type] || BOSS_HITBOX.grinmaw;
 }
 
 function raidPickAttack(b, options) {
@@ -4747,6 +4786,7 @@ function raidBossUpdate() {
   raidPhaseSpan.textContent = `PHASE ${b.phase}`;
 
   if (b.exposed > 0) b.exposed--;
+  if (b.hitFlash > 0) b.hitFlash--;
 
   // Phase change beat: the boss stops, roars and is briefly untouchable while the arena
   // is cleared, so a phase feels like a moment rather than a silent number change.
@@ -4846,13 +4886,17 @@ function raidBossUpdate() {
     proj.life--;
 
     if (raidBossUntargetable(b)) return;
-    if (Math.abs(proj.x - b.x) < 50 && Math.abs(proj.y - b.y) < 50) {
+    const bhb = raidBossHalfExtent(b.type);
+    if (Math.abs(proj.x - b.x) < bhb.hw && Math.abs(proj.y - b.y) < bhb.hh) {
       proj.life = 0;
       if (b.invulnerable || b.transition > 0) {
         raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
       } else {
-        b.hp -= (proj.damage || 5) * (b.exposed > 0 ? 2 : 1);
+        const bigHit = b.exposed > 0;
+        b.hp -= (proj.damage || 5) * (bigHit ? 2 : 1);
         if (b.hp < 0) b.hp = 0;
+        b.hitFlash = 10;
+        raidTriggerHitStop(bigHit ? 8 : 5);
         raidG.slamAnimations.push({
           x: proj.x,
           y: proj.y,
@@ -5014,18 +5058,35 @@ function raidUpdateLocal() {
   else if (p.vx < -0.5) p.facing = -1;
 
   p.x += p.vx;
-  p.vy += 0.4;
+
+  // Hollow Knight style variable-height jump: holding Z/Up sustains the rise (reduced gravity)
+  // for up to RAID_JUMP_HOLD_FRAMES frames; letting go early - or hitting the timer or the
+  // apex - cuts it short and normal gravity takes back over. A quick tap still gives the same
+  // ~200px hop as before; holding it the whole time reaches noticeably higher.
+  let gravity = RAID_GRAVITY;
+  if (p.jumpBoosting) {
+    if (p.input.up && p.jumpHoldTimer < RAID_JUMP_HOLD_FRAMES && p.vy < 0) {
+      gravity = RAID_JUMP_HOLD_GRAVITY;
+      p.jumpHoldTimer++;
+    } else {
+      p.jumpBoosting = false;
+    }
+  }
+  p.vy += gravity;
   p.y += p.vy;
   if (p.y > raidGROUND_Y - p.h) {
     p.y = raidGROUND_Y - p.h;
     p.vy = 0;
     p.onGround = true;
+    p.jumpBoosting = false;
   } else {
     p.onGround = false;
   }
   if (p.input.up && p.onGround) {
-    p.vy = -13;
+    p.vy = RAID_JUMP_VY;
     p.onGround = false;
+    p.jumpBoosting = true;
+    p.jumpHoldTimer = 0;
   }
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
 
@@ -5203,6 +5264,7 @@ function bossSpriteFrame(b) {
   const f = raidG.frame || 0;
   const idle = () => (b.phase >= 3 ? 'enraged_' + (1 + (Math.floor(f / 12) % 2)) : 'idle_' + (1 + (Math.floor(f / 15) % 4)));
   if (b.exposed > 0) return (Math.floor(f / 24) % 2) ? 'hurt_recover' : 'hurt';   // stunned: animation only (BOS-12)
+  if (b.hitFlash > 0) return 'hurt';   // a quick reaction pose on every hit, not just the big stun
   if (b.type === 'glutton') {
     if (b.feastTimer > 0) return 'special';   // clamped shut
     if (b.feastWarning) return 'telegraph';
@@ -5254,6 +5316,18 @@ function drawBossDispatch(ctx, boss) {
   else if (boss.type === 'glutton') drawGlutton(ctx, boss);
   else drawGrinmaw(ctx, boss);
   ctx.restore();
+
+  // Impact frame: a quick white flash on every hit (works for sprite and fallback art alike),
+  // independent of the longer "hurt" pose above.
+  if (boss.hitFlash > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.55 * (boss.hitFlash / 10);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, (boss.w || 120) * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (dazed) {
     // Stars circling above the head - the classic "knocked silly" cue.
@@ -5768,6 +5842,14 @@ function drawMathPrompt(ctx) {
 
 // Local-only juice, derived each frame by watching state that is already synced
 // (boss hp, my health, boss.transition), so it works identically for host and clients.
+// Hit-stop: a brief full freeze of the raid loop (frame counter included, so animations pause
+// too) on a meaningful hit - an "impact frame" that makes hits read as weighty. Purely a local
+// feel effect: harmless if a host's boss sim or a client's rendering pauses for a few frames.
+let raidHitStopTimer = 0;
+function raidTriggerHitStop(frames) {
+  raidHitStopTimer = Math.max(raidHitStopTimer, frames);
+}
+
 const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [] };
 
 function raidFxTick() {
@@ -6355,11 +6437,15 @@ function raidUpdateUI() {
 
 function raidGameLoop() {
   if (!raidLoopRunning) return;
-  raidG.frame++;
-  raidUpdateLocal();
-  mqCheckRaidReward();
-  if (raidIsHost) {
-    raidBossUpdate();
+  if (raidHitStopTimer > 0) {
+    raidHitStopTimer--;
+  } else {
+    raidG.frame++;
+    raidUpdateLocal();
+    mqCheckRaidReward();
+    if (raidIsHost) {
+      raidBossUpdate();
+    }
   }
   raidUpdateUI();
   raidDraw();
@@ -6477,9 +6563,11 @@ document.addEventListener('keydown', (e) => {
   
   if (key === 'ArrowLeft') { raidLocal.input.left = true; }
   if (key === 'ArrowRight') { raidLocal.input.right = true; }
-  if (key === 'ArrowUp') { raidLocal.input.up = true; }
+  // Z is the Hollow Knight-style jump key; ArrowUp still works too.
+  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = true; }
 
-  if (key === ' ' || key === 'Space') {
+  // X is "attack" (Hollow Knight-style); Space still shoots too.
+  if (key === ' ' || key === 'Space' || key === 'x' || key === 'X') {
     if (raidShowMathUI) {
       return;
     }
@@ -6493,7 +6581,8 @@ document.addEventListener('keydown', (e) => {
     raidTryShield();
   }
 
-  if (key === 'x' || key === 'X') {
+  // C is the Hollow Knight-style dash key (X used to dash; it is "attack" now).
+  if (key === 'c' || key === 'C') {
     if (raidShowMathUI) {
       return;
     }
@@ -6547,7 +6636,7 @@ document.addEventListener('keyup', (e) => {
   const key = e.key;
   if (key === 'ArrowLeft') { raidLocal.input.left = false; }
   if (key === 'ArrowRight') { raidLocal.input.right = false; }
-  if (key === 'ArrowUp') { raidLocal.input.up = false; }
+  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = false; }
 });
 
 // ============================================================
@@ -7924,6 +8013,7 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   let top, bottom;
   if (shield) { top = '#66ddff'; bottom = '#3399dd'; }
+  else if (invincible > 24) { top = '#ffffff'; bottom = '#ffe0e0'; } // impact frame: bright flash on the hit itself
   else if (invincible > 0 && invincible % 6 < 3) { top = '#ffaa88'; bottom = '#dd6644'; }
   else if (classic) { top = isLocal ? '#ffcc88' : '#88aaff'; bottom = isLocal ? '#dd8844' : '#446688'; }
   else if (sk.bodyDyn) { const cc = sk.bodyDyn(t); top = cc[0]; bottom = cc[1]; }

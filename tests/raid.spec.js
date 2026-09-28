@@ -139,24 +139,31 @@ test.describe('Multiplayer model (spec 8.1)', () => {
 });
 
 test.describe('Player controls and stats (spec 8.2)', () => {
-  test('RAI-10 keyboard: arrows move/jump, Space shoots, Shift/E shields, X dashes, R reloads', async ({ page }) => {
+  test('RAI-10 keyboard: arrows move, Z/Up jump, Space/X attack, Shift/E shields, C dashes, R reloads', async ({ page }) => {
     await page.evaluate(() => T.setupRaid('grinmaw'));
     await keyDown(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(true);
     await keyUp(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(false);
     await keyDown(page, 'ArrowRight'); expect(await page.evaluate(() => raidLocal.input.right)).toBe(true);
     await keyUp(page, 'ArrowRight');
     await keyDown(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
-    await keyUp(page, 'ArrowUp');
+    await keyUp(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
+    await keyDown(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
+    await keyUp(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
 
     await keyDown(page, ' ');
     expect(await page.evaluate(() => raidAmmo)).toBe(19);
+    await page.evaluate(() => { for (let i = 0; i < RAID_FIRE_DELAY; i++) raidUpdateLocal(); }); // clear the fire-rate limit (RAI-12)
+    await keyDown(page, 'x'); // Hollow Knight-style "attack" - fires the gun, same as Space
+    expect(await page.evaluate(() => raidAmmo)).toBe(18);
     await keyDown(page, 'e');
     expect(await page.evaluate(() => raidLocal.shield)).toBe(true);
     await page.evaluate(() => { raidLocal.shield = false; });
     await keyDown(page, 'Shift');
     expect(await page.evaluate(() => raidLocal.shield)).toBe(true);
-    await keyDown(page, 'x');
+    await keyDown(page, 'c'); // Hollow Knight-style dash key (X is "attack" now, not dash)
     expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180);
+    await keyDown(page, 'x'); // attack, not dash, while X means attack
+    expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180); // unchanged - X never dashes
     await keyDown(page, 'r');
     expect(await page.evaluate(() => raidReloadTimer)).toBe(100);
   });
@@ -332,6 +339,106 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.rise).toBeGreaterThan(190);
     expect(r.rise).toBeLessThan(230);
     expect(r.backOnGround).toBe(true);
+  });
+
+  test('RAI-17 holding the jump key rises higher than a quick tap (variable-height jump)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const jump = (holdFrames) => {
+        T.place(500);
+        raidLocal.onGround = true;
+        raidLocal.jumpBoosting = false;
+        raidLocal.jumpHoldTimer = 0;
+        const groundY = raidLocal.y;
+        raidLocal.input.up = true;
+        let minY = groundY;
+        for (let i = 0; i < holdFrames; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.up = false;
+        for (let i = 0; i < 150; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        return groundY - minY;
+      };
+      return {
+        tap: jump(1),
+        fullHold: jump(30),
+        constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
+      };
+    });
+    expect(r.constants).toEqual({ grav: 0.4, vy: -13, holdGrav: 0.16, holdFrames: 18 });
+    // a tap behaves like the old fixed jump (unaffected by the new hold mechanic)
+    expect(r.tap).toBeGreaterThan(190);
+    expect(r.tap).toBeLessThan(230);
+    expect(r.fullHold, 'holding the whole way up rises well beyond a tap').toBeGreaterThan(r.tap + 60);
+    expect(r.fullHold).toBeLessThan(380);
+  });
+
+  test('RAI-18 the boss hit area is sized per boss - the Wyrm is wider than the old fixed 50px box', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('wyrm');
+      const out = { table: JSON.parse(JSON.stringify(BOSS_HITBOX)) };
+      const hitAt = (type, dx, dy) => {
+        T.prepBoss(type, 1);
+        const b = raidG.boss;
+        const hp0 = b.hp;
+        raidG.playerProjectiles = [{ x: b.x + dx, y: b.y + dy, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }];
+        raidBossUpdate();
+        return hp0 - b.hp;
+      };
+      out.wyrmWideEdge = hitAt('wyrm', 80, 0); // outside the old fixed box, inside the Wyrm's wider one
+      out.wyrmBeyond = hitAt('wyrm', 140, 0); // outside even the wider box
+      out.grinmawNear = hitAt('grinmaw', 40, 0);
+      out.grinmawBeyond = hitAt('grinmaw', 80, 0); // same spot that hits the wider Wyrm misses the narrower Grinmaw
+      return out;
+    });
+    expect(r.table).toEqual({
+      grinmaw: { hw: 58, hh: 58 }, warden: { hw: 50, hh: 65 }, wyrm: { hw: 105, hh: 55 }, glutton: { hw: 58, hh: 58 }
+    });
+    expect(r.wyrmWideEdge).toBe(3);
+    expect(r.wyrmBeyond).toBe(0);
+    expect(r.grinmawNear).toBe(3);
+    expect(r.grinmawBeyond).toBe(0);
+  });
+
+  test('RAI-19 taking a hit knocks the player back, flashes white and briefly freezes the game (hit-stop)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidHitStopTimer = 0;
+      raidLocal.facing = 1; raidLocal.vx = 0; raidLocal.vy = 0;
+      // as raidDamagePlayer would on the host, but observed the way every client actually finds
+      // out - through its own player-list listener - so this also covers non-host players.
+      await raidPlayerRef.child(raidMyId).update({ health: 4, invincible: 30 });
+      const out = {};
+      out.knockedBack = raidLocal.vx < 0; // pushed opposite of facing (+1)
+      out.poppedUp = raidLocal.vy < 0;
+      out.hitStop = raidHitStopTimer > 0;
+
+      // the bright flash renders during the first ~6 of the 30 invincibility frames
+      // (40, 64) sits mid-torso, comfortably inside the body fill and clear of the outline stroke.
+      const flashAt = (invincible) => {
+        const c = document.createElement('canvas'); c.width = 80; c.height = 100;
+        const ctx = c.getContext('2d');
+        drawPlayerCuphead(ctx, 20, 40, 36, 48, 1, 4, 5, false, invincible, true, { noBar: true, noShadow: true, noGun: true, t: 0 });
+        return ctx.getImageData(40, 64, 1, 1).data;
+      };
+      const bright = flashAt(28), late = flashAt(10);
+      out.veryWhite = bright[0] > 245 && bright[1] > 225 && bright[2] > 225;
+      out.laterNotAsWhite = !(late[0] > 245 && late[1] > 225 && late[2] > 225);
+
+      // no reaction on a health increase, or once already dead
+      raidHitStopTimer = 0; raidLocal.vx = 0;
+      await raidPlayerRef.child(raidMyId).update({ health: 5 });
+      out.noReactionOnHeal = raidHitStopTimer === 0 && raidLocal.vx === 0;
+      raidLocal.health = 0;
+      await raidPlayerRef.child(raidMyId).update({ health: 0 });
+      out.noReactionWhenAlreadyDead = raidHitStopTimer === 0 && raidLocal.vx === 0;
+      return out;
+    });
+    expect(r.knockedBack).toBe(true);
+    expect(r.poppedUp).toBe(true);
+    expect(r.hitStop).toBe(true);
+    expect(r.veryWhite).toBe(true);
+    expect(r.laterNotAsWhite).toBe(true);
+    expect(r.noReactionOnHeal).toBe(true);
+    expect(r.noReactionWhenAlreadyDead).toBe(true);
   });
 });
 
