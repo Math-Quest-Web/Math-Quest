@@ -534,49 +534,151 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.ammoUnchanged, 'a sword swing does not touch the gun magazine').toBe(true);
   });
 
-  test('WPN-02 a sword swing damages the boss in reach, misses out of reach, respects its cooldown and never draws as a bullet', async ({ page }) => {
+  test('WPN-02 a side swing damages the boss only on real hitbox overlap, at most once per swing, and respects its cooldown', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       raidLocal.gun = 'sword_training';
       raidLocal.facing = 1;
+      raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
+
+      // Steps the swing to completion without touching raidUpdateLocal's movement/gravity, so
+      // the player's placed position stays exact - only swingTimer needs to count down through
+      // the "blade extended" window while raidBossUpdate resolves it each frame, same as a live
+      // raid (raidSendLocalState syncs raidG.players, raidBossUpdate checks it).
+      const stepSwing = (extra = 0) => {
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES + extra; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidSendLocalState();
+          raidBossUpdate();
+        }
+      };
 
       // out of reach: grounded, boss is well overhead
       T.place(500);
       raidLocal.swordCooldown = 0;
       let hpBefore = raidG.boss.hp;
       raidSwordSwing();
-      const missPlayed = raidLocal.swingTimer === RAID_SWORD_SWING_FRAMES;
+      const startedFull = raidLocal.swingTimer === RAID_SWORD_SWING_FRAMES;
+      stepSwing();
       const missedHit = raidG.boss.hp === hpBefore;
 
-      // in reach: jump up to the boss's height
+      // in reach: jump up to the boss's height, swing to the side
       T.place(raidG.boss.x, raidG.boss.y - 24);
       raidLocal.swordCooldown = 0;
       hpBefore = raidG.boss.hp;
       raidSwordSwing();
-      raidBossUpdate(); // resolves the pushed melee "hit" the same way a bullet is resolved
+      stepSwing(4); // keep checking a few frames past the end - must not hit twice
       const connected = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
       const cooldownSet = raidLocal.swordCooldown === RAID_SWORD_COOLDOWN_FRAMES;
 
       // cooldown blocks an immediate second swing
       hpBefore = raidG.boss.hp;
       raidSwordSwing();
-      raidBossUpdate();
+      stepSwing();
       const secondBlocked = raidG.boss.hp === hpBefore;
 
-      // the melee "hit" reuses the bullet array but must never render as a floating bullet
+      // a melee hit is resolved directly against the boss, never through the bullet array
       const c = document.createElement('canvas'); c.width = 40; c.height = 40;
       const ctx = c.getContext('2d');
       drawPlayerBullet(ctx, { x: 20, y: 20, r: 6, kind: 'melee', gun: 'sword_training' });
       const drewNothing = ctx.getImageData(0, 0, 40, 40).data.every((v, i) => i % 4 !== 3 || v === 0);
 
-      return { missPlayed, missedHit, connected, cooldownSet, secondBlocked, drewNothing };
+      return { startedFull, missedHit, connected, cooldownSet, secondBlocked, drewNothing };
     });
-    expect(r.missPlayed, 'the swing animation plays even on a miss').toBe(true);
+    expect(r.startedFull, 'the swing animation plays even on a miss').toBe(true);
     expect(r.missedHit, 'out of reach deals no damage').toBe(true);
-    expect(r.connected, 'in reach deals RAID_SWORD_DAMAGE').toBe(true);
+    expect(r.connected, 'in reach deals RAID_SWORD_DAMAGE exactly once').toBe(true);
     expect(r.cooldownSet).toBe(true);
     expect(r.secondBlocked, 'cooldown blocks an immediate second swing').toBe(true);
     expect(r.drewNothing, 'a melee hit never renders as a bullet').toBe(true);
+  });
+
+  test('WPN-05 up and down swings hit in their own direction, not to the side, and the down key is wired', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      raidLocal.facing = 1;
+      // Calls raidCheckSwordSwings directly rather than the full raidBossUpdate - that avoids
+      // grinmaw's own idle float re-positioning the boss out from under the fixed y values this
+      // test places it at, and tests exactly the piece of logic being verified here.
+      const stepSwing = () => {
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidSendLocalState();
+          raidCheckSwordSwings(raidG.boss);
+        }
+      };
+
+      // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
+      // far enough that the wider-but-shallower side box does not): an up-swing should connect,
+      // a plain side swing should not.
+      raidG.boss.x = 500; raidG.boss.y = 310;
+      T.place(500);
+      raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
+      raidLocal.swordCooldown = 0;
+      let hpBefore = raidG.boss.hp;
+      raidSwordSwing(); // dir resolves to 'side' since up/down are not held
+      stepSwing();
+      const sideMissesOverhead = raidG.boss.hp === hpBefore;
+
+      raidLocal.swordCooldown = 0;
+      raidLocal.input.up = true;
+      hpBefore = raidG.boss.hp;
+      raidSwordSwing(); // dir resolves to 'up'
+      const dirWasUp = raidLocal.swingDir === 'up';
+      raidLocal.input.up = false;
+      stepSwing();
+      const upConnects = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
+
+      // Boss below the player (e.g. a ground boss while airborne): a down-swing should connect.
+      raidG.boss.y = raidGROUND_Y - 20;
+      T.place(500, raidGROUND_Y - 48 - 120);
+      raidLocal.swordCooldown = 0;
+      raidLocal.input.down = true;
+      hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      const dirWasDown = raidLocal.swingDir === 'down';
+      raidLocal.input.down = false;
+      stepSwing();
+      const downConnects = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
+
+      // ArrowDown/S key wiring (WPN-05)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      const downKeyed = raidLocal.input.down === true;
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown' }));
+      const downKeyReleased = raidLocal.input.down === false;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }));
+      const sKeyed = raidLocal.input.down === true;
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 's' }));
+
+      return { sideMissesOverhead, dirWasUp, upConnects, dirWasDown, downConnects, downKeyed, downKeyReleased, sKeyed };
+    });
+    expect(r.sideMissesOverhead, 'a plain side swing does not reach straight overhead').toBe(true);
+    expect(r.dirWasUp).toBe(true);
+    expect(r.upConnects, 'an up-swing reaches a boss directly overhead').toBe(true);
+    expect(r.dirWasDown).toBe(true);
+    expect(r.downConnects, 'a down-swing reaches a boss directly below').toBe(true);
+    expect(r.downKeyed).toBe(true);
+    expect(r.downKeyReleased).toBe(true);
+    expect(r.sKeyed).toBe(true);
+  });
+
+  test('WPN-04 the sword swing\'s slash trail is white regardless of the blade\'s own color', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const c = document.createElement('canvas'); c.width = 100; c.height = 100;
+      const ctx = c.getContext('2d');
+      ctx.translate(50, 70);
+      // sword_frost has a blue blade/glow - if the trail picked up the sword's own color instead
+      // of white, this pixel would read blue-ish, not white.
+      mqDrawSword(ctx, 'sword_frost', 0, 0, 1, 0.5, 5, 'side');
+      const d = ctx.getImageData(0, 0, 100, 100).data;
+      let whitePixel = false;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230 && d[i + 3] > 80) { whitePixel = true; break; }
+      }
+      return { whitePixel };
+    });
+    expect(r.whitePixel, 'the slash trail renders a bright white stroke').toBe(true);
   });
 
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {

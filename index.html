@@ -3487,6 +3487,8 @@ function resetRaidState() {
   raidLocal.moveTimer = 0;
   raidLocal.swordCooldown = 0;
   raidLocal.swingTimer = 0;
+  raidLocal.swingDir = 'side';
+  raidSwingHitState = {};
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
@@ -3697,7 +3699,7 @@ const raidLocal = {
   shield: false,
   shieldTimer: 0,
   onGround: false,
-  input: { left: false, right: false, up: false, space: false },
+  input: { left: false, right: false, up: false, down: false, space: false },
   facing: 1,
   dashCooldown: 0,
   dashTimer: 0,
@@ -3706,6 +3708,7 @@ const raidLocal = {
   recoil: 0,
   swordCooldown: 0,
   swingTimer: 0,
+  swingDir: 'side',
   jumpBoosting: false,
   jumpHoldTimer: 0,
   moveTimer: 0,
@@ -3841,6 +3844,8 @@ function raidSendLocalState() {
     facing: raidLocal.facing,
     reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
     swing: raidLocal.swingTimer > 0 ? 1 - raidLocal.swingTimer / RAID_SWORD_SWING_FRAMES : 0,
+    swingTimer: raidLocal.swingTimer || 0,
+    swingDir: raidLocal.swingDir || 'side',
     skin: raidLocal.skin || 'skin_classic',
     gun: raidLocal.gun || 'gun_standard',
     utility: raidLocal.utility || '',
@@ -4092,6 +4097,22 @@ const BOSS_HITBOX = {
 };
 function raidBossHalfExtent(type) {
   return BOSS_HITBOX[type] || BOSS_HITBOX.grinmaw;
+}
+
+// Shared "a hit lands on the boss" resolution (BOS-13): used by both bullets and sword swings -
+// either just needs to construct a {x, y, damage} point at the impact location.
+function raidHitBoss(b, proj) {
+  if (b.invulnerable || b.transition > 0) {
+    raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
+    return;
+  }
+  const bigHit = b.exposed > 0;
+  b.hp -= (proj.damage || 5) * (bigHit ? 2 : 1);
+  if (b.hp < 0) b.hp = 0;
+  b.hitFlash = 10;
+  raidTriggerHitStop(bigHit ? 8 : 5);
+  raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 15, phase: 'impact', timer: 0 });
+  raidSendBossState();
 }
 
 function raidPickAttack(b, options) {
@@ -4930,26 +4951,12 @@ function raidBossUpdate() {
     const bhb = raidBossHalfExtent(b.type);
     if (Math.abs(proj.x - b.x) < bhb.hw && Math.abs(proj.y - b.y) < bhb.hh) {
       proj.life = 0;
-      if (b.invulnerable || b.transition > 0) {
-        raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'blocked', timer: 0 });
-      } else {
-        const bigHit = b.exposed > 0;
-        b.hp -= (proj.damage || 5) * (bigHit ? 2 : 1);
-        if (b.hp < 0) b.hp = 0;
-        b.hitFlash = 10;
-        raidTriggerHitStop(bigHit ? 8 : 5);
-        raidG.slamAnimations.push({
-          x: proj.x,
-          y: proj.y,
-          life: 15,
-          phase: 'impact',
-          timer: 0
-        });
-      }
-      raidSendBossState();
+      raidHitBoss(b, proj);
     }
   });
   raidG.playerProjectiles = raidG.playerProjectiles.filter(p => p.life > 0 && p.x > -50 && p.x < 1050 && p.y > -50 && p.y < 700);
+
+  raidCheckSwordSwings(b);
 
   if (b.hp <= 0) {
     b.hp = 0;
@@ -5066,6 +5073,14 @@ const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
 const RAID_SWORD_RANGE_X = 80;
 const RAID_SWORD_RANGE_Y = 95;
+// Up/down swings (WPN-05) are narrower and reach only in their own direction, instead of the
+// side swing's box centered symmetrically on the player.
+const RAID_SWORD_UP_HALF_X = 48;
+const RAID_SWORD_UP_REACH = 95;
+// The blade is only actually "out" for a window in the middle of the swing (matches where the
+// crescent trail is visibly drawn) - this is when a hit can land, not the whole 14 frames.
+const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
+const RAID_SWORD_HIT_WINDOW_END = RAID_SWORD_SWING_FRAMES - 9;
 
 function raidSwordSwing() {
   if (raidG.gameOver || raidG.victory) return;
@@ -5074,30 +5089,55 @@ function raidSwordSwing() {
   if (p.swordCooldown > 0) return;
   p.swordCooldown = RAID_SWORD_COOLDOWN_FRAMES;
   p.swingTimer = RAID_SWORD_SWING_FRAMES;
+  // Direction is read once, at the moment the swing starts (WPN-05), so releasing the key
+  // mid-swing doesn't change an already-playing animation.
+  p.swingDir = p.input.up ? 'up' : (p.input.down ? 'down' : 'side');
   raidUpdateUI();
   raidSendLocalState();
+}
 
-  // Reach check against the boss's actual (synced) position - every client already has this,
-  // host or not. In reach, place the hit exactly on the boss so it trivially passes the normal
-  // per-boss hit area (RAI-18) downstream; out of reach, the swing plays but hits nothing.
-  const boss = raidG.boss;
-  const inReach = Math.abs(raidPx(p) - boss.x) < RAID_SWORD_RANGE_X && Math.abs((p.y + 24) - boss.y) < RAID_SWORD_RANGE_Y;
-  if (!inReach) return;
-
-  // Reuses the exact same boss-hit path a bullet takes (raidBossUpdate's playerProjectiles
-  // loop): a single point, alive for a couple of frames. That path already applies the
-  // exposed 2x, hitFlash and hit-stop (BOS-13) - nothing extra to add for melee to work.
-  const hit = {
-    x: boss.x, y: boss.y,
-    vx: 0, vy: 0, r: 4, life: 2, damage: RAID_SWORD_DAMAGE, kind: 'melee', owner: raidMyId, gun: raidLocal.gun
-  };
-  if (raidIsHost) {
-    raidG.playerProjectiles.push(hit);
-    raidSendBossState();
-  } else if (raidShotsRef) {
-    hit.t = Date.now();
-    raidShotsRef.push(hit);
+// The player's world-space melee hitbox for the swing direction chosen when the swing started
+// (WPN-02/WPN-05) - a simple offset rectangle, not a new shape system. `p` is any synced player
+// object (x, y, facing, swingDir), local or remote.
+function raidSwordHitbox(p) {
+  const dir = p.swingDir || 'side';
+  const cx = raidPx(p);
+  if (dir === 'up') {
+    return { cx, cy: p.y - RAID_SWORD_UP_REACH / 2, hw: RAID_SWORD_UP_HALF_X, hh: RAID_SWORD_UP_REACH / 2 };
   }
+  if (dir === 'down') {
+    return { cx, cy: p.y + 24 + RAID_SWORD_UP_REACH / 2, hw: RAID_SWORD_UP_HALF_X, hh: RAID_SWORD_UP_REACH / 2 };
+  }
+  return { cx, cy: p.y + 24, hw: RAID_SWORD_RANGE_X, hh: RAID_SWORD_RANGE_Y };
+}
+
+// Host-only, per-player bookkeeping for "has this swing already hit the boss" - kept outside
+// raidG.players because that object is wholesale replaced every time a Firebase snapshot lands
+// (see RAI-11's fix note), so a flag stored on it wouldn't survive between checks.
+let raidSwingHitState = {};
+
+// Real hitbox-accurate melee resolution (WPN-02): runs every host frame against every player's
+// synced position, so a swing only damages the boss on a frame where its direction-aware hitbox
+// actually overlaps the boss's real hit area (raidBossHalfExtent) - not a one-time reach check
+// snapped onto the boss's own coordinates. Host and non-host players are resolved identically
+// from their synced state, so there's no separate relay path for melee any more.
+function raidCheckSwordSwings(b) {
+  if (raidBossUntargetable(b)) return;
+  const bhb = raidBossHalfExtent(b.type);
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p || !(p.swingTimer > 0)) return;
+    const st = raidSwingHitState[id] || (raidSwingHitState[id] = { lastTimer: 0, hasHit: false });
+    if (p.swingTimer > st.lastTimer) st.hasHit = false; // a higher timer than last frame means a new swing just started
+    st.lastTimer = p.swingTimer;
+    if (st.hasHit) return;
+    if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
+    const box = raidSwordHitbox(p);
+    if (Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh) {
+      st.hasHit = true;
+      raidHitBoss(b, { x: box.cx, y: box.cy, damage: RAID_SWORD_DAMAGE });
+    }
+  });
 }
 
 function raidShootProjectile() {
@@ -6414,7 +6454,7 @@ function raidDraw() {
     if (!p) return;
     drawPlayerCuphead(raidCtx, p.x, p.y, 36, 48, p.facing || 1,
                p.health || 5, p.maxHealth || 5, p.shield || false, p.invincible || 0, false,
-               { skin: p.skin, gun: p.gun, reload: p.reload || 0, swing: p.swing || 0, recoil: 0, vx: p.vx || 0, onGround: p.onGround !== false });
+               { skin: p.skin, gun: p.gun, reload: p.reload || 0, swing: p.swing || 0, swingDir: p.swingDir || 'side', recoil: 0, vx: p.vx || 0, onGround: p.onGround !== false });
   });
 
   const lp = raidLocal;
@@ -6430,7 +6470,8 @@ function raidDraw() {
              lp.health, lp.maxHealth, lp.shield, lp.invincible, true,
              { skin: lp.skin, gun: lp.gun, recoil: lp.recoil, vx: lp.vx, onGround: lp.onGround,
                reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
-               swing: lp.swingTimer > 0 ? 1 - lp.swingTimer / RAID_SWORD_SWING_FRAMES : 0 });
+               swing: lp.swingTimer > 0 ? 1 - lp.swingTimer / RAID_SWORD_SWING_FRAMES : 0,
+               swingDir: lp.swingDir || 'side' });
 
   raidFx.floaters.forEach(f => {
     raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
@@ -6709,7 +6750,7 @@ function raidInit() {
 
 document.addEventListener('keydown', (e) => {
   const key = e.key;
-  if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === ' ' || key === 'Space') {
+  if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown' || key === ' ' || key === 'Space') {
     const raidSection = document.getElementById('raid');
     if (raidSection && raidSection.classList.contains('active')) {
       e.preventDefault();
@@ -6720,6 +6761,8 @@ document.addEventListener('keydown', (e) => {
   if (key === 'ArrowRight') { raidLocal.input.right = true; }
   // Z is the Hollow Knight-style jump key; ArrowUp still works too.
   if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = true; }
+  // Up/down decide sword swing direction (WPN-05) - held at the moment X/Space is pressed.
+  if (key === 'ArrowDown' || key === 's' || key === 'S') { raidLocal.input.down = true; }
 
   // X is "attack" (Hollow Knight-style); Space still shoots (or swings) too. Which one
   // actually happens depends on the equipped weapon - see raidAttack.
@@ -6793,6 +6836,7 @@ document.addEventListener('keyup', (e) => {
   if (key === 'ArrowLeft') { raidLocal.input.left = false; }
   if (key === 'ArrowRight') { raidLocal.input.right = false; }
   if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = false; }
+  if (key === 'ArrowDown' || key === 's' || key === 'S') { raidLocal.input.down = false; }
 });
 
 // ============================================================
@@ -8079,21 +8123,30 @@ function mqDrawGun(ctx, gunId, px, py, facing, reload, recoil, t) {
 // differ by color/glow, same as the rest of the shop's items. swing: 0 at rest, 1 mid-swing,
 // wrapping back down to 0 as the blade returns - see raidSwordSwing / raidLocal.swingTimer.
 
-function mqDrawSword(ctx, swordId, px, py, facing, swing, t) {
+function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir) {
   const def = MQ_SWORD_MAP[swordId] || MQ_SWORD_MAP.sword_training;
   swing = swing || 0;
   // ease out-and-back: 0 -> 1 over the first half of the swing, 1 -> 0 over the second half.
   const e = swing <= 0.5 ? swing * 2 : (1 - swing) * 2;
-  const angle = -0.7 + e * 2.0; // sweeps from behind the player to well in front
+  // The blade points straight up at rotation 0 (see the blade path below), so each direction
+  // (WPN-05) just picks a different sweep center: side sweeps from behind-and-up to mostly
+  // forward (unchanged from the original single-direction swing); up stays centered overhead;
+  // down is the same overhead sweep rotated a half turn to point below the player.
+  let angle;
+  if (dir === 'up') angle = -0.9 + e * 1.8;
+  else if (dir === 'down') angle = Math.PI - 0.9 + e * 1.8;
+  else angle = -0.7 + e * 2.0;
 
   if (swing > 0) {
-    // The slash trail: a fading crescent following the blade through its arc.
+    // The slash trail (WPN-04): a fading white crescent following the blade through its arc -
+    // Hollow Knight's nail slash is white regardless of the nail's own color, so only the blade
+    // itself (below) keeps this sword's tint.
     ctx.save();
     ctx.translate(px, py);
     ctx.scale(facing, 1);
     for (let i = 0; i < 5; i++) {
       const a2 = angle - i * 0.09;
-      ctx.strokeStyle = def.glow;
+      ctx.strokeStyle = '#ffffff';
       ctx.globalAlpha = (1 - i / 5) * 0.55 * (0.4 + e * 0.6);
       ctx.lineWidth = 5 - i * 0.7;
       ctx.beginPath();
@@ -8134,8 +8187,8 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t) {
 }
 
 // Draws whichever weapon is equipped, gun or sword - the only fork the caller needs.
-function mqDrawWeapon(ctx, weaponId, px, py, facing, reload, recoil, swing, t) {
-  if (MQ_SWORD_MAP[weaponId]) mqDrawSword(ctx, weaponId, px, py, facing, swing, t);
+function mqDrawWeapon(ctx, weaponId, px, py, facing, reload, recoil, swing, t, dir) {
+  if (MQ_SWORD_MAP[weaponId]) mqDrawSword(ctx, weaponId, px, py, facing, swing, t, dir);
   else mqDrawGun(ctx, weaponId, px, py, facing, reload, recoil, t);
 }
 
@@ -8253,7 +8306,7 @@ function drawPlayerBullet(ctx, p) {
 }
 
 // ---- Player -----------------------------------------------------------------
-// look: {skin, gun, reload (0..1), recoil (0..1), t, noBar, noShadow}
+// look: {skin, gun, reload (0..1), recoil (0..1), swing (0..1), swingDir, t, noBar, noShadow}
 
 // A step toward Hollow Knight's smaller, simpler vessel look (WPN-20): the whole character is
 // drawn at this scale, anchored at the feet - see drawPlayerCuphead.
@@ -8392,7 +8445,7 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
     ctx.strokeStyle = bottom; ctx.lineWidth = 4.6;
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
-    mqDrawWeapon(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, look.swing || 0, t);
+    mqDrawWeapon(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, look.swing || 0, t, look.swingDir || 'side');
     ctx.fillStyle = hc[0]; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(gx, gy + 1, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }

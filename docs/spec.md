@@ -131,7 +131,9 @@ lives in section `raid`.
 | ID | Requirement | Status |
 |----|-------------|--------|
 | WPN-01 | **Weapon slot:** equipping a gun or a sword changes what the X/Space attack button does - shoot (RAI-12) with a gun, swing (WPN-02) with a sword. Guns and swords are otherwise both just "the weapon slot" - stored under the same `equipped.gun` profile key and the same `raidLocal.gun` field - so nothing else about equipping or syncing needs to know which kind is active. | Done |
-| WPN-02 | **Sword combat:** X/Space swings instead of shooting - no ammo or reload. A 14-frame swing animation (crescent slash trail) plays, and if the boss is within reach (80px horizontal, 95px vertical of the player, generous enough to hit an aerial boss from a jump) it takes 4 damage, 26-frame cooldown between swings. The hit is relayed and resolved through the same host-authoritative pipeline as bullets (`playerProjectiles`, `raidShotsRef` for non-hosts) and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) - no boss-side code differs between being shot and being cut. | Done |
+| WPN-02 | **Sword combat, hitbox-accurate:** X/Space swings instead of shooting - no ammo or reload. Every host frame, each player's direction-aware melee hitbox (WPN-05) is tested for real overlap against the boss's own hit area (`BOSS_HITBOX`/RAI-18) during the few frames the blade is actually extended (mid-swing, not the whole 14-frame animation) - a hit only lands on genuine overlap, at most once per swing, 4 damage, 26-frame cooldown between swings. Resolved identically for host and non-host players from each player's synced position/direction (no separate relay path), and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) as a bullet - no boss-side code differs between being shot and being cut. | Done |
+| WPN-04 | **White slash (Hollow Knight-style):** the swing's crescent trail always renders white, regardless of the equipped sword's own color - only the blade itself keeps that sword's tint. | Done |
+| WPN-05 | **Directional swings:** holding Up or Down at the moment X/Space is pressed swings up or down instead of to the side (the default) - each direction has its own, differently-shaped melee hitbox (narrower, reaching only in its own direction, instead of the side swing's box centered on the player). Direction is locked in for the whole swing once it starts. | Done |
 | WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). Effects: | Done |
 
 | Item | Rarity | Effect |
@@ -261,8 +263,8 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | Firestore `publicSets/<id>` | Community question sets (`ownerId`, `name`, `questions`, ...). |
 | RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `raidStart`, `players`. |
 | RTDB `bossRaid/<code>/gameState` | Host-published boss, projectiles, hazards, slam effects, `gameOver`, `victory`. |
-| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, reload, swing, skin, weapon (`gun` field - a gun or sword id), utility, `wardUsed`). |
-| RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed shots and melee hits, math answers (math off). |
+| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, reload, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a gun or sword id), utility, `wardUsed`). |
+| RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed gun shots (melee hits resolve straight from synced player state - WPN-02 - no relay needed), math answers (math off). |
 | `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility), `stats`. |
 
 | ID | Requirement | Status |
@@ -271,6 +273,10 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 
 ## 12. Known issues and decisions
 
+- **Sword hitbox accuracy is only frame-perfect for the host.** WPN-02's per-frame overlap check
+  runs on the host, using every player's *synced* position/direction (updated roughly every 2
+  frames via `raidSendLocalState`) - the same latency tradeoff bullets already have. A non-host
+  player's swing is judged against slightly-stale data, not their own live-local view.
 - **Realtime Database rules are not deployed.** `database.rules.json` requires auth for writes, but the deploy workflow only deploys hosting, so the live database is effectively open. Deploying the rules is a separate decision.
 - **Coins and items live in the browser** and can be edited by a determined player. Acceptable for cosmetics; move server-side if coins ever gain real value.
 - **One pre-existing self-test fails:** "Attack timer resets after attack" (`testBossAttack`). It is unrelated to current gameplay and shows up in every console.
@@ -312,3 +318,4 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-09 | Hollow Knight-style controls (Z jump, X attack, C dash; RAI-10, RAI-16); variable-height jump (RAI-17); impact frames on every hit - knockback, flash and hit-stop for the player (RAI-19) and hurt pose/flash/hit-stop for the boss (BOS-13); per-boss hit area, fixing the Wyrm's undersized one (RAI-18). |
 | 2026-09 | Fixed the dash burst being clamped away almost immediately (RAI-16); added a weapon slot (guns or swords, WPN-01/WPN-02) and a utility slot with 6 effects (WPN-03), 5 new swords and 6 new utility items, obtainable from the Starter/Arsenal/Legend crates (SHP-02/06/07); character redesign - ~15% smaller, Hollow Knight-style face and horns (WPN-20) - plus idle/run movement animation (RAI-20). |
 | 2026-09 | Fixed player invincibility (RAI-11) not being enforced synchronously: `raidDamagePlayer` now mutates the player object immediately instead of only firing an async Firebase write, closing a same-frame/round-trip window where two hazards or projectiles overlapping the same player could both land. |
+| 2026-09 | Reworked sword combat to be hitbox-accurate (WPN-02): swings now damage the boss only on real per-frame overlap between a direction-aware hitbox and the boss's actual hit area, instead of a one-time reach check snapped onto the boss's coordinates. Added Up/Down directional swings (WPN-05) and a white slash trail regardless of the sword's own color (WPN-04), matching Hollow Knight's nail slash. |
