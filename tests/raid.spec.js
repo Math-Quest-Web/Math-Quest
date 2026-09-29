@@ -187,6 +187,35 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(out.defeatedAfter).toEqual([false, false, false, false, true]);
   });
 
+  test('RAI-11 raidDamagePlayer marks its player object invincible synchronously, not only via the async Firebase write', async ({ page }) => {
+    // Regression test: raidDamagePlayer used to only fire an async raidPlayerRef.update(...)
+    // and never mutate the `p` object it was handed. Two damage sources resolved in the same
+    // synchronous pass (e.g. a hazard and a boss projectile overlapping the same player in one
+    // raidBossUpdate() call) would each see invincible===0 and both land, because the guard at
+    // the top of the function only reflects reality once the Firebase round-trip completes -
+    // which, on the real (non-stub) SDK, is never within the same synchronous turn.
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const p = { health: 5, invincible: 0, shield: false, wardUsed: false };
+      raidDamagePlayer(raidMyId, p, 1);
+      const afterFirst = { health: p.health, invincible: p.invincible };
+      raidDamagePlayer(raidMyId, p, 1); // same object, called before any round-trip could land
+      const afterSecond = { health: p.health, invincible: p.invincible };
+
+      // the ward branch must be synchronous too
+      const w = { health: 5, invincible: 0, shield: false, utility: 'util_ward', wardUsed: false };
+      raidDamagePlayer(raidMyId, w, 1);
+      const wardAfterFirst = { health: w.health, wardUsed: w.wardUsed, invincible: w.invincible };
+      raidDamagePlayer(raidMyId, w, 1); // ward already used, invincible should still block this
+      const wardAfterSecond = { health: w.health };
+      return { afterFirst, afterSecond, wardAfterFirst, wardAfterSecond };
+    });
+    expect(r.afterFirst).toEqual({ health: 4, invincible: 30 });
+    expect(r.afterSecond).toEqual({ health: 4, invincible: 30 });
+    expect(r.wardAfterFirst).toEqual({ health: 5, wardUsed: true, invincible: 30 });
+    expect(r.wardAfterSecond).toEqual({ health: 5 });
+  });
+
   test('RAI-12 shooting: 20 rounds, 7-frame delay, straight-up 3-damage bullets from the muzzle', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');

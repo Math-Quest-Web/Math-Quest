@@ -4040,13 +4040,20 @@ function startCountdown(callback) {
 
 function raidDamagePlayer(id, p, amount) {
   if (!p || p.shield || p.invincible > 0) return;
+  // Mutate p synchronously (RAI-11) so a second hazard/projectile hitting the same player later
+  // in this same host frame - or before the Firebase round-trip lands - sees invincible>0 right
+  // away, instead of racing the async .update() below.
   // Warding Sigil absorbs exactly one hit per raid (WPN-03).
   const u = MQ_UTILITY_MAP[p.utility];
   if (u && u.effect === 'first_hit_ward' && !p.wardUsed) {
+    p.wardUsed = true;
+    p.invincible = 30;
     raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
     return;
   }
   const newHealth = Math.max(0, (p.health || 5) - (amount || 1));
+  p.health = newHealth;
+  p.invincible = 30;
   raidPlayerRef.child(id).update({ health: newHealth, invincible: 30 });
   if (newHealth <= 0) {
     raidG.gameOver = true;
