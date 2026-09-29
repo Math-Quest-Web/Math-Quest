@@ -439,7 +439,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       return out;
     });
     expect(r.table).toEqual({
-      grinmaw: { hw: 58, hh: 58 }, warden: { hw: 50, hh: 65 }, wyrm: { hw: 105, hh: 55 }, glutton: { hw: 58, hh: 58 }
+      grinmaw: { hw: 58, hh: 58 }, warden: { hw: 50, hh: 65 }, wyrm: { hw: 105, hh: 55 }, glutton: { hw: 58, hh: 58 },
+      bramblehide: { hw: 70, hh: 50 }, colossus: { hw: 55, hh: 85 }, griffon: { hw: 95, hh: 60 }
     });
     expect(r.wyrmWideEdge).toBe(3);
     expect(r.wyrmBeyond).toBe(0);

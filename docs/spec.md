@@ -74,7 +74,7 @@ lives in section `raid`.
 |----|-------------|--------|
 | LOB-01 | The lobby list shows each lobby's name, boss, difficulty, code, host, status (Waiting / In Raid) and player count `n/6`, with Join and Refresh. | Done |
 | LOB-02 | Creating a lobby takes a name and generates a 4-digit code. Creation is a transaction so two hosts can never get the same code. | Done |
-| LOB-03 | After creating, the **host** sees the boss selection page (4 bosses) and a **difficulty** picker (Easy / Normal / Hard, default Normal). Picking a boss commits both. Non-hosts see "waiting for the host". | Done |
+| LOB-03 | After creating, the **host** sees the boss selection page (7 bosses) and a **difficulty** picker (Easy / Normal / Hard, default Normal). Picking a boss commits both. Non-hosts see "waiting for the host". | Done |
 | LOB-04 | The waiting room shows the boss, difficulty and the player list. Only the host sees Start Raid. Everyone sees Leave Lobby. | Done |
 | LOB-05 | Start Raid writes a start signal; **every** client (host and non-host) switches to the game and runs the 3-2-1 countdown. | Done |
 | LOB-06 | A collapsible "How to Play" tutorial is on the raid page (controls, wind-ups/markers, shield, dash, HP bar goal). It must not mention math while math is off (RAI-40) and must not tell players when a boss is vulnerable (BOS-12). | Done |
@@ -169,8 +169,9 @@ lives in section `raid`.
 | BOS-12 | **Vulnerability is shown, not told.** A stunned boss tilts, sags and has dizzy stars circling its head. There is no text or icon saying "weak/exposed". | Done |
 | BOS-13 | Feedback: screen shake on hits and phase changes, floating damage numbers, red flash when the local player is hit, phase notches at 60% and 30% on the boss HP bar. **Every hit on the boss** (not just the big stun) briefly shows its hurt pose and a white flash, and triggers a short hit-stop felt by every client (see RAI-19 for the player's own impact frame). | Done |
 | BOS-14 | The boss HP bar is large, fixed at the top of the screen (not attached to the boss). | Done |
+| BOS-43 | **Ground-anchored bosses** (Bramblehide, Colossus) sit at floor height (`raidGROUND_Y` minus their own hit-area half-height) with only a small idle bob - no floating drift like the other bosses. A grounded player can melee or shoot them without needing to jump first. | Done |
 
-### 9.2 The four bosses
+### 9.2 The seven bosses
 
 | Boss | Max HP | Theme | Attacks (phase) | Stun after |
 |------|--------|-------|-----------------|------------|
@@ -178,6 +179,9 @@ lives in section `raid`.
 | **The Chained Warden** | 165 | Purple wraith | Chain lash (1): chain flung from its hands to a floor marker (two chains in 2+). Vanish strike (1): slowly fades, materialises on a floor marker, crashes down. Void orb (2+): orb grows in its hands, is thrown, hovers with growing spikes, bursts into 8 slow shots. | Vanish strike |
 | **Trio, the Three-Headed Wyrm** | 180 | Teal sky serpent | Triple volley (1): each head spits a slow fang. Fire spit (1): 2 arcing fireballs (3 in 2+) land on a marker and erupt as flame pillars. Dive bomb (2+): flies over a target, floor shadow grows, dives and crashes. | Dive bomb |
 | **The Glutton** | 160 | Green swamp beast | Belch (1): inflates, lobs slow bubbles at each player. Chomp (1): sinks and fades, swims as a shadow, slowly surfaces on a rippling floor marker, bites. Bubble fan (2+): a spread of bubbles with gaps. Feast: periodically clamps shut and is invulnerable for a telegraphed window. | Chomp |
+| **Bramblehide the Ravenous** (ground) | 170 | Orange thorned boar | Root spikes (1): a floor marker under every player, then spikes erupt. Charge stomp (1): leans toward the nearest player, then a fast one-directional shockwave. Bramble toss (2+): 2 lobbed seed-pods that erupt into short spike pillars on landing. | Charge stomp |
+| **Ironclad Colossus** (ground) | 180 | Cyan mechanical golem | Piston slam (1): rises, then a floor marker under the nearest player and a radius strike. Arc discharge (1): chest core glows, then one aimed bolt per player. Overload pulse (2+): a ground shockwave in both directions. | Piston slam |
+| **Skybound Griffon** | 165 | Gold-feathered diver | Feather volley (1): wing pull-back, then one aimed feather-shard per player. Wind dive (1): swoops over a target, plunges, crashes. Gale storm (2+): a gapped spread of five lobbed feather shots. | Wind dive |
 
 ### 9.3 Per-boss attack requirements
 
@@ -189,6 +193,9 @@ Frame counts are the durations of each animation state (60 frames = 1 second).
 | BOS-21 | **Warden.** Chain lash: a marker on the floor, the chain lands about 62 frames later and only hurts standing players; one chain, two (30 frames apart) from phase 2. Vanish strike: fade 50, unseen 40, materialise 45 on a floor marker, strike (hurts within 62 px, grounded), stun, return 40. Void orb (phase 2+): grows 40 frames in the hands, thrown, hovers until frame 135, then 8 evenly spaced slow shots from the orb. | Done |
 | BOS-22 | **Wyrm.** Triple volley: coil, then one fang per head at frames 24, 44 and 64. Fire spit: fireballs at frames 26 and 60 (plus 94 from phase 2) that land on a spot and erupt into a pillar that hurts only after a 32-frame marker and only grounded players within 38 px (a high jump clears it). Dive bomb (phase 2+): fly over the target 45 frames, dive 26 frames, crash (hurts within 78 px, grounded), stun, climb back 50. | Done |
 | BOS-23 | **Glutton.** Belch: inflate 24 frames, then one slow bubble per player that lands on the floor and pops. Chomp: sink and fade 48, swim as a shadow 52, surface on a floor marker 40, bite (hurts within 62 px, grounded), stun, retreat 48. Bubble fan (phase 2+): five bubbles landing more than 100 px apart. Feast: after a warning it clamps shut and is invulnerable for 80 frames; any attack ends the clamp early. | Done |
+| BOS-40 | **Bramblehide.** Root spikes: 26-frame windup, then a floor-marker pillar (same shared hazard as a landed fireball - BOS-01) under every player. Charge stomp: 30-frame lean toward whichever player is nearest, then one shockwave in that direction only, then stun. Bramble toss (phase 2+): 24-frame windup, then 2 lobbed pods (one per player) that erupt into a pillar on landing. | Done |
+| BOS-41 | **Colossus.** Piston slam: 40-frame rise, 8-frame slam, then a floor-marker pillar under the nearest player, then stun. Arc discharge: 28-frame chest-glow windup, then one aimed bolt per player (speed 2.1 + 0.3 x phase). Overload pulse (phase 2+): 34-frame windup, then a ground shockwave in both directions (reuses Grinmaw's exactly). | Done |
+| BOS-42 | **Griffon.** Feather volley: 26-frame wind pull-back, then one aimed feather-shard per player (speed 2.0 + 0.3 x phase). Wind dive: swoop over the target 40 frames, plunge 24 frames, crash (hurts within 80 px, grounded), stun, soar back 50. Gale storm (phase 2+): 26-frame windup, then five lobbed feathers landing more than 100 px apart. | Done |
 
 ### 9.4 Boss sprite sheet
 
@@ -319,3 +326,4 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-09 | Fixed the dash burst being clamped away almost immediately (RAI-16); added a weapon slot (guns or swords, WPN-01/WPN-02) and a utility slot with 6 effects (WPN-03), 5 new swords and 6 new utility items, obtainable from the Starter/Arsenal/Legend crates (SHP-02/06/07); character redesign - ~15% smaller, Hollow Knight-style face and horns (WPN-20) - plus idle/run movement animation (RAI-20). |
 | 2026-09 | Fixed player invincibility (RAI-11) not being enforced synchronously: `raidDamagePlayer` now mutates the player object immediately instead of only firing an async Firebase write, closing a same-frame/round-trip window where two hazards or projectiles overlapping the same player could both land. |
 | 2026-09 | Reworked sword combat to be hitbox-accurate (WPN-02): swings now damage the boss only on real per-frame overlap between a direction-aware hitbox and the boss's actual hit area, instead of a one-time reach check snapped onto the boss's coordinates. Added Up/Down directional swings (WPN-05) and a white slash trail regardless of the sword's own color (WPN-04), matching Hollow Knight's nail slash. |
+| 2026-09 | Added 3 bosses (BOS-40 to BOS-43): Bramblehide the Ravenous and Ironclad Colossus, the first two ground-anchored bosses (meleeable/shootable without jumping), and the airborne Skybound Griffon - seven bosses total. |

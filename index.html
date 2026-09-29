@@ -3106,10 +3106,35 @@ const BOSS_DEFS = {
     desc: 'A bottomless swamp beast that clamps shut to chew - time your shots between bites.',
     maxHp: 160,
     bg1: '#1a2a0d', bg2: '#33511a', accent: '#9ee66c'
+  },
+  bramblehide: {
+    id: 'bramblehide',
+    name: 'Bramblehide the Ravenous',
+    icon: '🐗',
+    desc: 'A thorned boar rooted to the arena floor. Erupts spikes underfoot and charges anyone in range.',
+    maxHp: 170,
+    bg1: '#1f2e0a', bg2: '#3a4a14', accent: '#ff9d2e'
+  },
+  colossus: {
+    id: 'colossus',
+    name: 'Ironclad Colossus',
+    icon: '🗿',
+    desc: 'A mechanical golem bolted to the ground. Slams the earth and fires bolts from its chest core.',
+    maxHp: 180,
+    bg1: '#10131c', bg2: '#232c3d', accent: '#5ce1ff'
+  },
+  griffon: {
+    id: 'griffon',
+    name: 'Skybound Griffon',
+    icon: '🦅',
+    desc: 'A golden-feathered griffon that dives from above. Watch the shadow before it strikes.',
+    maxHp: 165,
+    bg1: '#0a1a2e', bg2: '#16324a', accent: '#ffe27a'
   }
 };
 
-const BOSS_ORDER = ['grinmaw', 'warden', 'wyrm', 'glutton'];
+// bramblehide/colossus are ground-anchored (BOS-43); griffon floats like the original four.
+const BOSS_ORDER = ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon'];
 
 // ============================================================
 // DIFFICULTY DEFINITIONS
@@ -4093,7 +4118,10 @@ const BOSS_HITBOX = {
   grinmaw: { hw: 58, hh: 58 },
   warden: { hw: 50, hh: 65 },
   wyrm: { hw: 105, hh: 55 },
-  glutton: { hw: 58, hh: 58 }
+  glutton: { hw: 58, hh: 58 },
+  bramblehide: { hw: 70, hh: 50 },
+  colossus: { hw: 55, hh: 85 },
+  griffon: { hw: 95, hh: 60 }
 };
 function raidBossHalfExtent(type) {
   return BOSS_HITBOX[type] || BOSS_HITBOX.grinmaw;
@@ -4145,6 +4173,17 @@ function raidRandomPlayer() {
   if (!ids.length) return null;
   const id = ids[Math.floor(Math.random() * ids.length)];
   return { id: id, p: raidG.players[id] };
+}
+// -1/1: which side of the boss the closest player is on (Bramblehide's charge, BOS-40).
+function raidNearestPlayerDir(b) {
+  let best = null, bestDist = Infinity;
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    const d = Math.abs(raidPx(p) - b.x);
+    if (d < bestDist) { bestDist = d; best = p; }
+  });
+  return best && raidPx(best) < b.x ? -1 : 1;
 }
 
 // While a boss is fading/submerged it can't be hit - shots pass straight through.
@@ -4645,8 +4684,299 @@ function gluttonMaybeFeast(b) {
   }
 }
 
-const BOSS_ATTACK_FNS = { grinmaw: grinmawAttack, warden: wardenAttack, wyrm: wyrmAttack, glutton: gluttonAttack };
-const BOSS_ULTIMATE_FNS = { grinmaw: grinmawUltimate, warden: wardenUltimate, wyrm: wyrmUltimate, glutton: gluttonUltimate };
+// ------------------------------------------------------------
+// Bramblehide the Ravenous - ground-anchored thorned boar (BOS-40, BOS-43)
+// ------------------------------------------------------------
+
+function bramblehideAttack(b) {
+  const options = ['spikes', 'charge'];
+  if (b.phase >= 2) options.push('toss');
+  const pick = raidPickAttack(b, options);
+  if (pick === 'spikes') b.anim = { state: 'rootWindup', timer: 0 };
+  else if (pick === 'charge') b.anim = { state: 'chargeWindup', timer: 0, dir: raidNearestPlayerDir(b) };
+  else b.anim = { state: 'tossWindup', timer: 0 };
+}
+
+// A crack marker appears under every player's current spot, then spikes erupt there - reuses
+// the fireball-landing "pillar" hazard's own marker/delayed-hit timing.
+function bramblehideRootSpikes(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    raidHazard({ kind: 'pillar', x: clampX(raidPx(p), 40, 960), life: 66 });
+  });
+}
+
+// A fast one-directional ground charge toward whichever side the nearest player was on.
+function bramblehideCharge(b, dir) {
+  raidHazard({ kind: 'shockwave', x: b.x, dir: dir, speed: 4.2 + b.phase * 0.4, life: 260 });
+}
+
+// Phase 2+: seed-pods lobbed toward players, each erupting into a short spike pillar on landing.
+function bramblehideBrambleToss(b) {
+  const ids = Object.keys(raidG.players);
+  const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
+  targets.slice(0, 2).forEach(tx => {
+    const hx = b.x, hy = b.y - 10, T = 50, g = 0.12;
+    raidG.projectiles.push({
+      x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 12) - hy - g * T * (T + 1) / 2) / T, gravity: g,
+      r: 10, life: T + 6, isWarning: false, owner: 'pod', isBossProjectile: true, kind: 'pod', onLand: 'pillar'
+    });
+  });
+}
+
+function bramblehideUltimate(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (p) raidDamagePlayer(id, p, 2);
+  });
+}
+
+function updateBramblehideAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'rootWindup') {
+    const t = Math.min(a.timer / 26, 1);
+    b.animScale = 1 + 0.08 * easeInOut(t);
+    if (a.timer === 26) bramblehideRootSpikes(b);
+    if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'chargeWindup') {
+    const t = Math.min(a.timer / 30, 1);
+    b.animOffsetX = -14 * a.dir * easeInOut(t);
+    if (t >= 1) {
+      bramblehideCharge(b, a.dir);
+      a.state = 'dazed'; a.timer = 0;
+      b.exposed = BOSS_STUN_FRAMES;
+    }
+  } else if (a.state === 'tossWindup') {
+    const t = Math.min(a.timer / 24, 1);
+    b.animScale = 1 + 0.1 * easeInOut(t);
+    if (a.timer === 24) bramblehideBrambleToss(b);
+    if (a.timer >= 30) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'dazed') {
+    b.animOffsetX = (b.animOffsetX || 0) * 0.98;
+    b.animScale = 0.97;
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'settle') {
+    const t = Math.min(a.timer / 18, 1);
+    b.animOffsetX = (b.animOffsetX || 0) * (1 - t);
+    b.animScale = 1 + ((b.animScale || 1) - 1) * (1 - t);
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetX = 0; b.animScale = 1; }
+  }
+}
+
+// ------------------------------------------------------------
+// Ironclad Colossus - ground-anchored mechanical golem (BOS-41, BOS-43)
+// ------------------------------------------------------------
+
+function colossusAttack(b) {
+  const options = ['slam', 'discharge'];
+  if (b.phase >= 2) options.push('pulse');
+  const pick = raidPickAttack(b, options);
+  if (pick === 'slam') b.anim = { state: 'slamWindup', timer: 0 };
+  else if (pick === 'discharge') b.anim = { state: 'chargeGlow', timer: 0 };
+  else b.anim = { state: 'pulseWindup', timer: 0 };
+}
+
+// A marker appears under the nearest player, then a radius strike lands there.
+function colossusPistonSlam(b) {
+  const pick = raidRandomPlayer();
+  const tx = clampX(pick ? raidPx(pick.p) : 500, 60, 940);
+  raidHazard({ kind: 'pillar', x: tx, life: 66 });
+}
+
+// One aimed bolt per player, fired from the chest core.
+function colossusArcDischarge(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y - 10);
+    const dist = Math.hypot(dx, dy) || 1;
+    const spd = 2.1 + b.phase * 0.3;
+    raidG.projectiles.push({
+      x: b.x, y: b.y - 10, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
+      r: 9, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'bolt'
+    });
+  });
+}
+
+// Phase 2+: a ground shockwave rolling out in both directions - reuses Grinmaw's exactly.
+function colossusOverloadPulse(b) {
+  [-1, 1].forEach(dir => {
+    raidHazard({ kind: 'shockwave', x: b.x, dir: dir, speed: 2.6 + b.phase * 0.3, life: 300 });
+  });
+  raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+}
+
+function colossusUltimate(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (p) raidDamagePlayer(id, p, 2);
+  });
+}
+
+function updateColossusAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'slamWindup') {
+    const t = Math.min(a.timer / 40, 1);
+    b.animOffsetY = -18 * easeInOut(t);
+    if (t >= 1) {
+      colossusPistonSlam(b);
+      a.state = 'slamDown'; a.timer = 0;
+    }
+  } else if (a.state === 'slamDown') {
+    const t = Math.min(a.timer / 8, 1);
+    b.animOffsetY = -18 * (1 - t);
+    if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
+  } else if (a.state === 'chargeGlow') {
+    const t = Math.min(a.timer / 28, 1);
+    b.animScale = 1 + 0.08 * easeInOut(t);
+    if (a.timer === 28) colossusArcDischarge(b);
+    if (a.timer >= 34) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'pulseWindup') {
+    const t = Math.min(a.timer / 34, 1);
+    b.animScale = 1 + 0.1 * easeInOut(t);
+    if (t >= 1) {
+      colossusOverloadPulse(b);
+      a.state = 'dazed'; a.timer = 0;
+      b.exposed = BOSS_STUN_FRAMES;
+    }
+  } else if (a.state === 'dazed') {
+    b.animScale = 0.97;
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'settle') {
+    const t = Math.min(a.timer / 18, 1);
+    b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
+    b.animScale = 1 + ((b.animScale || 1) - 1) * (1 - t);
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetY = 0; b.animScale = 1; }
+  }
+}
+
+// ------------------------------------------------------------
+// Skybound Griffon - floating, golden-feathered diver (BOS-42)
+// ------------------------------------------------------------
+
+function griffonAttack(b) {
+  const options = ['volley', 'dive'];
+  if (b.phase >= 2) options.push('storm');
+  const pick = raidPickAttack(b, options);
+  if (pick === 'volley') b.anim = { state: 'volleyWindup', timer: 0 };
+  else if (pick === 'dive') griffonWindDive(b);
+  else b.anim = { state: 'stormWindup', timer: 0 };
+}
+
+// One aimed feather-shard per player, fired after a readable wind-up (BOS-02) - a wing-pull-back
+// telegraph, not an instant poke. Uses its own kind ('plume') distinct from Gale Storm's lobbed
+// 'feather' shots, since one is aimed (BOS-07's aimedKinds) and the other follows a gravity arc
+// (lobbedKinds) - same boss, two different delivery styles, so they can't share a kind name.
+function griffonFeatherVolley(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y + 10);
+    const dist = Math.hypot(dx, dy) || 1;
+    const spd = 2.0 + b.phase * 0.3;
+    raidG.projectiles.push({
+      x: b.x, y: b.y + 10, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
+      r: 9, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'plume'
+    });
+  });
+}
+
+// A growing shadow marker, then a dive-crash there - reused almost verbatim from the Wyrm's,
+// with its own state names (swoop/plunge/thud/soar) so the two bosses' animation states stay
+// distinguishable (BOS-10) even though the underlying motion is the same shape.
+function griffonWindDive(b) {
+  const pick = raidRandomPlayer();
+  const tx = clampX(pick ? raidPx(pick.p) : 500, 100, 900);
+  b.anim = { state: 'swoop', timer: 0, targetX: tx, startX: b.x, startY: b.y };
+}
+
+// Phase 2+: a gapped spread of feather shots lobbed across the arena - reuses the Glutton's
+// bubble-fan formula.
+function griffonGaleStorm(b) {
+  for (let i = 0; i < 5; i++) {
+    const tx = clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960);
+    const hx = b.x, hy = b.y + 10, T = 55, g = 0.1;
+    raidG.projectiles.push({
+      x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 30) - hy - g * T * (T + 1) / 2) / T, gravity: g,
+      r: 9, life: T + 10, isWarning: false, owner: 'feather', isBossProjectile: true, kind: 'feather'
+    });
+  }
+}
+
+function griffonUltimate(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (p) raidDamagePlayer(id, p, 2);
+  });
+}
+
+const GRIFFON_POSITIONAL = ['swoop', 'plunge', 'thud', 'soar'];
+
+function griffonPathPos() {
+  return { x: 500 + Math.sin(raidG.frame * 0.011) * 240, y: 90 + Math.sin(raidG.frame * 0.025) * 16 };
+}
+
+function updateGriffonAnimation(b) {
+  const a = b.anim;
+  a.timer++;
+  if (a.state === 'volleyWindup') {
+    const t = Math.min(a.timer / 26, 1);
+    b.animOffsetY = -10 * easeInOut(t);
+    if (a.timer === 26) griffonFeatherVolley(b);
+    if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'stormWindup') {
+    const t = Math.min(a.timer / 26, 1);
+    b.animScale = 1 + 0.1 * easeInOut(t);
+    if (a.timer === 26) griffonGaleStorm(b);
+    if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'swoop') {
+    const e = easeInOut(Math.min(a.timer / 40, 1));
+    b.x = lerp(a.startX, a.targetX, e);
+    b.y = lerp(a.startY, 60, e);
+    if (a.timer >= 40) { a.state = 'plunge'; a.timer = 0; }
+  } else if (a.state === 'plunge') {
+    const t = Math.min(a.timer / 24, 1);
+    b.x = a.targetX;
+    b.y = lerp(60, raidGROUND_Y - 80, t * t);
+    if (t >= 1) {
+      Object.keys(raidG.players).forEach(id => {
+        const p = raidG.players[id];
+        if (!p) return;
+        if (Math.abs(raidPx(p) - a.targetX) < 80 && !raidAirborne(p, 50)) raidDamagePlayer(id, p, 1);
+      });
+      raidG.slamAnimations.push({ x: a.targetX, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+      a.state = 'thud'; a.timer = 0;
+      b.exposed = BOSS_STUN_FRAMES;
+    }
+  } else if (a.state === 'thud') {
+    b.x = a.targetX;
+    b.y = raidGROUND_Y - 80 + Math.sin(a.timer * 0.3) * 1.5;
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'soar'; a.timer = 0; }
+  } else if (a.state === 'soar') {
+    const e = easeInOut(Math.min(a.timer / 50, 1));
+    const p = griffonPathPos();
+    b.x = lerp(a.targetX, p.x, e);
+    b.y = lerp(raidGROUND_Y - 80, p.y, e);
+    if (a.timer >= 50) { b.anim = { state: 'idle', timer: 0 }; }
+  } else if (a.state === 'settle') {
+    const t = Math.min(a.timer / 15, 1);
+    b.animScale = 1 + ((b.animScale || 1) - 1) * (1 - t);
+    b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animScale = 1; b.animOffsetY = 0; }
+  }
+}
+
+const BOSS_ATTACK_FNS = {
+  grinmaw: grinmawAttack, warden: wardenAttack, wyrm: wyrmAttack, glutton: gluttonAttack,
+  bramblehide: bramblehideAttack, colossus: colossusAttack, griffon: griffonAttack
+};
+const BOSS_ULTIMATE_FNS = {
+  grinmaw: grinmawUltimate, warden: wardenUltimate, wyrm: wyrmUltimate, glutton: gluttonUltimate,
+  bramblehide: bramblehideUltimate, colossus: colossusUltimate, griffon: griffonUltimate
+};
 
 // ------------------------------------------------------------
 // Weak-point / ultimate-interrupt math events (host-authoritative)
@@ -4834,6 +5164,26 @@ function raidBossUpdate() {
       b.y = 95 + Math.sin(raidG.frame * 0.02) * 6;
     }
     if (b.anim.state !== 'idle') updateGluttonAnimation(b);
+  } else if (b.type === 'bramblehide') {
+    // Ground-anchored (BOS-43): sits at floor height with only a small sway, no floating drift,
+    // so a grounded player can melee or shoot it without needing to jump.
+    b.x = 500 + Math.sin(raidG.frame * 0.008) * 20;
+    b.y = raidGROUND_Y - BOSS_HITBOX.bramblehide.hh + Math.sin(raidG.frame * 0.03) * 3;
+    if (b.anim.state !== 'idle') updateBramblehideAnimation(b);
+    b.x += b.animOffsetX || 0;
+  } else if (b.type === 'colossus') {
+    // Ground-anchored (BOS-43), same as Bramblehide.
+    b.x = 500 + Math.sin(raidG.frame * 0.006) * 14;
+    b.y = raidGROUND_Y - BOSS_HITBOX.colossus.hh + Math.sin(raidG.frame * 0.025) * 2;
+    if (b.anim.state !== 'idle') updateColossusAnimation(b);
+    b.y += b.animOffsetY || 0;
+  } else if (b.type === 'griffon') {
+    if (!GRIFFON_POSITIONAL.includes(b.anim.state)) {
+      const path = griffonPathPos();
+      b.x = path.x; b.y = path.y;
+    }
+    if (b.anim.state !== 'idle') updateGriffonAnimation(b);
+    if (!GRIFFON_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
   } else {
     b.x += Math.sin(raidG.frame * 0.018) * 0.8;
     b.y = 80 + Math.sin(raidG.frame * 0.025) * 12;
@@ -5491,6 +5841,9 @@ function drawBossDispatch(ctx, boss) {
   else if (boss.type === 'warden') drawWarden(ctx, boss);
   else if (boss.type === 'wyrm') drawWyrm(ctx, boss);
   else if (boss.type === 'glutton') drawGlutton(ctx, boss);
+  else if (boss.type === 'bramblehide') drawBramblehide(ctx, boss);
+  else if (boss.type === 'colossus') drawColossus(ctx, boss);
+  else if (boss.type === 'griffon') drawGriffon(ctx, boss);
   else drawGrinmaw(ctx, boss);
   ctx.restore();
 
@@ -5961,6 +6314,191 @@ function drawGlutton(ctx, boss) {
   }
 }
 
+function drawBramblehide(ctx, boss) {
+  const b = boss;
+  const hpPercent = b.hp / b.maxHp;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(b.x, raidGROUND_Y - 4, 78, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stubby legs planted on the ground.
+  ctx.fillStyle = '#3a2a12';
+  ctx.strokeStyle = '#1a1206';
+  ctx.lineWidth = 3;
+  [-45, -15, 15, 45].forEach(dx => {
+    ctx.beginPath();
+    ctx.roundRect(b.x + dx - 7, b.y + 30, 14, 22, 5);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  ctx.shadowBlur = 30;
+  ctx.shadowColor = hpPercent > 0.4 ? '#ff9d2e' : '#c9531a';
+  const bodyGrad = ctx.createRadialGradient(b.x - 20, b.y - 10, 10, b.x, b.y, 70);
+  bodyGrad.addColorStop(0, hpPercent > 0.4 ? '#8a6a3a' : '#6a4a26');
+  bodyGrad.addColorStop(1, '#2e2110');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y, 68, 46, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#1a1206';
+  ctx.lineWidth = 4;
+  sketchStroke(ctx, b.x * 0.09);
+
+  // Thorns along the spine.
+  ctx.fillStyle = '#3a4a14';
+  ctx.strokeStyle = '#182008';
+  ctx.lineWidth = 2;
+  for (let i = -3; i <= 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(b.x + i * 16, b.y - 34);
+    ctx.lineTo(b.x + i * 16 - 5, b.y - 14);
+    ctx.lineTo(b.x + i * 16 + 5, b.y - 14);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+
+  // Tusks and eyes.
+  ctx.fillStyle = '#fff6e0'; ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2;
+  [-1, 1].forEach(s => {
+    ctx.beginPath();
+    ctx.moveTo(b.x + s * 30, b.y + 18);
+    ctx.quadraticCurveTo(b.x + s * 48, b.y + 10, b.x + s * 42, b.y - 6);
+    ctx.lineTo(b.x + s * 34, b.y + 4);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  });
+  const eyeY = b.y - 6;
+  ctx.fillStyle = '#ffcc44';
+  ctx.beginPath();
+  ctx.ellipse(b.x - 20, eyeY, 8, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(b.x + 20, eyeY, 8, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1a1206';
+  ctx.beginPath();
+  ctx.arc(b.x - 20, eyeY, 3.4, 0, Math.PI * 2);
+  ctx.arc(b.x + 20, eyeY, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawColossus(ctx, boss) {
+  const b = boss;
+  const hpPercent = b.hp / b.maxHp;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(b.x, raidGROUND_Y - 4, 60, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wide planted feet.
+  ctx.fillStyle = '#232c3d'; ctx.strokeStyle = '#0a0d14'; ctx.lineWidth = 3;
+  [-28, 28].forEach(dx => {
+    ctx.beginPath();
+    ctx.roundRect(b.x + dx - 16, b.y + 62, 32, 20, 6);
+    ctx.fill(); ctx.stroke();
+  });
+
+  // Tall armored torso.
+  ctx.shadowBlur = 26;
+  ctx.shadowColor = hpPercent > 0.4 ? '#5ce1ff' : '#2f7a99';
+  const bodyGrad = ctx.createLinearGradient(b.x, b.y - 85, b.x, b.y + 65);
+  bodyGrad.addColorStop(0, hpPercent > 0.4 ? '#3a4658' : '#2a3444');
+  bodyGrad.addColorStop(1, '#12151d');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.roundRect(b.x - 42, b.y - 85, 84, 150, 18);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#0a0d14';
+  ctx.lineWidth = 4;
+  sketchStroke(ctx, b.x * 0.07);
+
+  // Panel seams.
+  ctx.strokeStyle = 'rgba(10,13,20,0.5)'; ctx.lineWidth = 2;
+  [-20, 0, 20].forEach(dx => {
+    ctx.beginPath();
+    ctx.moveTo(b.x + dx, b.y - 78);
+    ctx.lineTo(b.x + dx, b.y + 58);
+    ctx.stroke();
+  });
+
+  // Chest core - glows brighter during Arc Discharge's windup.
+  const coreGlow = b.anim && b.anim.state === 'chargeGlow' ? 1 + (b.anim.timer || 0) / 28 : 1;
+  ctx.shadowBlur = 20 * coreGlow;
+  ctx.shadowColor = '#5ce1ff';
+  ctx.fillStyle = '#bff3ff';
+  ctx.beginPath();
+  ctx.arc(b.x, b.y - 15, 14 * Math.min(coreGlow, 1.4), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#0a0d14'; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.arc(b.x, b.y - 15, 14, 0, Math.PI * 2); ctx.stroke();
+
+  // Eyes.
+  ctx.fillStyle = '#5ce1ff';
+  ctx.beginPath();
+  ctx.ellipse(b.x - 18, b.y - 56, 7, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(b.x + 18, b.y - 56, 7, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawGriffon(ctx, boss) {
+  const b = boss;
+  const hpPercent = b.hp / b.maxHp;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(b.x, raidGROUND_Y - 6, 60 * (1 - Math.min((raidGROUND_Y - b.y) / 400, 0.7)), 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Wings, swept back.
+  ctx.fillStyle = hpPercent > 0.4 ? '#ffe27a' : '#c9a83a';
+  ctx.strokeStyle = '#7a5a10'; ctx.lineWidth = 3;
+  [-1, 1].forEach(s => {
+    ctx.beginPath();
+    ctx.moveTo(b.x + s * 20, b.y - 5);
+    ctx.quadraticCurveTo(b.x + s * 80, b.y - 30, b.x + s * 95, b.y + 5);
+    ctx.quadraticCurveTo(b.x + s * 60, b.y + 10, b.x + s * 24, b.y + 16);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  });
+
+  // Body.
+  ctx.shadowBlur = 26;
+  ctx.shadowColor = '#ffe27a';
+  const bodyGrad = ctx.createRadialGradient(b.x - 12, b.y - 10, 8, b.x, b.y, 50);
+  bodyGrad.addColorStop(0, hpPercent > 0.4 ? '#fff3c2' : '#d9c07a');
+  bodyGrad.addColorStop(1, '#8a5a1a');
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y, 40, 32, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#5a3a10'; ctx.lineWidth = 3.5;
+  sketchStroke(ctx, b.x * 0.11);
+
+  // Beak and eyes.
+  ctx.fillStyle = '#ffaa22'; ctx.strokeStyle = '#7a4a00'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y + 6);
+  ctx.lineTo(b.x - 14, b.y + 16);
+  ctx.lineTo(b.x, b.y + 22);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  const eyeY = b.y - 6;
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.ellipse(b.x - 12, eyeY, 8, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1a1206';
+  ctx.beginPath();
+  ctx.arc(b.x - 12, eyeY, 3.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 // One shared visual for every math prompt (shield recharge, weak point, ultimate interrupt)
 // so they don't look like three different UI systems.
 function drawMathPrompt(ctx) {
@@ -6419,7 +6957,11 @@ function raidDraw() {
         fang: ['#aaffee', '#2ce6c6', '#0d5c50'],
         bubble: ['#eaffcc', '#9ee66c', '#3d6b1f'],
         ember: ['#ffe9a0', '#ff8a2a', '#8a2a0a'],
-        void: ['#d8b8ff', '#7c3ce6', '#2a0f4a']
+        void: ['#d8b8ff', '#7c3ce6', '#2a0f4a'],
+        bolt: ['#e0faff', '#5ce1ff', '#123a52'],
+        feather: ['#fff6d0', '#ffe27a', '#7a5a10'],
+        plume: ['#fff6d0', '#ffe27a', '#7a5a10'],
+        pod: ['#d9ffb0', '#9ee66c', '#2f5a12']
       }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
       raidCtx.shadowBlur = 30;
       raidCtx.shadowColor = palette[1];

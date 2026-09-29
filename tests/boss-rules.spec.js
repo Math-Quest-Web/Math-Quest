@@ -2,14 +2,18 @@
 // stun, feedback). Whole fights are simulated with a seeded RNG so results are repeatable.
 const { test, expect } = require('./support/fixtures');
 
-const BOSSES = ['grinmaw', 'warden', 'wyrm', 'glutton'];
+const BOSSES = ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon'];
+// Bramblehide's Root Spikes and Colossus's Piston Slam spawn a 'pillar' hazard directly under a
+// marked spot (still sourced/telegraphed - same shared hazard, just not preceded by a projectile
+// landing there, unlike every other boss's pillars which only ever come from a lobbed shot).
+const DIRECT_PILLAR_BOSSES = ['bramblehide', 'colossus'];
 
 test.describe('Boss design rules (spec 9.1)', () => {
   test('BOS-01 every projectile and hazard comes from the boss or a marked spot - nothing appears from nowhere', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(7);
         const sim = T.simulate(boss, 3, 3600);
         const orbs = sim.hazards.filter((h) => h.kind === 'voidOrb');
@@ -36,21 +40,27 @@ test.describe('Boss design rules (spec 9.1)', () => {
       expect(r[b].impsFar).toBe(0);
       expect(r[b].wavesFar).toBe(0);
       r[b].hazardKinds.forEach((k) => expect(allowed, b + ' hazard kind ' + k).toContain(k));
-      expect(r[b].pillars, b + ' pillars only come from landed fireballs').toBeLessThanOrEqual(r[b].embers);
+      if (!DIRECT_PILLAR_BOSSES.includes(b)) {
+        expect(r[b].pillars, b + ' pillars only come from landed fireballs/pods').toBeLessThanOrEqual(r[b].embers);
+      }
     }
     // every void burst belongs to an orb that was conjured at the Warden's hands
     expect(r.warden.orbs).toBeGreaterThan(0);
     expect(r.warden.orbsNearBoss).toBe(r.warden.orbs);
     expect(r.warden.voidShots).toBe(r.warden.orbs * 8);
     // nothing except the Wyrm spits fireballs, so nothing else ever makes flame pillars
-    expect(r.grinmaw.pillars + r.warden.pillars + r.glutton.pillars).toBe(0);
+    expect(r.grinmaw.pillars + r.warden.pillars + r.glutton.pillars + r.griffon.pillars).toBe(0);
+    // Bramblehide/Colossus's pillars are directly marked (see DIRECT_PILLAR_BOSSES) - still
+    // sourced from a real spot (a player's or the nearest player's position), never "far".
+    expect(r.bramblehide.pillars).toBeGreaterThan(0);
+    expect(r.colossus.pillars).toBeGreaterThan(0);
   });
 
   test('BOS-02 no attack can hurt within 25 frames of starting - there is always a readable wind-up', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         let earliest = Infinity, hits = 0, nonIdleStarts = 0, attacks = 0;
         for (const phase of [1, 2]) {
           T.seed(11 + phase);
@@ -74,7 +84,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(21);
         const bot = T.runBot(boss, 3600, 3);
         T.seed(21);
@@ -130,7 +140,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(3);
         const sim = T.simulate(boss, 3, 6000);
         out[boss] = { attacks: sim.attacks.length, notIdle: sim.attacks.filter((a) => a.state !== 'idle').length };
@@ -147,7 +157,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(6);
         T.prepBoss(boss, 1); raidG.boss.attackTimer = 30; T.recordAttacks();
         let idle = 0, seen = 0; const gaps = [];
@@ -226,9 +236,9 @@ test.describe('Boss design rules (spec 9.1)', () => {
   test('BOS-07 aimed projectiles are slow (<= 3 px/frame); lobbed shots follow a short, visible arc to a landing spot', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
-      const aimedKinds = ['candy', 'fang', 'void'];
+      const aimedKinds = ['candy', 'fang', 'void', 'bolt', 'plume'];
       const out = { aimedMax: 0, aimedSeen: new Set(), lobbed: [] };
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(9);
         const sim = T.simulate(boss, 3, 3600);
         sim.spawns.forEach((p) => {
@@ -243,11 +253,11 @@ test.describe('Boss design rules (spec 9.1)', () => {
       delete out.lobbed;
       return out;
     });
-    expect(r.aimedSeen).toEqual(['candy', 'fang', 'void']);
+    expect(r.aimedSeen).toEqual(['bolt', 'candy', 'fang', 'plume', 'void']);
     expect(r.aimedMax).toBeLessThanOrEqual(3.2);
-    expect(r.lobbedKinds).toEqual(['bubble', 'ember']);
+    expect(r.lobbedKinds).toEqual(['bubble', 'ember', 'feather', 'pod']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['bubble:pops', 'ember:pillar']);
+    expect(r.lobbedLands).toEqual(['bubble:pops', 'ember:pillar', 'feather:pops', 'pod:pillar']);
   });
 
   test('BOS-08 phases at 60% and 30% HP: a 100-frame invulnerable beat that clears the arena and unlocks attacks', async ({ page }) => {
@@ -351,21 +361,21 @@ test.describe('Boss design rules (spec 9.1)', () => {
       for (const s of ['fade', 'ghost', 'materialize']) out['warden_' + s] = hitFor('warden', s);
       for (const s of ['sink', 'swim', 'rise']) out['glutton_' + s] = hitFor('glutton', s);
       out.idle = (() => { T.prepBoss('glutton', 1); const b = raidG.boss; const hp0 = b.hp; b.x = 500; b.y = 95; raidG.playerProjectiles = [{ x: 500, y: 95, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }]; raidBossUpdate(); return { hit: hp0 - raidG.boss.hp }; })();
-      out.helper = ['grinmaw', 'wyrm'].map((t) => { T.prepBoss(t, 1); raidG.boss.anim.state = 'dive'; return raidBossUntargetable(raidG.boss); });
+      out.helper = ['grinmaw', 'wyrm', 'bramblehide', 'colossus', 'griffon'].map((t) => { T.prepBoss(t, 1); raidG.boss.anim.state = 'dive'; return raidBossUntargetable(raidG.boss); });
       return out;
     });
     ['warden_fade', 'warden_ghost', 'warden_materialize', 'glutton_sink', 'glutton_swim', 'glutton_rise'].forEach((k) => {
       expect(r[k], k).toEqual({ hit: 0, kept: 1 });
     });
     expect(r.idle.hit).toBe(3);
-    expect(r.helper).toEqual([false, false]);
+    expect(r.helper).toEqual([false, false, false, false, false]);
   });
 
   test('BOS-10 each boss has its own animations and they are published so every client sees them', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.seed(4);
         out[boss] = T.simulate(boss, 3, 4000).states.filter((s) => s !== 'idle').sort();
       }
@@ -410,6 +420,9 @@ test.describe('Boss design rules (spec 9.1)', () => {
       out.warden = measure('warden', () => wardenStartVanish(raidG.boss), 'dazed');
       out.wyrm = measure('wyrm', () => wyrmDiveBomb(raidG.boss), 'crash');
       out.glutton = measure('glutton', () => gluttonStartChomp(raidG.boss), 'dazed');
+      out.bramblehide = measure('bramblehide', () => { raidG.boss.anim = { state: 'chargeWindup', timer: 0, dir: 1 }; }, 'dazed');
+      out.colossus = measure('colossus', () => { raidG.boss.anim = { state: 'slamWindup', timer: 0 }; }, 'dazed');
+      out.griffon = measure('griffon', () => griffonWindDive(raidG.boss), 'thud');
       return out;
     });
     expect(r.const).toBe(120);
@@ -443,7 +456,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
       const f1 = raidCtx.fillText.bind(raidCtx), f2 = raidCtx.strokeText.bind(raidCtx);
       raidCtx.fillText = (t, ...a) => { seen.push(String(t)); return f1(t, ...a); };
       raidCtx.strokeText = (t, ...a) => { seen.push(String(t)); return f2(t, ...a); };
-      for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton']) {
+      for (const boss of BOSS_ORDER) {
         T.prepBoss(boss, 1); raidG.boss.exposed = 100; raidDraw();
       }
       raidCtx.fillText = f1; raidCtx.strokeText = f2;

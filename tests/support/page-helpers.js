@@ -153,6 +153,7 @@ window.T = {
         if (['fade', 'ghost', 'materialize'].includes(a.state) && b.type === 'warden') dangers.push({ x: a.targetX, r: 100 });
         if (['aim', 'dive', 'crash'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: a.targetX, r: 110 });
         if (['sink', 'swim', 'rise'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.targetX, r: 100 });
+        if (['swoop', 'plunge', 'thud'].includes(a.state) && b.type === 'griffon') dangers.push({ x: a.targetX, r: 110 });
       }
       raidG.projectiles.forEach((p) => { if (p.isBossProjectile && p.life > 0 && p.y > raidGROUND_Y - 260) dangers.push({ x: p.x + (p.vx || 0) * 12, r: 60 }); });
       let wantJump = false;

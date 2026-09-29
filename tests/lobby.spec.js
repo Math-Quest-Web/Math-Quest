@@ -74,7 +74,7 @@ test.describe('Boss and difficulty selection, waiting room (LOB-03 to LOB-06, LO
   test('LOB-03 after creating, the host picks a boss and a difficulty; others just wait', async ({ page }) => {
     const id = await createLobbyViaUi(page);
     await expect(page.locator('#raidBossChooseStep')).toBeVisible();
-    await expect(page.locator('#raidBossPicker .boss-pick-card')).toHaveCount(4);
+    await expect(page.locator('#raidBossPicker .boss-pick-card')).toHaveCount(7);
     await expect(page.locator('.difficulty-btn')).toHaveCount(3);
     await expect(page.locator('.difficulty-btn.selected')).toContainText('Normal');
 
