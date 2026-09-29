@@ -3492,6 +3492,7 @@ function resetRaidState() {
   raidG.playerProjectiles = [];
   raidG.slamAnimations = [];
   raidG.hazards = [];
+  raidG.minions = [];
   raidG.mathEvent = null;
   raidG.players = {};
   raidG.frame = 0;
@@ -3509,11 +3510,14 @@ function resetRaidState() {
   raidLocal.trail = [];
   raidLocal.jumpBoosting = false;
   raidLocal.jumpHoldTimer = 0;
+  raidLocal.airJumpsUsed = 0;
+  raidLocal.wasUpPressed = false;
   raidLocal.moveTimer = 0;
   raidLocal.swordCooldown = 0;
   raidLocal.swingTimer = 0;
   raidLocal.swingDir = 'side';
   raidSwingHitState = {};
+  raidMaxAmmo = raidMagSizeForLoadout();
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
@@ -3672,7 +3676,7 @@ let countdownValue = 3;
 let countdownInterval = null;
 
 // Ammo system: a 20-round magazine that must be reloaded whenever it runs dry (or with R).
-const raidMaxAmmo = 20;
+let raidMaxAmmo = 20;
 let raidAmmo = raidMaxAmmo;
 const RAID_RELOAD_FRAMES = 100;
 const RAID_FIRE_DELAY = 7;
@@ -3705,6 +3709,7 @@ const raidG = {
   playerProjectiles: [],
   slamAnimations: [],
   hazards: [],
+  minions: [],
   mathEvent: null,
   gameOver: false,
   victory: false,
@@ -3736,6 +3741,8 @@ const raidLocal = {
   swingDir: 'side',
   jumpBoosting: false,
   jumpHoldTimer: 0,
+  airJumpsUsed: 0,
+  wasUpPressed: false,
   moveTimer: 0,
   skin: 'skin_classic',
   gun: 'gun_standard', // the equipped weapon's id - a gun or a sword, see MQ_WEAPON_MAP
@@ -3886,6 +3893,7 @@ function raidSendBossState() {
     playerProjectiles: raidG.playerProjectiles,
     slamAnimations: raidG.slamAnimations,
     hazards: raidG.hazards,
+    minions: raidG.minions,
     mathEvent: raidG.mathEvent,
     gameOver: raidG.gameOver,
     victory: raidG.victory,
@@ -3913,6 +3921,7 @@ function raidListenToGame() {
         raidG.playerProjectiles = data.playerProjectiles || [];
         raidG.slamAnimations = data.slamAnimations || [];
         raidG.hazards = data.hazards || [];
+        raidG.minions = data.minions || [];
         raidG.gameOver = data.gameOver || false;
         raidG.victory = data.victory || false;
         raidG.lastUpdate = data.lastUpdate;
@@ -3959,8 +3968,9 @@ function raidListenToMathHits() {
 // client sees its own health drop (works the same whether this client is the host or not).
 function raidOnLocalPlayerHit() {
   raidTriggerHitStop(6);
-  raidLocal.vx = -raidLocal.facing * 6;
-  raidLocal.vy = Math.min(raidLocal.vy, -4);
+  const kb = raidKnockbackMult(); // Iron Skin (WPN-03)
+  raidLocal.vx = -raidLocal.facing * 6 * kb;
+  raidLocal.vy = Math.min(raidLocal.vy, -4 * kb);
 }
 
 function raidListenToPlayers() {
@@ -5131,6 +5141,67 @@ function raidUpdateHazards() {
   raidG.hazards = raidG.hazards.filter(hz => hz.life > 0);
 }
 
+// Spectral Familiar (WPN-07): a small companion that orbits its owner and periodically fires a
+// weak shot at the boss. Host-simulated and synced like hazards; the bolt itself is just pushed
+// into the existing raidG.playerProjectiles array, so it's resolved by the normal bullet/
+// raidHitBoss collision path below with no new collision code.
+function raidUpdateMinions(b) {
+  const owners = new Set();
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    const u = p && MQ_UTILITY_MAP[p.utility];
+    if (u && u.effect === 'minion') owners.add(id);
+  });
+  raidG.minions = raidG.minions.filter(m => owners.has(m.ownerId));
+  owners.forEach(id => {
+    if (!raidG.minions.some(m => m.ownerId === id)) {
+      raidG.minions.push({ ownerId: id, x: raidPx(raidG.players[id]), y: raidG.players[id].y, angle: Math.random() * Math.PI * 2, fireTimer: 90 });
+    }
+  });
+  raidG.minions.forEach(m => {
+    const owner = raidG.players[m.ownerId];
+    if (!owner) return;
+    m.angle += 0.05;
+    m.x = raidPx(owner) + Math.cos(m.angle) * 40;
+    m.y = owner.y - 6 + Math.sin(m.angle) * 15;
+    m.fireTimer--;
+    if (m.fireTimer <= 0) {
+      m.fireTimer = 90;
+      if (!raidBossUntargetable(b)) {
+        const dx = b.x - m.x, dy = b.y - m.y, dist = Math.hypot(dx, dy) || 1;
+        // speed/life generous enough to cross the whole arena (the boss floats well above the
+        // ground - see RAI-17) since the minion has no reach limit of its own, only low damage.
+        raidG.playerProjectiles.push({
+          x: m.x, y: m.y, vx: (dx / dist) * 5, vy: (dy / dist) * 5, r: 4, life: 200, damage: 1,
+          kind: 'minionBolt', owner: m.ownerId
+        });
+      }
+    }
+  });
+}
+
+// A small glowing companion orb - the Spectral Familiar charm's visual (WPN-07).
+function drawMinion(ctx, m) {
+  ctx.save();
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = '#ff8ae0';
+  const g = ctx.createRadialGradient(m.x - 2, m.y - 2, 1, m.x, m.y, 9);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.5, '#c68aff');
+  g.addColorStop(1, '#6a2fb0');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(m.x, m.y, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(m.x, m.y, 8, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function raidBossUpdate() {
   if (!raidIsHost) return;
   const b = raidG.boss;
@@ -5252,6 +5323,7 @@ function raidBossUpdate() {
   }
 
   raidUpdateHazards();
+  raidUpdateMinions(b);
 
   raidG.slamAnimations.forEach(anim => {
     anim.life--;
@@ -5349,6 +5421,7 @@ function raidBossUpdate() {
           raidLocal.health = raidLocal.maxHealth;
           raidLocal.wardUsed = false;
           raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
+          raidMaxAmmo = raidMagSizeForLoadout();
           raidAmmo = raidMaxAmmo;
           raidReloadTimer = 0;
           raidSendBossState();
@@ -5452,13 +5525,16 @@ function raidSwordSwing() {
 function raidSwordHitbox(p) {
   const dir = p.swingDir || 'side';
   const cx = raidPx(p);
+  const mult = raidAttackRangeMult(p.utility); // Long Reach (WPN-03)
   if (dir === 'up') {
-    return { cx, cy: p.y - RAID_SWORD_UP_REACH / 2, hw: RAID_SWORD_UP_HALF_X, hh: RAID_SWORD_UP_REACH / 2 };
+    const reach = RAID_SWORD_UP_REACH * mult;
+    return { cx, cy: p.y - reach / 2, hw: RAID_SWORD_UP_HALF_X * mult, hh: reach / 2 };
   }
   if (dir === 'down') {
-    return { cx, cy: p.y + 24 + RAID_SWORD_UP_REACH / 2, hw: RAID_SWORD_UP_HALF_X, hh: RAID_SWORD_UP_REACH / 2 };
+    const reach = RAID_SWORD_UP_REACH * mult;
+    return { cx, cy: p.y + 24 + reach / 2, hw: RAID_SWORD_UP_HALF_X * mult, hh: reach / 2 };
   }
-  return { cx, cy: p.y + 24, hw: RAID_SWORD_RANGE_X, hh: RAID_SWORD_RANGE_Y };
+  return { cx, cy: p.y + 24, hw: RAID_SWORD_RANGE_X * mult, hh: RAID_SWORD_RANGE_Y * mult };
 }
 
 // Host-only, per-player bookkeeping for "has this swing already hit the boss" - kept outside
@@ -5506,7 +5582,7 @@ function raidShootProjectile() {
     vx: (Math.random() - 0.5) * 0.5,
     vy: -6,
     r: 6,
-    life: 120,
+    life: Math.round(120 * raidAttackRangeMult()), // Long Reach: bullets fly further (WPN-03)
     damage: 3,
     owner: raidMyId,
     gun: raidLocal.gun || 'gun_standard'
@@ -5555,7 +5631,8 @@ function raidUpdateLocal() {
     if (p.input.right) p.vx += accel;
     p.vx *= friction;
     if (Math.abs(p.vx) < 0.1) p.vx = 0;
-    if (Math.abs(p.vx) > 7) p.vx = Math.sign(p.vx) * 7;
+    const maxSpeed = raidMaxSpeed();
+    if (Math.abs(p.vx) > maxSpeed) p.vx = Math.sign(p.vx) * maxSpeed;
   }
   p.trail.forEach(g => g.life--);
   p.trail = p.trail.filter(g => g.life > 0);
@@ -5585,6 +5662,7 @@ function raidUpdateLocal() {
     p.vy = 0;
     p.onGround = true;
     p.jumpBoosting = false;
+    p.airJumpsUsed = 0; // Second Wind's air jump refills on landing (WPN-06)
   } else {
     p.onGround = false;
   }
@@ -5593,7 +5671,16 @@ function raidUpdateLocal() {
     p.onGround = false;
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
+  } else if (p.input.up && !p.wasUpPressed && !p.onGround && (p.airJumpsUsed || 0) < raidMaxAirJumps()) {
+    // Second Wind (WPN-06): one extra jump while airborne, edge-detected on the key press so
+    // holding jump doesn't spend it repeatedly the instant it becomes eligible (e.g. at the
+    // apex of the ground jump).
+    p.vy = RAID_JUMP_VY;
+    p.jumpBoosting = true;
+    p.jumpHoldTimer = 0;
+    p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
   }
+  p.wasUpPressed = p.input.up;
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
 
   if (p.invincible > 0) p.invincible--;
@@ -5608,7 +5695,7 @@ function raidUpdateLocal() {
 
   if (!RAID_MATH_ENABLED && raidMathShieldCharges < raidMaxShieldCharges) {
     raidShieldRegenTimer++;
-    if (raidShieldRegenTimer >= RAID_SHIELD_REGEN_FRAMES) {
+    if (raidShieldRegenTimer >= raidShieldRegenFrames()) {
       raidMathShieldCharges++;
       raidShieldRegenTimer = 0;
       raidUpdateUI();
@@ -5649,7 +5736,7 @@ function raidTryShield() {
   if (raidMathShieldCharges > 0) {
     raidMathShieldCharges--;
     raidLocal.shield = true;
-    raidLocal.shieldTimer = 90;
+    raidLocal.shieldTimer = raidShieldDurationFrames();
     raidUpdateUI();
     raidSendLocalState();
   } else if (RAID_MATH_ENABLED) {
@@ -5669,7 +5756,7 @@ function raidTryDash() {
   p.dashTimer = RAID_DASH_FRAMES;
   p.dashDir = p.facing;
   p.vx = p.dashDir * RAID_DASH_SPEED;
-  p.invincible = Math.max(p.invincible, 14);
+  p.invincible = Math.max(p.invincible, raidDashInvincibleFrames());
   p.dashCooldown = raidDashCooldownFrames();
   raidUpdateUI();
   raidSendLocalState();
@@ -5691,6 +5778,58 @@ function raidMaxHealthForLoadout() {
 function raidJumpHoldFrames() {
   const u = MQ_UTILITY_MAP[raidLocal.utility];
   return u && u.effect === 'jump_hold' ? Math.round(RAID_JUMP_HOLD_FRAMES * u.value) : RAID_JUMP_HOLD_FRAMES;
+}
+
+// Nimble Treads' higher move speed cap (WPN-03).
+function raidMaxSpeed() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'move_speed' ? 7 * u.value : 7;
+}
+
+// Iron Skin's reduced hit-knockback (WPN-03).
+function raidKnockbackMult() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'knockback_resist' ? u.value : 1;
+}
+
+// Reinforced Plating's longer shield window (WPN-03).
+function raidShieldDurationFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'shield_duration' ? Math.round(90 * u.value) : 90;
+}
+
+// Mending Charm's faster shield recharge (WPN-03).
+function raidShieldRegenFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'shield_charge_rate' ? Math.round(RAID_SHIELD_REGEN_FRAMES / u.value) : RAID_SHIELD_REGEN_FRAMES;
+}
+
+// Long Reach's bigger melee hitbox and longer bullet range (WPN-03) - one multiplier, shared
+// by the sword (raidSwordHitbox) and the gun (raidShootProjectile). Takes an explicit utility id
+// (rather than always reading raidLocal.utility) because raidSwordHitbox resolves swings for
+// every synced player, not just the local one - each player's own equipped charm applies to
+// their own swing.
+function raidAttackRangeMult(utilityId) {
+  const u = MQ_UTILITY_MAP[utilityId !== undefined ? utilityId : raidLocal.utility];
+  return u && u.effect === 'attack_range' ? u.value : 1;
+}
+
+// Phantom Step's longer dash invincibility (WPN-03).
+function raidDashInvincibleFrames() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'dash_iframes' ? Math.round(14 * u.value) : 14;
+}
+
+// Extended Mag's bigger magazine (WPN-03).
+function raidMagSizeForLoadout() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'mag_size' ? Math.round(20 * u.value) : 20;
+}
+
+// Second Wind's one extra air jump (WPN-06).
+function raidMaxAirJumps() {
+  const u = MQ_UTILITY_MAP[raidLocal.utility];
+  return u && u.effect === 'double_jump' ? 1 : 0;
 }
 
 function raidSubmitEventAnswer() {
@@ -6990,6 +7129,9 @@ function raidDraw() {
   raidG.playerProjectiles.forEach(p => drawPlayerBullet(raidCtx, p));
   raidCtx.shadowBlur = 0;
 
+  raidG.minions.forEach(m => drawMinion(raidCtx, m));
+  raidCtx.shadowBlur = 0;
+
   Object.keys(raidG.players).forEach(id => {
     if (id === raidMyId) return;
     const p = raidG.players[id];
@@ -7195,7 +7337,6 @@ function raidInit() {
   raidMyId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   raidLocal.id = raidMyId;
   raidLocal.facing = 1;
-  raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
   raidFireCooldown = 0;
   raidLocal.recoil = 0;
@@ -7206,6 +7347,8 @@ function raidInit() {
   raidLocal.utility = eq.utility || '';
   raidLocal.maxHealth = raidMaxHealthForLoadout();
   raidLocal.health = raidLocal.maxHealth;
+  raidMaxAmmo = raidMagSizeForLoadout();
+  raidAmmo = raidMaxAmmo;
 
   raidConnectedRef = raidDbRef.ref('.info/connected');
   raidConnectedRef.on('value', (snap) => {
@@ -8489,7 +8632,27 @@ const MQ_UTILITY = [
   { id: 'util_heart', name: 'Vital Core', rarity: 'epic', effect: 'max_health', value: 1,
     color: '#ff6b8a', accent: '#ffd84d', blurb: '+1 max heart.' },
   { id: 'util_ward', name: 'Warding Sigil', rarity: 'legendary', effect: 'first_hit_ward', value: 1,
-    color: '#ffd23f', accent: '#b56bff', blurb: 'The first hit you take each raid is absorbed.' }
+    color: '#ffd23f', accent: '#b56bff', blurb: 'The first hit you take each raid is absorbed.' },
+  { id: 'util_boots2', name: 'Nimble Treads', rarity: 'common', effect: 'move_speed', value: 1.15,
+    color: '#c9a9ff', accent: '#8a5cff', blurb: '+15% move speed.' },
+  { id: 'util_iron', name: 'Iron Skin', rarity: 'common', effect: 'knockback_resist', value: 0.5,
+    color: '#b8b8c8', accent: '#e8e8f0', blurb: 'Half the knockback when you are hit.' },
+  { id: 'util_shield', name: 'Reinforced Plating', rarity: 'uncommon', effect: 'shield_duration', value: 1.3,
+    color: '#66ccff', accent: '#c2ecff', blurb: 'Shield blocks 30% longer.' },
+  { id: 'util_regen', name: 'Mending Charm', rarity: 'uncommon', effect: 'shield_charge_rate', value: 1.5,
+    color: '#7af0c2', accent: '#eafff5', blurb: 'Shield recharges 50% faster.' },
+  { id: 'util_range', name: 'Long Reach', rarity: 'rare', effect: 'attack_range', value: 1.25,
+    color: '#ffb066', accent: '#ffe0b3', blurb: '+25% sword reach and bullet range.' },
+  { id: 'util_dashi', name: 'Phantom Step', rarity: 'rare', effect: 'dash_iframes', value: 1.5,
+    color: '#c6a8ff', accent: '#f0e0ff', blurb: 'Dash invincibility lasts 50% longer.' },
+  { id: 'util_ammo', name: 'Extended Mag', rarity: 'epic', effect: 'mag_size', value: 1.5,
+    color: '#ffd166', accent: '#fff0c2', blurb: '+50% magazine size.' },
+  { id: 'util_swift_reload', name: 'Overclock Coil', rarity: 'epic', effect: 'reload_speed', value: 0.65,
+    color: '#ff8a5c', accent: '#ffd0b8', blurb: 'Reload 35% faster.' },
+  { id: 'util_double', name: 'Second Wind', rarity: 'legendary', effect: 'double_jump', value: 1,
+    color: '#9ef0ff', accent: '#ffffff', blurb: 'Adds one extra jump in the air.' },
+  { id: 'util_minion', name: 'Spectral Familiar', rarity: 'legendary', effect: 'minion', value: 1,
+    color: '#c68aff', accent: '#ff8ae0', blurb: 'A spectral companion that fires at the boss for you.' }
 ];
 
 // Tall hats/hair push the floating health bar and reload ring up so they do not overlap.
@@ -9211,8 +9374,8 @@ const MQ_CRATES = [
     types: ['skin'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
     art: { wood: '#4a86e8', wood2: '#23438f', trim: '#0f1f4d', metal: '#bcd4ff', glow: '#8fb8ff' } },
   { id: 'crate_arsenal', name: 'Arsenal Crate', price: 250, emoji: '🔫',
-    blurb: 'Weapon skins only - guns and swords alike. No commons - every drop is uncommon or better.',
-    types: ['gun', 'sword'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
+    blurb: 'Weapons and charms - guns, swords and utility items. No commons - every drop is uncommon or better.',
+    types: ['gun', 'sword', 'utility'], weights: { uncommon: 38, rare: 40, epic: 17, legendary: 5 },
     art: { wood: '#7a8a9e', wood2: '#404c5e', trim: '#151b26', metal: '#d6dde8', glow: '#a9c7ee' } },
   { id: 'crate_cosmic', name: 'Cosmic Crate', price: 400, emoji: '🌌',
     blurb: 'Space-themed skins and guns only. A tighter pool means better odds on each item.',

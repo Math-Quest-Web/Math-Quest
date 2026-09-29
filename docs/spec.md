@@ -134,19 +134,31 @@ lives in section `raid`.
 | WPN-02 | **Sword combat, hitbox-accurate:** X/Space swings instead of shooting - no ammo or reload. Every host frame, each player's direction-aware melee hitbox (WPN-05) is tested for real overlap against the boss's own hit area (`BOSS_HITBOX`/RAI-18) during the few frames the blade is actually extended (mid-swing, not the whole 14-frame animation) - a hit only lands on genuine overlap, at most once per swing, 4 damage, 26-frame cooldown between swings. Resolved identically for host and non-host players from each player's synced position/direction (no separate relay path), and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) as a bullet - no boss-side code differs between being shot and being cut. | Done |
 | WPN-04 | **White slash (Hollow Knight-style):** the swing's crescent trail always renders white, regardless of the equipped sword's own color - only the blade itself keeps that sword's tint. | Done |
 | WPN-05 | **Directional swings:** holding Up or Down at the moment X/Space is pressed swings up or down instead of to the side (the default) - each direction has its own, differently-shaped melee hitbox (narrower, reaching only in its own direction, instead of the side swing's box centered on the player). Direction is locked in for the whole swing once it starts. | Done |
-| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). Effects: | Done |
+| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). 16 charms across all 5 rarities: | Done |
 
 | Item | Rarity | Effect |
 |------|--------|--------|
 | Swift Boots | Common | Dash cooldown -25% |
 | Lucky Charm | Common | +10% coins from every win |
+| Nimble Treads | Common | +15% move speed |
+| Iron Skin | Common | Half the knockback when you are hit |
 | Quick Hands | Uncommon | Reload 20% faster |
+| Reinforced Plating | Uncommon | Shield blocks 30% longer |
+| Mending Charm | Uncommon | Shield recharges 50% faster |
 | Feather Cloak | Rare | Hold jump 30% longer for extra height |
+| Long Reach | Rare | +25% sword reach and bullet range |
+| Phantom Step | Rare | Dash invincibility lasts 50% longer |
 | Vital Core | Epic | +1 max heart |
+| Extended Mag | Epic | +50% magazine size |
+| Overclock Coil | Epic | Reload 35% faster |
 | Warding Sigil | Legendary | Absorbs the first hit taken each raid |
+| Second Wind | Legendary | Adds one extra jump in the air (WPN-06) |
+| Spectral Familiar | Legendary | A companion that orbits you and fires at the boss for you (WPN-07) |
 
 | ID | Requirement | Status |
 |----|-------------|--------|
+| WPN-06 | **Second Wind (double jump):** while airborne and holding the charm, one extra jump is available - edge-detected on the key press (not the whole time it's held) so it can't be spammed the instant it becomes eligible. Refills the moment the player lands. | Done |
+| WPN-07 | **Spectral Familiar (minion):** while equipped, a small companion orbits its owner and, every 90 frames, fires a weak (1 damage) aimed shot at the boss. Host-simulated and synced like a hazard; the shot itself is resolved through the same bullet/hit pipeline as everything else - no separate collision code. Despawns the frame the charm is unequipped. | Done |
 | WPN-20 | **Character redesign:** the whole player silhouette is drawn about 15% smaller, anchored at the feet so it doesn't sink into or float off the ground (the health bar and reload ring above the head keep their original size and position, unaffected by the scale-down). The face is Hollow Knight-styled: big flat black eyes and no visible mouth, with small horns instead of the old red pom-pom (a skin can still cover the horns with its own headwear via `noHorns`). | Done |
 
 ## 9. Boss design rules and bosses
@@ -236,11 +248,11 @@ Crates:
 
 | Crate | Price | Pool | Rarity weights |
 |-------|-------|------|----------------|
-| Starter Crate | 100 | Skins, guns, swords and utility items (30) | Common 64, Uncommon 27, Rare 8, Epic 1 |
+| Starter Crate | 100 | Skins, guns, swords and utility items (38) | Common 64, Uncommon 27, Rare 8, Epic 1 |
 | Hero Crate | 250 | Player skins only (10) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Arsenal Crate | 250 | Weapon skins only - guns and swords (14) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
+| Arsenal Crate | 250 | Weapons and charms - guns, swords and utility items (26) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
 | Cosmic Crate | 400 | Items tagged "cosmic" (7): Astronaut, Galaxy Walker, Stardust Wand, Void Pulse, Solar Flare, Sunbreaker, Voidbone Fang | Rare 60, Epic 32, Legendary 8 |
-| Legend Crate | 700 | Skins, guns, swords and utility items (20) | Rare 46, Epic 39, Legendary 15 |
+| Legend Crate | 700 | Skins, guns, swords and utility items (26) | Rare 46, Epic 39, Legendary 15 |
 
 ### 10.3 Items
 
@@ -327,3 +339,4 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-09 | Fixed player invincibility (RAI-11) not being enforced synchronously: `raidDamagePlayer` now mutates the player object immediately instead of only firing an async Firebase write, closing a same-frame/round-trip window where two hazards or projectiles overlapping the same player could both land. |
 | 2026-09 | Reworked sword combat to be hitbox-accurate (WPN-02): swings now damage the boss only on real per-frame overlap between a direction-aware hitbox and the boss's actual hit area, instead of a one-time reach check snapped onto the boss's coordinates. Added Up/Down directional swings (WPN-05) and a white slash trail regardless of the sword's own color (WPN-04), matching Hollow Knight's nail slash. |
 | 2026-09 | Added 3 bosses (BOS-40 to BOS-43): Bramblehide the Ravenous and Ironclad Colossus, the first two ground-anchored bosses (meleeable/shootable without jumping), and the airborne Skybound Griffon - seven bosses total. |
+| 2026-09 | Added 10 charms (WPN-03), 16 total: move speed, knockback resistance, longer/faster-recharging shields, longer sword reach and bullet range, longer dash invincibility, a bigger magazine, a faster reload, a double jump (WPN-06) and a Spectral Familiar minion companion (WPN-07). Arsenal Crate now also drops utility items. |

@@ -728,6 +728,133 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.coinBonus).toBe(187);
   });
 
+  test('WPN-03 the 10 new charms: Nimble Treads, Iron Skin, Reinforced Plating, Mending Charm, Long Reach, Phantom Step, Extended Mag and Overclock Coil each apply their effect', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+
+      raidLocal.utility = 'util_boots2';
+      out.maxSpeed = raidMaxSpeed(); // 7 * 1.15
+
+      raidLocal.utility = 'util_iron';
+      out.knockbackMult = raidKnockbackMult(); // 0.5
+
+      raidLocal.utility = 'util_shield';
+      out.shieldDuration = raidShieldDurationFrames(); // round(90 * 1.3)
+
+      raidLocal.utility = 'util_regen';
+      out.shieldRegen = raidShieldRegenFrames(); // round(420 / 1.5)
+
+      raidLocal.utility = 'util_range';
+      out.attackRangeMult = raidAttackRangeMult(); // 1.25
+      out.swordHitbox = raidSwordHitbox({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: 'util_range' });
+
+      raidLocal.utility = 'util_dashi';
+      out.dashIframes = raidDashInvincibleFrames(); // round(14 * 1.5)
+
+      raidLocal.utility = 'util_ammo';
+      out.magSize = raidMagSizeForLoadout(); // round(20 * 1.5)
+
+      raidLocal.utility = 'util_swift_reload';
+      out.overclockReload = raidReloadFrames(); // round(100 * 0.65)
+
+      raidLocal.utility = null;
+      out.defaultSpeed = raidMaxSpeed();
+      out.defaultKnockback = raidKnockbackMult();
+      out.defaultShieldDuration = raidShieldDurationFrames();
+      out.defaultShieldRegen = raidShieldRegenFrames();
+      out.defaultRangeMult = raidAttackRangeMult();
+      out.defaultDashIframes = raidDashInvincibleFrames();
+      out.defaultMagSize = raidMagSizeForLoadout();
+      return out;
+    });
+    expect(r.maxSpeed).toBeCloseTo(8.05, 5);
+    expect(r.knockbackMult).toBe(0.5);
+    expect(r.shieldDuration).toBe(117);
+    expect(r.shieldRegen).toBe(280);
+    expect(r.attackRangeMult).toBe(1.25);
+    expect(r.swordHitbox).toEqual({ cx: 318, cy: 476, hw: 100, hh: 118.75 });
+    expect(r.dashIframes).toBe(21);
+    expect(r.magSize).toBe(30);
+    expect(r.overclockReload).toBe(65);
+    // defaults (no utility equipped) are unaffected
+    expect(r.defaultSpeed).toBe(7);
+    expect(r.defaultKnockback).toBe(1);
+    expect(r.defaultShieldDuration).toBe(90);
+    expect(r.defaultShieldRegen).toBe(420);
+    expect(r.defaultRangeMult).toBe(1);
+    expect(r.defaultDashIframes).toBe(14);
+    expect(r.defaultMagSize).toBe(20);
+  });
+
+  test('WPN-06 Second Wind grants exactly one extra jump in the air, refilled on landing, and only while equipped', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      // Edge-detected: press (up true on a frame where it was false before), then release,
+      // so a held key can't be mistaken for a fresh press on the next attempt.
+      const pressJump = () => {
+        raidLocal.input.up = true; raidUpdateLocal();
+        raidLocal.input.up = false; raidUpdateLocal();
+      };
+
+      // without the charm: airborne and "falling" (vy > 0) - a jump press should not boost it
+      raidLocal.utility = null;
+      T.place(500, raidGROUND_Y - 48 - 100); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 2;
+      pressJump();
+      const noCharmBlocked = raidLocal.vy > 0; // gravity only, no fresh negative (upward) boost
+
+      // with the charm: one air jump gives a fresh upward boost
+      raidLocal.utility = 'util_double';
+      T.place(500, raidGROUND_Y - 48 - 100); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 2;
+      pressJump();
+      const afterAirJump = { vy: raidLocal.vy, used: raidLocal.airJumpsUsed };
+      // a second air jump is blocked (only one charge) - still falling, no second boost
+      raidLocal.vy = 2;
+      pressJump();
+      const secondBlocked = raidLocal.vy > 0;
+      // landing refills it
+      T.place(500, raidGROUND_Y - 48); raidLocal.onGround = false;
+      raidUpdateLocal(); // lands, onGround becomes true, airJumpsUsed resets
+      const refilled = raidLocal.airJumpsUsed === 0;
+      return { noCharmBlocked, afterAirJump, secondBlocked, refilled };
+    });
+    expect(r.noCharmBlocked, 'no extra jump without the charm').toBe(true);
+    expect(r.afterAirJump.vy).toBeLessThan(0);
+    expect(r.afterAirJump.used).toBe(1);
+    expect(r.secondBlocked, 'only one air jump per landing').toBe(true);
+    expect(r.refilled, 'landing refills the air jump').toBe(true);
+  });
+
+  test('WPN-07 Spectral Familiar spawns an orbiting minion for its owner that fires at the boss and despawns when unequipped', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.utility = 'util_minion';
+      raidSendLocalState();
+      raidBossUpdate();
+      const spawned = raidG.minions.length === 1 && raidG.minions[0].ownerId === raidMyId;
+      const p0 = { x: raidG.minions[0].x, y: raidG.minions[0].y };
+      for (let i = 0; i < 10; i++) raidBossUpdate();
+      const orbited = raidG.minions[0].x !== p0.x || raidG.minions[0].y !== p0.y;
+      raidG.playerProjectiles = [];
+      for (let i = 0; i < 90; i++) raidBossUpdate();
+      const fired = raidG.playerProjectiles.some((p) => p.kind === 'minionBolt' && p.owner === raidMyId);
+      const hpBefore = raidG.boss.hp;
+      for (let i = 0; i < 200; i++) raidBossUpdate();
+      const damaged = raidG.boss.hp < hpBefore;
+      // unequipping despawns it
+      raidLocal.utility = null;
+      raidSendLocalState();
+      raidBossUpdate();
+      const despawned = raidG.minions.length === 0;
+      return { spawned, orbited, fired, damaged, despawned };
+    });
+    expect(r.spawned, 'a minion spawns for the owner').toBe(true);
+    expect(r.orbited, 'the minion orbits, it does not sit still').toBe(true);
+    expect(r.fired, 'the minion fires a weak bolt at the boss').toBe(true);
+    expect(r.damaged, 'the minion bolt damages the boss through the normal pipeline').toBe(true);
+    expect(r.despawned, 'unequipping the charm removes the minion').toBe(true);
+  });
+
   test('WPN-20 the player is drawn smaller, feet-anchored, with a Hollow Knight-style face and horns', async ({ page }) => {
     const r = await page.evaluate(() => {
       const c = document.createElement('canvas'); c.width = 80; c.height = 120;

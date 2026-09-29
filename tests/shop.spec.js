@@ -63,17 +63,18 @@ test.describe('Shop and crates (spec 10.2)', () => {
     expect(r.crate_cosmic).toMatchObject({ name: 'Cosmic Crate', price: 400, weights: { rare: 60, epic: 32, legendary: 8 } });
     expect(r.crate_legend).toMatchObject({ name: 'Legend Crate', price: 700, weights: { rare: 46, epic: 39, legendary: 15 } });
 
-    expect(r.crate_starter.pool).toHaveLength(30);
+    expect(r.crate_starter.pool).toHaveLength(38);
     expect(r.crate_starter.types).toEqual(['gun', 'skin', 'sword', 'utility']);
     expect(r.crate_starter.rarities).toEqual(['common', 'epic', 'rare', 'uncommon']);
     expect(r.crate_hero.pool).toHaveLength(10);
     expect(r.crate_hero.types).toEqual(['skin']);
     expect(r.crate_hero.rarities).toEqual(['epic', 'legendary', 'rare', 'uncommon']);
-    expect(r.crate_arsenal.pool).toHaveLength(14);
-    expect(r.crate_arsenal.types).toEqual(['gun', 'sword']);
+    // Arsenal now includes utility items too (charms are weapon-locker gear, WPN-03).
+    expect(r.crate_arsenal.pool).toHaveLength(26);
+    expect(r.crate_arsenal.types).toEqual(['gun', 'sword', 'utility']);
     // Voidbone Fang is a cosmic-tagged sword, so it now joins the cosmic gun/skin pool too.
     expect(r.crate_cosmic.pool).toEqual(['Astronaut', 'Galaxy Walker', 'Solar Flare', 'Stardust Wand', 'Sunbreaker', 'Void Pulse', 'Voidbone Fang']);
-    expect(r.crate_legend.pool).toHaveLength(20);
+    expect(r.crate_legend.pool).toHaveLength(26);
     expect(r.crate_legend.types).toEqual(['gun', 'skin', 'sword', 'utility']);
     expect(r.crate_legend.rarities).toEqual(['epic', 'legendary', 'rare']);
     // default items are never in a crate
@@ -169,9 +170,9 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       mqProfile.owned.skin_wizard = 2; mqProfile.owned.gun_frost = 1;
       showSection('shop'); mqOnShopOpen(); mqSetTab('inv');
     });
-    await expect(page.locator('.inv-card')).toHaveCount(39);
-    await expect(page.locator('#invCount')).toHaveText('5 / 39 collected');
-    await expect(page.locator('.inv-card.locked')).toHaveCount(34);
+    await expect(page.locator('.inv-card')).toHaveCount(49);
+    await expect(page.locator('#invCount')).toHaveText('5 / 49 collected');
+    await expect(page.locator('.inv-card.locked')).toHaveCount(44);
     await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(5);
     await expect(page.locator('.inv-card.locked .inv-equip')).toHaveCount(0);
     await expect(page.locator('.inv-card', { hasText: 'Star Wizard' })).toContainText('x2');
@@ -300,8 +301,8 @@ test.describe('Items (spec 10.3)', () => {
     });
     expect(r.skins).toEqual(SPEC_SKINS);
     expect(r.guns).toEqual(SPEC_GUNS);
-    expect(r.items).toBe(39);
-    expect(r.uniqueIds).toBe(39);
+    expect(r.items).toBe(49);
+    expect(r.uniqueIds).toBe(49);
     expect(r.distinctSkins, 'every skin looks different').toBe(14);
     expect(r.errors).toEqual([]);
     expect(r.animatedRare, 'epic and legendary skins are animated').toEqual([true, true, true, true]);
