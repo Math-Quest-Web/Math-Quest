@@ -403,36 +403,52 @@ test.describe('The Glutton (BOS-23)', () => {
 });
 
 test.describe('Bramblehide the Ravenous (BOS-40)', () => {
-  test('BOS-40 root spikes: a 26-frame windup, then a pillar marker erupts under every player', async ({ page }) => {
+  test('BOS-40 root spikes: a 26-frame windup, then a thorn spike erupts under every player', async ({ page }) => {
     await setup(page, 'bramblehide');
     const r = await page.evaluate(() => {
       T.prepBoss('bramblehide', 1); T.place(300);
       raidG.boss.anim = { state: 'rootWindup', timer: 0 };
-      const frames = T.until(() => raidG.hazards.some((h) => h.kind === 'pillar'), 60);
-      const pillars = raidG.hazards.filter((h) => h.kind === 'pillar');
-      return { frames, count: pillars.length, atPlayer: Math.abs(pillars[0].x - 300) < 5 };
+      const frames = T.until(() => raidG.hazards.some((h) => h.kind === 'thornSpike'), 60);
+      const spikes = raidG.hazards.filter((h) => h.kind === 'thornSpike');
+      return { frames, count: spikes.length, atPlayer: Math.abs(spikes[0].x - 300) < 5 };
     });
     expect(r.frames).toBe(26);
     expect(r.count).toBe(1);
     expect(r.atPlayer).toBe(true);
   });
 
-  test('BOS-40 charge stomp: a 30-frame lean toward the nearest player, then a one-directional shockwave; stunned after', async ({ page }) => {
+  test('BOS-40 ram charge: a 30-frame lean, then the boar itself dashes across and hits on contact; stunned after', async ({ page }) => {
     await setup(page, 'bramblehide');
     const r = await page.evaluate(() => {
       T.prepBoss('bramblehide', 1); T.place(700); // player to the right of the boss (x=500)
+      const startX = raidG.boss.x;
       raidG.boss.anim = { state: 'chargeWindup', timer: 0, dir: raidNearestPlayerDir(raidG.boss) };
-      const seq = runs(80, () => raidG.hazards.some((h) => h.kind === 'shockwave'));
-      const waves = raidG.hazards.filter((h) => h.kind === 'shockwave');
-      return { seq: seq.map((s) => s[0]), dir: waves[0].dir, count: waves.length, stunned: raidG.boss.exposed >= 119 };
+      const seq = runs(80, () => raidG.boss.anim.state === 'dazed');
+      const movedToward = raidG.boss.x > startX + 100; // dashed rightward, toward the player
+      return {
+        seq: seq.map((s) => s[0]), movedToward, hit: T.me().health < 5,
+        stunned: raidG.boss.exposed >= 119
+      };
     });
-    expect(r.seq).toEqual(['chargeWindup', 'dazed']);
-    expect(r.dir, 'charges toward the player it started closest to').toBe(1);
-    expect(r.count).toBe(1);
+    expect(r.seq).toEqual(['chargeWindup', 'charging', 'dazed']);
+    expect(r.movedToward, 'the boar\'s own x crosses the arena toward the player it started closest to').toBe(true);
+    expect(r.hit, 'a stationary player in its path takes contact damage').toBe(true);
     expect(r.stunned).toBe(true);
   });
 
-  test('BOS-40 bramble toss (phase 2+): a 24-frame windup, then 2 lobbed pods that erupt into pillars on landing', async ({ page }) => {
+  test('BOS-40 ram charge: skids to a stop and trots back to its home spot afterward', async ({ page }) => {
+    await setup(page, 'bramblehide');
+    const r = await page.evaluate(() => {
+      T.prepBoss('bramblehide', 1); T.place(900); // out of the way, so it isn't stopped by a hit
+      raidG.boss.anim = { state: 'chargeWindup', timer: 0, dir: raidNearestPlayerDir(raidG.boss) };
+      // 30 windup + 18 charging + 120 dazed + 40 trot + 18 settle = 226 frames end to end.
+      runs(260, () => raidG.boss.anim.state === 'idle');
+      return { home: Math.abs(raidG.boss.x - 500) < 25 };
+    });
+    expect(r.home, 'ends up back near its ground-anchored home spot, not stranded mid-arena').toBe(true);
+  });
+
+  test('BOS-40 bramble toss (phase 2+): a 24-frame windup, then 2 lobbed pods that erupt into thorn spikes on landing', async ({ page }) => {
     await setup(page, 'bramblehide');
     const r = await page.evaluate(() => {
       T.prepBoss('bramblehide', 2); T.place(500);
@@ -441,28 +457,35 @@ test.describe('Bramblehide the Ravenous (BOS-40)', () => {
       raidG.boss.anim = { state: 'tossWindup', timer: 0 };
       const frames = T.until(() => raidG.projectiles.some((p) => p.kind === 'pod'), 60);
       const pods = raidG.projectiles.filter((p) => p.kind === 'pod');
-      return { frames, count: pods.length, gravity: pods.every((p) => p.gravity > 0), landsAsPillar: pods.every((p) => p.onLand === 'pillar') };
+      return { frames, count: pods.length, gravity: pods.every((p) => p.gravity > 0), landsAsThornSpike: pods.every((p) => p.onLand === 'thornSpike') };
     });
     expect(r.frames).toBe(24);
     expect(r.count).toBe(2);
     expect(r.gravity).toBe(true);
-    expect(r.landsAsPillar).toBe(true);
+    expect(r.landsAsThornSpike).toBe(true);
   });
 });
 
 test.describe('Ironclad Colossus (BOS-41)', () => {
-  test('BOS-41 piston slam: a 40-frame windup, then a pillar marker under the nearest player; stunned after', async ({ page }) => {
+  test('BOS-41 earthquake stomp: a 40-frame windup, then a quake erupts from directly under the golem; stunned after', async ({ page }) => {
     await setup(page, 'colossus');
     const r = await page.evaluate(() => {
       T.prepBoss('colossus', 1); T.place(500);
       raidG.boss.anim = { state: 'slamWindup', timer: 0 };
       const seq = runs(120, () => raidG.boss.anim.state === 'dazed');
-      const pillars = raidG.hazards.filter((h) => h.kind === 'pillar');
-      return { seq: seq.map((s) => s[0]), rise: seq[0][1], count: pillars.length, stunned: raidG.boss.exposed >= 119 };
+      const quakes = raidG.hazards.filter((h) => h.kind === 'quake');
+      return {
+        seq: seq.map((s) => s[0]), rise: seq[0][1], count: quakes.length,
+        atBoss: quakes.length ? Math.abs(quakes[0].x - raidG.boss.x) < 3 : false,
+        dusted: raidG.slamAnimations.some((s) => Math.abs(s.x - raidG.boss.x) < 3),
+        stunned: raidG.boss.exposed >= 119
+      };
     });
     expect(r.seq).toEqual(['slamWindup', 'slamDown', 'dazed']);
     near(r.rise, 40);
     expect(r.count).toBe(1);
+    expect(r.atBoss, "the quake erupts from directly under the golem's own feet, not a distant marked spot").toBe(true);
+    expect(r.dusted, 'a dust/impact burst lands at the same spot as the quake').toBe(true);
     expect(r.stunned).toBe(true);
   });
 

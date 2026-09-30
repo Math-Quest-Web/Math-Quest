@@ -3,10 +3,6 @@
 const { test, expect } = require('./support/fixtures');
 
 const BOSSES = ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon'];
-// Bramblehide's Root Spikes and Colossus's Piston Slam spawn a 'pillar' hazard directly under a
-// marked spot (still sourced/telegraphed - same shared hazard, just not preceded by a projectile
-// landing there, unlike every other boss's pillars which only ever come from a lobbed shot).
-const DIRECT_PILLAR_BOSSES = ['bramblehide', 'colossus'];
 
 test.describe('Boss design rules (spec 9.1)', () => {
   test('BOS-01 every projectile and hazard comes from the boss or a marked spot - nothing appears from nowhere', async ({ page }) => {
@@ -26,34 +22,43 @@ test.describe('Boss design rules (spec 9.1)', () => {
         const hazardKinds = [...new Set(sim.hazards.map((h) => h.kind))].sort();
         const embers = sim.spawns.filter((p) => p.kind === 'ember').length;
         const pillars = sim.hazards.filter((h) => h.kind === 'pillar').length;
-        // imps start at the boss's hands; shockwaves start at the boss
+        const thornSpikes = sim.hazards.filter((h) => h.kind === 'thornSpike').length;
+        const quakes = sim.hazards.filter((h) => h.kind === 'quake').length;
+        // imps/shockwaves/quakes all start at the boss
         const impsFar = sim.hazards.filter((h) => h.kind === 'imp' && Math.hypot(h.x - h._bx, h.y - h._by) > 80).length;
         const wavesFar = sim.hazards.filter((h) => h.kind === 'shockwave' && Math.abs(h.x - h._bx) > 5).length;
-        out[boss] = { far, voidShots, orbs: orbs.length, orbsNearBoss, hazardKinds, embers, pillars, impsFar, wavesFar, attacks: sim.attacks.length };
+        const quakesFar = sim.hazards.filter((h) => h.kind === 'quake' && Math.abs(h.x - h._bx) > 5).length;
+        out[boss] = { far, voidShots, orbs: orbs.length, orbsNearBoss, hazardKinds, embers, pillars, thornSpikes, quakes, impsFar, wavesFar, quakesFar, attacks: sim.attacks.length };
       }
       return out;
     });
-    const allowed = ['chainLash', 'imp', 'pillar', 'shockwave', 'voidOrb'];
+    const allowed = ['chainLash', 'imp', 'pillar', 'quake', 'shockwave', 'thornSpike', 'voidOrb'];
     for (const b of BOSSES) {
       expect(r[b].attacks, b + ' attacked').toBeGreaterThan(5);
       expect(r[b].far, b + ' projectiles spawning far from the boss').toEqual([]);
       expect(r[b].impsFar).toBe(0);
       expect(r[b].wavesFar).toBe(0);
+      expect(r[b].quakesFar, b + ' quakes only ever spread from directly under the boss').toBe(0);
       r[b].hazardKinds.forEach((k) => expect(allowed, b + ' hazard kind ' + k).toContain(k));
-      if (!DIRECT_PILLAR_BOSSES.includes(b)) {
-        expect(r[b].pillars, b + ' pillars only come from landed fireballs/pods').toBeLessThanOrEqual(r[b].embers);
+      if (b !== 'bramblehide') {
+        expect(r[b].thornSpikes, b + " thorn spikes only come from Bramblehide's own marks/pods").toBe(0);
+      }
+      if (b !== 'colossus') {
+        expect(r[b].quakes, b + ' quakes only come from Colossus stomping').toBe(0);
       }
     }
     // every void burst belongs to an orb that was conjured at the Warden's hands
     expect(r.warden.orbs).toBeGreaterThan(0);
     expect(r.warden.orbsNearBoss).toBe(r.warden.orbs);
     expect(r.warden.voidShots).toBe(r.warden.orbs * 8);
-    // nothing except the Wyrm spits fireballs, so nothing else ever makes flame pillars
-    expect(r.grinmaw.pillars + r.warden.pillars + r.glutton.pillars + r.griffon.pillars).toBe(0);
-    // Bramblehide/Colossus's pillars are directly marked (see DIRECT_PILLAR_BOSSES) - still
-    // sourced from a real spot (a player's or the nearest player's position), never "far".
-    expect(r.bramblehide.pillars).toBeGreaterThan(0);
-    expect(r.colossus.pillars).toBeGreaterThan(0);
+    // only the Wyrm spits fireballs, so nothing else - including the new bosses - ever makes flame
+    // pillars any more (Bramblehide/Colossus's ground eruptions are their own thornSpike/quake kinds)
+    expect(r.grinmaw.pillars + r.warden.pillars + r.glutton.pillars + r.griffon.pillars + r.bramblehide.pillars + r.colossus.pillars).toBe(0);
+    // Bramblehide's thorn spikes come from a marked spot (a player's position) or a landed pod,
+    // never appearing with no source.
+    expect(r.bramblehide.thornSpikes).toBeGreaterThan(0);
+    // Colossus's quakes always spread from directly under its own feet (checked via quakesFar above).
+    expect(r.colossus.quakes).toBeGreaterThan(0);
   });
 
   test('BOS-02 no attack can hurt within 25 frames of starting - there is always a readable wind-up', async ({ page }) => {
@@ -257,7 +262,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(r.aimedMax).toBeLessThanOrEqual(3.2);
     expect(r.lobbedKinds).toEqual(['bubble', 'ember', 'feather', 'pod']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['bubble:pops', 'ember:pillar', 'feather:pops', 'pod:pillar']);
+    expect(r.lobbedLands).toEqual(['bubble:pops', 'ember:pillar', 'feather:pops', 'pod:thornSpike']);
   });
 
   test('BOS-08 phases at 60% and 30% HP: a 100-frame invulnerable beat that clears the arena and unlocks attacks', async ({ page }) => {

@@ -147,7 +147,7 @@ window.T = {
       const dangers = [];
       raidG.hazards.forEach((h) => {
         if (h.kind === 'chainLash') { const t = h.timer - h.delay; if (t >= 15 && t < 82) dangers.push({ x: h.tx, r: 75 }); }
-        if (h.kind === 'pillar' && h.timer >= 15 && h.timer < 62) dangers.push({ x: h.x, r: 75 });
+        if ((h.kind === 'pillar' || h.kind === 'thornSpike') && h.timer >= 15 && h.timer < 62) dangers.push({ x: h.x, r: 75 });
       });
       if (a.timer >= 15) {
         if (['fade', 'ghost', 'materialize'].includes(a.state) && b.type === 'warden') dangers.push({ x: a.targetX, r: 100 });
@@ -158,8 +158,11 @@ window.T = {
       raidG.projectiles.forEach((p) => { if (p.isBossProjectile && p.life > 0 && p.y > raidGROUND_Y - 260) dangers.push({ x: p.x + (p.vx || 0) * 12, r: 60 }); });
       let wantJump = false;
       raidG.hazards.forEach((h) => {
-        if ((h.kind === 'shockwave' || h.kind === 'imp') && Math.abs(x - h.x) < 55) wantJump = true;
+        if ((h.kind === 'shockwave' || h.kind === 'imp' || h.kind === 'quake') && Math.abs(x - h.x) < 55) wantJump = true;
       });
+      // Bramblehide's dash sweeps most of the arena in 18 frames - far too fast to outrun, so the
+      // dodge is a jump (like a shockwave), reacting to the boar's own live x as it closes in.
+      if (b.type === 'bramblehide' && a.state === 'charging' && Math.abs(x - b.x) < 90) wantJump = true;
       if (wantJump && airborne <= 0 && jumpCd <= 0) { airborne = 45; jumpCd = 70; }
       const inDanger = (d) => dangers.some((dd) => Math.abs(d - dd.x) < dd.r);
       if (inDanger(x)) {
