@@ -3516,8 +3516,11 @@ function resetRaidState() {
   raidLocal.swordCooldown = 0;
   raidLocal.swingTimer = 0;
   raidLocal.swingDir = 'side';
+  raidLocal.squashTimer = 0;
+  raidLocal.squashKind = null;
   raidSwingHitState = {};
   raidChargeHitState = {};
+  raidPogoState = { lastSwingTimer: 0, bounced: false };
   raidMaxAmmo = raidMagSizeForLoadout();
   raidAmmo = raidMaxAmmo;
   raidReloadTimer = 0;
@@ -3740,6 +3743,8 @@ const raidLocal = {
   swordCooldown: 0,
   swingTimer: 0,
   swingDir: 'side',
+  squashTimer: 0,
+  squashKind: null, // 'land' | 'launch' - RAI-21 squash-stretch
   jumpBoosting: false,
   jumpHoldTimer: 0,
   airJumpsUsed: 0,
@@ -5562,6 +5567,35 @@ const RAID_SWORD_UP_REACH = 95;
 const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
 const RAID_SWORD_HIT_WINDOW_END = RAID_SWORD_SWING_FRAMES - 9;
 
+// 8-way swing aiming (WPN-05): absolute world-space unit vectors for every direction the swing
+// can aim, keyed the same way p.swingDir already is. up/down are here too (even though their own
+// raidSwordHitbox/mqDrawSword branches don't consult this table) so the diagonal branches and the
+// facing-correction trig in mqDrawSword can share one lookup.
+const RAID_SWORD_DIR_VECTORS = {
+  up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0],
+  upleft: [-0.7071, -0.7071], upright: [0.7071, -0.7071],
+  downleft: [-0.7071, 0.7071], downright: [0.7071, 0.7071]
+};
+const RAID_SWORD_DIAG_REACH = 68; // player-centre to diagonal-hitbox-centre distance
+const RAID_SWORD_DIAG_HALF = 42;  // diagonal hitbox half-extent (both axes)
+const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
+
+// Absolute swing direction from whichever movement keys are held at the instant the attack starts
+// (WPN-05) - world-space, not facing-relative: holding Left always aims left, even if the player
+// is still facing right (e.g. decelerating out of a rightward run). Opposite keys held together
+// cancel to neither, matching how raidUpdateLocal's vx acceleration already cancels out when both
+// horizontal keys are held - keeps the swing direction consistent with the character's actual
+// physical intent that frame.
+function raidResolveSwingDir(input) {
+  const up = input.up && !input.down, down = input.down && !input.up;
+  const left = input.left && !input.right, right = input.right && !input.left;
+  if (up) return left ? 'upleft' : right ? 'upright' : 'up';
+  if (down) return left ? 'downleft' : right ? 'downright' : 'down';
+  if (left) return 'left';
+  if (right) return 'right';
+  return 'side'; // no direction held - unchanged fallback
+}
+
 function raidSwordSwing() {
   if (raidG.gameOver || raidG.victory) return;
   if (countdownActive) return;
@@ -5571,7 +5605,7 @@ function raidSwordSwing() {
   p.swingTimer = RAID_SWORD_SWING_FRAMES;
   // Direction is read once, at the moment the swing starts (WPN-05), so releasing the key
   // mid-swing doesn't change an already-playing animation.
-  p.swingDir = p.input.up ? 'up' : (p.input.down ? 'down' : 'side');
+  p.swingDir = raidResolveSwingDir(p.input);
   raidUpdateUI();
   raidSendLocalState();
 }
@@ -5591,6 +5625,16 @@ function raidSwordHitbox(p) {
     const reach = RAID_SWORD_UP_REACH * mult;
     return { cx, cy: p.y + 24 + reach / 2, hw: RAID_SWORD_UP_HALF_X * mult, hh: reach / 2 };
   }
+  if (dir === 'left' || dir === 'right') {
+    const sgn = dir === 'left' ? -1 : 1;
+    const reach = RAID_SWORD_RANGE_X * mult;
+    return { cx: cx + sgn * reach / 2, cy: p.y + 24, hw: reach / 2, hh: RAID_SWORD_UP_HALF_X * mult };
+  }
+  if (RAID_SWORD_DIR_VECTORS[dir]) { // the 4 diagonals
+    const v = RAID_SWORD_DIR_VECTORS[dir];
+    const reach = RAID_SWORD_DIAG_REACH * mult, half = RAID_SWORD_DIAG_HALF * mult;
+    return { cx: cx + v[0] * reach, cy: p.y + 24 + v[1] * reach, hw: half, hh: half };
+  }
   return { cx, cy: p.y + 24, hw: RAID_SWORD_RANGE_X * mult, hh: RAID_SWORD_RANGE_Y * mult };
 }
 
@@ -5604,6 +5648,38 @@ let raidSwingHitState = {};
 // (and the test stub that mirrors it) drops empty-object fields on the round-trip, so a freshly
 // started charge's guard would come back as undefined on the very next synced frame.
 let raidChargeHitState = {};
+
+// Pogo bounce (WPN-08): local-only guard for "has the current downward swing already bounced the
+// player". Module-level rather than a raidLocal field, for consistency with the two guards above,
+// even though raidLocal itself is never wholesale-replaced by a snapshot the way raidG.players is.
+let raidPogoState = { lastSwingTimer: 0, bounced: false };
+const RAID_POGO_VY = -13; // same magnitude as RAID_JUMP_VY - a full Hollow-Knight-style nail bounce
+
+// Hollow Knight's nail-bounce (WPN-08): a downward air-swing connecting with the boss bounces the
+// player upward. Purely local/client-side - reads raidLocal and raidG.boss (already synced to
+// every client via raidListenToGame) directly, no host round-trip, so it fires identically for
+// host and non-host clients the instant their own swing connects. Damage is NOT duplicated here:
+// raidCheckSwordSwings/raidHitBoss (host-only, unchanged) remains the sole damage path - this
+// only ever writes raidLocal.vy/onGround/jumpBoosting/squash state.
+function raidCheckLocalPogo() {
+  const p = raidLocal;
+  if (p.swingTimer > raidPogoState.lastSwingTimer) raidPogoState.bounced = false; // a new swing started
+  raidPogoState.lastSwingTimer = p.swingTimer;
+  if (raidPogoState.bounced) return;
+  if (p.swingDir !== 'down' || p.onGround || !(p.swingTimer > 0)) return;
+  if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
+  const b = raidG.boss;
+  if (!b || raidBossUntargetable(b)) return;
+  const box = raidSwordHitbox(p);
+  const bhb = raidBossHalfExtent(b.type);
+  if (Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh) {
+    raidPogoState.bounced = true;
+    p.vy = RAID_POGO_VY;
+    p.jumpBoosting = false; // a clean fixed-height bounce, not modulated by stale jump-hold
+    p.onGround = false;
+    p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch'; // reuse the RAI-21 launch pop
+  }
+}
 
 // Real hitbox-accurate melee resolution (WPN-02): runs every host frame against every player's
 // synced position, so a swing only damages the boss on a frame where its direction-aware hitbox
@@ -5681,6 +5757,9 @@ function raidListenToShots() {
 function raidUpdateLocal() {
   if (raidG.gameOver || raidG.victory) return;
   const p = raidLocal;
+  // Decremented up front so a squash/stretch pop set fresh later THIS frame (landing, jumping)
+  // still reads as its full RAID_SQUASH_FRAMES value for the frame it starts on.
+  if (p.squashTimer > 0) p.squashTimer--;
   const accel = 0.7;
   const friction = 0.85;
   // A dash is a committed burst: fixed velocity for the whole window, immune to the normal
@@ -5688,7 +5767,13 @@ function raidUpdateLocal() {
   // later, so the "burst" was barely faster than just running).
   if (p.dashTimer > 0) {
     p.vx = p.dashDir * RAID_DASH_SPEED;
-    p.trail.push({ x: p.x, y: p.y, facing: p.facing, life: RAID_DASH_TRAIL_LIFE });
+    // RAI-21: capture the real motion pose too, so the afterimages replay it instead of a
+    // forced idle stance.
+    p.trail.push({
+      x: p.x, y: p.y, facing: p.facing, life: RAID_DASH_TRAIL_LIFE,
+      vx: p.vx, onGround: p.onGround, swingDir: p.swingDir,
+      swing: p.swingTimer > 0 ? 1 - p.swingTimer / RAID_SWORD_SWING_FRAMES : 0
+    });
   } else {
     if (p.input.left) p.vx -= accel;
     if (p.input.right) p.vx += accel;
@@ -5720,12 +5805,14 @@ function raidUpdateLocal() {
   }
   p.vy += gravity;
   p.y += p.vy;
+  const wasOnGround = p.onGround; // RAI-21: edge-detect the landing transition, for squash-stretch
   if (p.y > raidGROUND_Y - p.h) {
     p.y = raidGROUND_Y - p.h;
     p.vy = 0;
     p.onGround = true;
     p.jumpBoosting = false;
     p.airJumpsUsed = 0; // Second Wind's air jump refills on landing (WPN-06)
+    if (!wasOnGround) { p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'land'; }
   } else {
     p.onGround = false;
   }
@@ -5734,6 +5821,7 @@ function raidUpdateLocal() {
     p.onGround = false;
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
+    p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
   } else if (p.input.up && !p.wasUpPressed && !p.onGround && (p.airJumpsUsed || 0) < raidMaxAirJumps()) {
     // Second Wind (WPN-06): one extra jump while airborne, edge-detected on the key press so
     // holding jump doesn't spend it repeatedly the instant it becomes eligible (e.g. at the
@@ -5742,6 +5830,7 @@ function raidUpdateLocal() {
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
     p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
+    p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
   }
   p.wasUpPressed = p.input.up;
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
@@ -5755,6 +5844,7 @@ function raidUpdateLocal() {
   if (p.dashTimer > 0) p.dashTimer--;
   if (p.swordCooldown > 0) p.swordCooldown--;
   if (p.swingTimer > 0) p.swingTimer--;
+  raidCheckLocalPogo(); // WPN-08: local, every client, right after swingTimer reflects this frame
 
   if (!RAID_MATH_ENABLED && raidMathShieldCharges < raidMaxShieldCharges) {
     raidShieldRegenTimer++;
@@ -5893,6 +5983,40 @@ function raidMagSizeForLoadout() {
 function raidMaxAirJumps() {
   const u = MQ_UTILITY_MAP[raidLocal.utility];
   return u && u.effect === 'double_jump' ? 1 : 0;
+}
+
+// RAI-21 animation polish - three small pure/testable helpers, same style as the readers above.
+
+const RAID_SQUASH_FRAMES = 10; // frames a landing/launch pop takes to decay back to 1:1 scale
+
+// Non-uniform scale multiplier for a landing thump or a jump-launch stretch, applied on top of
+// the body's normal MQ_PLAYER_SCALE. 'land' squashes wide/flat, 'launch' stretches tall/thin.
+function raidSquashScale(kind, timer) {
+  if (!(timer > 0) || !kind) return { sx: 1, sy: 1 };
+  const t = timer / RAID_SQUASH_FRAMES, amt = t * 0.22;
+  return kind === 'land' ? { sx: 1 + amt, sy: 1 - amt } : { sx: 1 - amt * 0.7, sy: 1 + amt * 0.7 };
+}
+
+// Air-pose lean: leans back while rising fast, tucks forward while falling fast, roughly neutral
+// near the apex. Only meaningful for the local player (vy isn't synced - see raidSendLocalState).
+function raidAirLean(vy) {
+  const clamped = Math.max(-15, Math.min(15, vy || 0));
+  return clamped * 0.01;
+}
+
+// Swing follow-through: a small body lean toward the swing's direction, easing in and out with
+// the same curve mqDrawSword uses for the blade itself, so the body reads as part of the swing.
+function raidSwingBodyLean(dir, swing, facing) {
+  if (!(swing > 0)) return 0;
+  const e = swing <= 0.5 ? swing * 2 : (1 - swing) * 2;
+  let hx;
+  if (dir === 'left') hx = -1;
+  else if (dir === 'right') hx = 1;
+  else if (dir === 'upleft' || dir === 'downleft') hx = -0.7071;
+  else if (dir === 'upright' || dir === 'downright') hx = 0.7071;
+  else if (dir === 'side') hx = facing; // unchanged feel: leans into whichever way you're facing
+  else hx = 0; // 'up'/'down': no horizontal lean
+  return hx * 0.16 * e;
 }
 
 function raidSubmitEventAnswer() {
@@ -7433,17 +7557,21 @@ function raidDraw() {
   lp.trail.forEach(g => {
     raidCtx.save();
     raidCtx.globalAlpha = Math.max(0, (g.life / RAID_DASH_TRAIL_LIFE) * 0.35);
+    // RAI-21: replay the real motion pose captured when this ghost was recorded, instead of a
+    // forced idle stance, so a dash mid-jump or mid-swing leaves afterimages that look like it.
     drawPlayerCuphead(raidCtx, g.x, g.y, lp.w, lp.h, g.facing,
                lp.health, lp.maxHealth, false, 0, false,
-               { skin: lp.skin, gun: lp.gun, recoil: 0, vx: 0, onGround: true, noBar: true, noShadow: true });
+               { skin: lp.skin, gun: lp.gun, recoil: 0, vx: g.vx, onGround: g.onGround,
+                 swingDir: g.swingDir, swing: g.swing, noBar: true, noShadow: true });
     raidCtx.restore();
   });
   drawPlayerCuphead(raidCtx, lp.x, lp.y, lp.w, lp.h, lp.facing,
              lp.health, lp.maxHealth, lp.shield, lp.invincible, true,
-             { skin: lp.skin, gun: lp.gun, recoil: lp.recoil, vx: lp.vx, onGround: lp.onGround,
+             { skin: lp.skin, gun: lp.gun, recoil: lp.recoil, vx: lp.vx, vy: lp.vy, onGround: lp.onGround,
                reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
                swing: lp.swingTimer > 0 ? 1 - lp.swingTimer / RAID_SWORD_SWING_FRAMES : 0,
-               swingDir: lp.swingDir || 'side' });
+               swingDir: lp.swingDir || 'side',
+               squashKind: lp.squashKind, squashTimer: lp.squashTimer });
 
   raidFx.floaters.forEach(f => {
     raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
@@ -9128,7 +9256,19 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir) {
   let angle;
   if (dir === 'up') angle = -0.9 + e * 1.8;
   else if (dir === 'down') angle = Math.PI - 0.9 + e * 1.8;
-  else angle = -0.7 + e * 2.0;
+  else if (dir === 'left' || dir === 'right' || RAID_SWORD_DIR_VECTORS[dir]) {
+    // left/right/diagonals (WPN-05): the ctx.scale(facing,1) below mirrors the whole draw
+    // (including this rotation), so an absolute world-space target vector (tx,ty) needs a
+    // facing-corrected base angle. Composing the transform stack on a blade that natively points
+    // local (0,-1): rotate(theta) then scale(facing,1) sends it to world (facing*sin(theta),
+    // -cos(theta)) - solving facing*sin(theta)=tx, -cos(theta)=ty gives theta = atan2(tx*facing, -ty).
+    // (Sanity check against the untouched branches above: up=(0,-1) -> theta=0, matching that
+    // branch's own sweep center of 0; down=(0,1) -> theta=pi, matching Math.PI above.)
+    const v = RAID_SWORD_DIR_VECTORS[dir];
+    const theta0 = Math.atan2(v[0] * facing, -v[1]);
+    angle = theta0 - RAID_SWORD_SWEEP_HALF + e * RAID_SWORD_SWEEP_HALF * 2;
+  }
+  else angle = -0.7 + e * 2.0; // 'side' (default), unchanged
 
   if (swing > 0) {
     // The slash trail (WPN-04): a fading white crescent following the blade through its arc -
@@ -9317,14 +9457,16 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
   ctx.save();
   ctx.shadowBlur = 0;
 
-  // Movement animation (RAI-20): a small idle bob, a bigger/faster bob while running, and a
-  // slight lean into the direction of travel - none of it while airborne. Bob phase rides the
-  // shared frame counter rather than per-player state, so this stays simple and self-contained.
+  // Movement animation (RAI-20/RAI-21): a small idle bob, a bigger/faster bob while running, and
+  // a lean into the direction of travel while grounded, or into the air-pose/swing while not, so
+  // the body never just goes flat and inert while airborne. Bob phase rides the shared frame
+  // counter rather than per-player state, so this stays simple and self-contained.
   const mvx = look.vx || 0;
   const mvGrounded = look.onGround !== false;
   const mvMoving = Math.abs(mvx) > 0.5;
   const bob = mvGrounded ? Math.sin(t * (mvMoving ? 0.35 : 0.08)) * (mvMoving ? 3 : 1.6) : 0;
-  const lean = mvGrounded ? Math.max(-0.12, Math.min(0.12, mvx * 0.02)) : 0;
+  const lean = (mvGrounded ? Math.max(-0.12, Math.min(0.12, mvx * 0.02)) : raidAirLean(look.vy))
+    + raidSwingBodyLean(look.swingDir, look.swing, facing);
   if (!look.noShadow) {
     // Drawn before the scale-down/bob transform below, so the shadow stays a constant-size
     // ground shadow instead of shrinking and bobbing along with the body above it.
@@ -9341,7 +9483,10 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
   ctx.save();
   ctx.translate(cx, baseY + h);
   ctx.rotate(lean);
-  ctx.scale(MQ_PLAYER_SCALE, MQ_PLAYER_SCALE);
+  // RAI-21: a landing thump squashes wide/flat, a jump launch stretches tall/thin, both decaying
+  // back to 1:1 over RAID_SQUASH_FRAMES - layered on top of the fixed WPN-20 scale-down.
+  const squash = raidSquashScale(look.squashKind, look.squashTimer);
+  ctx.scale(MQ_PLAYER_SCALE * squash.sx, MQ_PLAYER_SCALE * squash.sy);
   ctx.translate(-cx, -(baseY + h));
   ctx.translate(0, bob);
 

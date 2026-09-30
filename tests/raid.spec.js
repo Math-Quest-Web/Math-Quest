@@ -512,6 +512,116 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.runDiffers, 'running bob/lean animates over time').toBe(true);
     expect(r.airborneSame, 'no bob or lean while airborne').toBe(true);
   });
+
+  test('RAI-21 landing and launching pop a decaying squash-stretch on raidLocal', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+
+      // Falling onto the ground triggers a 'land' pop on the landing frame only.
+      T.place(500, raidGROUND_Y - 48 - 50);
+      raidLocal.onGround = false;
+      raidLocal.vy = 5;
+      raidLocal.squashKind = null; raidLocal.squashTimer = 0;
+      let landedAt = -1;
+      for (let i = 0; i < 30 && landedAt < 0; i++) { raidUpdateLocal(); if (raidLocal.onGround) landedAt = i; }
+      out.landedKind = raidLocal.squashKind;
+      out.landedTimerFull = raidLocal.squashTimer === RAID_SQUASH_FRAMES;
+      // it decays back to a falsy kind within RAID_SQUASH_FRAMES more frames
+      for (let i = 0; i < RAID_SQUASH_FRAMES; i++) raidUpdateLocal();
+      out.decayedTimer = raidLocal.squashTimer;
+
+      // A ground jump pops a 'launch' stretch immediately.
+      T.place(500);
+      raidLocal.onGround = true;
+      raidLocal.jumpBoosting = false;
+      raidLocal.squashKind = null; raidLocal.squashTimer = 0;
+      raidLocal.input.up = true;
+      raidUpdateLocal();
+      raidLocal.input.up = false;
+      out.launchKind = raidLocal.squashKind;
+      out.launchTimerFull = raidLocal.squashTimer === RAID_SQUASH_FRAMES;
+
+      // Pure helper checks.
+      out.landScale = raidSquashScale('land', RAID_SQUASH_FRAMES);
+      out.launchScale = raidSquashScale('launch', RAID_SQUASH_FRAMES);
+      out.neutralScale = raidSquashScale(null, 0);
+      out.expiredScale = raidSquashScale('land', 0);
+
+      return out;
+    });
+    expect(r.landedKind).toBe('land');
+    expect(r.landedTimerFull).toBe(true);
+    expect(r.decayedTimer).toBe(0);
+    expect(r.launchKind).toBe('launch');
+    expect(r.launchTimerFull).toBe(true);
+    expect(r.landScale.sx).toBeGreaterThan(1); // wide
+    expect(r.landScale.sy).toBeLessThan(1); // flat
+    expect(r.launchScale.sx).toBeLessThan(1); // thin
+    expect(r.launchScale.sy).toBeGreaterThan(1); // tall
+    expect(r.neutralScale).toEqual({ sx: 1, sy: 1 });
+    expect(r.expiredScale).toEqual({ sx: 1, sy: 1 });
+  });
+
+  test('RAI-21 air-pose lean reacts to vertical speed, and swing follow-through leans the body toward the swing', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      return {
+        risingLeansBack: raidAirLean(-15) < 0,
+        fallingLeansForward: raidAirLean(15) > 0,
+        apexNeutral: raidAirLean(0) === 0,
+        clamped: raidAirLean(-999) === raidAirLean(-15) && raidAirLean(999) === raidAirLean(15),
+        noSwingNoLean: raidSwingBodyLean('right', 0, 1) === 0,
+        rightLeansPositive: raidSwingBodyLean('right', 0.5, 1) > 0,
+        leftLeansNegative: raidSwingBodyLean('left', 0.5, 1) < 0,
+        upNoHorizontalLean: raidSwingBodyLean('up', 0.5, 1) === 0,
+        sideFollowsFacing: raidSwingBodyLean('side', 0.5, -1) < 0 && raidSwingBodyLean('side', 0.5, 1) > 0,
+        downrightPositive: raidSwingBodyLean('downright', 0.5, 1) > 0,
+        downleftNegative: raidSwingBodyLean('downleft', 0.5, 1) < 0
+      };
+    });
+    expect(r.risingLeansBack).toBe(true);
+    expect(r.fallingLeansForward).toBe(true);
+    expect(r.apexNeutral).toBe(true);
+    expect(r.clamped, 'extreme vy values clamp rather than growing unbounded').toBe(true);
+    expect(r.noSwingNoLean).toBe(true);
+    expect(r.rightLeansPositive).toBe(true);
+    expect(r.leftLeansNegative).toBe(true);
+    expect(r.upNoHorizontalLean).toBe(true);
+    expect(r.sideFollowsFacing).toBe(true);
+    expect(r.downrightPositive).toBe(true);
+    expect(r.downleftNegative).toBe(true);
+  });
+
+  test('RAI-21 dash afterimages replay the real motion pose (vx/onGround/swingDir/swing) instead of a forced idle stance', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      T.place(500, 200); // airborne
+      raidLocal.onGround = false;
+      raidLocal.swordCooldown = 0;
+      raidLocal.input = { left: false, right: false, up: false, down: true, space: false };
+      raidSwordSwing(); // swingDir 'down', swingTimer counting down
+      raidLocal.input.down = false;
+      raidLocal.facing = 1;
+      raidTryDash();
+      // A few dash frames, so the swing has some real progress by the time a ghost is captured
+      // (the very first frame after raidSwordSwing() still reads swingTimer at its full value,
+      // since the decrement for this frame hasn't run yet at push time).
+      raidUpdateLocal(); raidUpdateLocal(); raidUpdateLocal();
+      const g = raidLocal.trail[raidLocal.trail.length - 1];
+      return {
+        capturedVx: g.vx, capturedOnGround: g.onGround, capturedSwingDir: g.swingDir,
+        capturedSwingIsProgress: g.swing > 0 && g.swing < 1,
+        matchesLiveVx: g.vx === raidLocal.vx, matchesLiveOnGround: g.onGround === raidLocal.onGround
+      };
+    });
+    expect(r.capturedVx).not.toBe(0);
+    expect(r.capturedOnGround).toBe(false);
+    expect(r.capturedSwingDir).toBe('down');
+    expect(r.capturedSwingIsProgress, 'captures the swing progress, not just whether it is swinging').toBe(true);
+    expect(r.matchesLiveVx).toBe(true);
+    expect(r.matchesLiveOnGround).toBe(true);
+  });
 });
 
 test.describe('Equipment: weapons and utility (spec 8.5)', () => {
@@ -662,6 +772,93 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.downKeyed).toBe(true);
     expect(r.downKeyReleased).toBe(true);
     expect(r.sKeyed).toBe(true);
+  });
+
+  test('WPN-05 8-way aiming: left/right/diagonals resolve from held movement keys, in absolute world-space (not facing-relative)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+
+      // raidResolveSwingDir is pure - table-drive every combination, including cancelling pairs.
+      const combos = [
+        [{}, 'side'],
+        [{ up: true }, 'up'], [{ down: true }, 'down'],
+        [{ left: true }, 'left'], [{ right: true }, 'right'],
+        [{ up: true, left: true }, 'upleft'], [{ up: true, right: true }, 'upright'],
+        [{ down: true, left: true }, 'downleft'], [{ down: true, right: true }, 'downright'],
+        [{ up: true, down: true }, 'side'], // cancels
+        [{ left: true, right: true }, 'side'], // cancels
+        [{ up: true, left: true, right: true }, 'up'] // left/right cancel, up survives
+      ];
+      out.resolved = combos.map(([held]) =>
+        raidResolveSwingDir(Object.assign({ left: false, right: false, up: false, down: false }, held)));
+      out.expected = combos.map(([, dir]) => dir);
+
+      // Absolute, not facing-relative: facing right but holding Left must still aim left.
+      raidLocal.gun = 'sword_training';
+      raidLocal.facing = 1;
+      raidLocal.input = { left: true, right: false, up: false, down: false, space: false };
+      raidLocal.swordCooldown = 0;
+      raidSwordSwing();
+      out.dirWasLeft = raidLocal.swingDir === 'left';
+      const boxLeft = raidSwordHitbox(raidLocal);
+      out.hitboxLeftOfCenter = boxLeft.cx < raidPx(raidLocal);
+
+      // Same again facing left (mirrored) - the hitbox offset must be identical (still absolute).
+      raidLocal.facing = -1;
+      const boxLeftMirrored = raidSwordHitbox(raidLocal);
+      out.hitboxUnaffectedByFacing = boxLeftMirrored.cx === boxLeft.cx;
+
+      // Direct raidSwordHitbox checks for 'right' and one diagonal.
+      const pRight = { x: 300, y: 452, facing: 1, swingDir: 'right', utility: '' };
+      const boxRight = raidSwordHitbox(pRight);
+      out.rightOffsetPositive = boxRight.cx > raidPx(pRight);
+      out.rightNarrowVertically = boxRight.hh === RAID_SWORD_UP_HALF_X;
+
+      const pDiag = { x: 300, y: 452, facing: 1, swingDir: 'downright', utility: '' };
+      const boxDiag = raidSwordHitbox(pDiag);
+      out.diagOffsetRightAndDown = boxDiag.cx > raidPx(pDiag) && boxDiag.cy > pDiag.y + 24;
+
+      // Connect/miss: place the boss diagonally down-right of the player, downright swing connects,
+      // a plain up swing does not.
+      const stepSwing = () => {
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidSendLocalState();
+          raidCheckSwordSwings(raidG.boss);
+        }
+      };
+      raidG.boss.x = 500 + RAID_SWORD_DIAG_REACH; raidG.boss.y = 452 + RAID_SWORD_DIAG_REACH;
+      T.place(500);
+      raidLocal.input = { left: false, right: true, up: false, down: true, space: false };
+      raidLocal.swordCooldown = 0;
+      let hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      out.dirWasDownright = raidLocal.swingDir === 'downright';
+      raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
+      stepSwing();
+      out.downrightConnects = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
+
+      raidLocal.swordCooldown = 0;
+      raidLocal.input.up = true;
+      hpBefore = raidG.boss.hp;
+      raidSwordSwing();
+      raidLocal.input.up = false;
+      stepSwing();
+      out.upMissesDiagonalTarget = raidG.boss.hp === hpBefore;
+
+      return out;
+    });
+    expect(r.resolved).toEqual(r.expected);
+    expect(r.dirWasLeft).toBe(true);
+    expect(r.hitboxLeftOfCenter, 'holding Left aims left regardless of facing').toBe(true);
+    expect(r.hitboxUnaffectedByFacing, 'the hitbox is absolute, not mirrored by facing').toBe(true);
+    expect(r.rightOffsetPositive).toBe(true);
+    expect(r.rightNarrowVertically).toBe(true);
+    expect(r.diagOffsetRightAndDown).toBe(true);
+    expect(r.dirWasDownright).toBe(true);
+    expect(r.downrightConnects, 'a downright swing reaches a target diagonally down-right').toBe(true);
+    expect(r.upMissesDiagonalTarget, 'a plain up swing does not reach a diagonal target').toBe(true);
   });
 
   test('WPN-04 the sword swing\'s slash trail is white regardless of the blade\'s own color', async ({ page }) => {
@@ -853,6 +1050,127 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.fired, 'the minion fires a weak bolt at the boss').toBe(true);
     expect(r.damaged, 'the minion bolt damages the boss through the normal pipeline').toBe(true);
     expect(r.despawned, 'unequipping the charm removes the minion').toBe(true);
+  });
+
+  test('WPN-08 a downward air-attack that connects with the boss bounces the player upward (pogo)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      // Calls raidCheckLocalPogo directly, decrementing swingTimer by hand rather than running
+      // the full raidUpdateLocal - isolates exactly the logic under test, same reasoning WPN-05's
+      // stepSwing() uses raidCheckSwordSwings directly instead of the full raidBossUpdate.
+      const stepPogo = () => {
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidCheckLocalPogo();
+        }
+      };
+      const primeDownSwing = () => {
+        raidLocal.swordCooldown = 0;
+        raidLocal.input = { left: false, right: false, up: false, down: true, space: false };
+        raidSwordSwing();
+        raidLocal.input.down = false;
+      };
+
+      // Airborne, boss positioned exactly under the down-swing's own hitbox: should bounce.
+      T.place(500, 200);
+      raidLocal.onGround = false;
+      raidLocal.vy = 4;
+      primeDownSwing();
+      const box = raidSwordHitbox(raidLocal);
+      raidG.boss.type = 'grinmaw';
+      raidG.boss.x = box.cx; raidG.boss.y = box.cy;
+      raidG.boss.anim = { state: 'idle', timer: 0 }; raidG.boss.invulnerable = false; raidG.boss.transition = 0;
+      stepPogo();
+      const bounced = raidLocal.vy === RAID_POGO_VY;
+      const stillAirborne = raidLocal.onGround === false;
+      const jumpBoostCleared = raidLocal.jumpBoosting === false;
+
+      // The same already-resolved swing does not bounce a second time.
+      raidLocal.vy = 4;
+      stepPogo();
+      const noDoubleBounce = raidLocal.vy === 4;
+
+      // Grounded: a connecting down-swing never bounces.
+      raidLocal.onGround = true;
+      raidLocal.vy = 0;
+      primeDownSwing();
+      stepPogo();
+      const groundedNoBounce = raidLocal.vy === 0;
+
+      // A non-downward swing (side) never bounces, even airborne and overlapping.
+      raidLocal.onGround = false;
+      raidLocal.vy = 4;
+      raidLocal.swordCooldown = 0;
+      raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
+      raidSwordSwing();
+      const sideBox = raidSwordHitbox(raidLocal);
+      raidG.boss.x = sideBox.cx; raidG.boss.y = sideBox.cy;
+      stepPogo();
+      const sideNoBounce = raidLocal.vy === 4;
+
+      // A genuinely untargetable boss (fading) blocks the bounce...
+      raidLocal.vy = 4;
+      primeDownSwing();
+      raidG.boss.x = box.cx; raidG.boss.y = box.cy;
+      raidG.boss.type = 'warden';
+      raidG.boss.anim = { state: 'fade', timer: 1 };
+      stepPogo();
+      const untargetableNoBounce = raidLocal.vy === 4;
+
+      // ...but a merely-invulnerable boss (the phase-transition beat) still bounces the player -
+      // deliberate: raidCheckSwordSwings still consumes a blocked swing the same way.
+      raidG.boss.type = 'grinmaw';
+      raidG.boss.anim = { state: 'idle', timer: 0 };
+      raidG.boss.invulnerable = true;
+      raidLocal.vy = 4;
+      primeDownSwing();
+      raidG.boss.x = box.cx; raidG.boss.y = box.cy;
+      stepPogo();
+      const invulnerableStillBounces = raidLocal.vy === RAID_POGO_VY;
+      raidG.boss.invulnerable = false;
+
+      // Damage isn't duplicated: the pogo check and the real (host) damage check run over the
+      // same connecting swing and the boss loses exactly RAID_SWORD_DAMAGE, once.
+      raidLocal.vy = 4;
+      primeDownSwing();
+      raidG.boss.x = box.cx; raidG.boss.y = box.cy;
+      const hpBefore = raidG.boss.hp;
+      for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+        if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+        raidCheckLocalPogo();
+        raidSendLocalState();
+        raidCheckSwordSwings(raidG.boss);
+      }
+      const damageNotDoubled = raidG.boss.hp === hpBefore - RAID_SWORD_DAMAGE;
+      const alsoBouncedWithDamage = raidLocal.vy === RAID_POGO_VY;
+
+      // Host/non-host parity: raidCheckLocalPogo doesn't consult raidIsHost at all.
+      raidLocal.vy = 4;
+      primeDownSwing();
+      raidG.boss.x = box.cx; raidG.boss.y = box.cy;
+      const wasHost = raidIsHost;
+      raidIsHost = false;
+      stepPogo();
+      const nonHostBounces = raidLocal.vy === RAID_POGO_VY;
+      raidIsHost = wasHost;
+
+      return {
+        bounced, stillAirborne, jumpBoostCleared, noDoubleBounce, groundedNoBounce, sideNoBounce,
+        untargetableNoBounce, invulnerableStillBounces, damageNotDoubled, alsoBouncedWithDamage, nonHostBounces
+      };
+    });
+    expect(r.bounced, 'a connecting airborne down-swing sets vy to RAID_POGO_VY').toBe(true);
+    expect(r.stillAirborne).toBe(true);
+    expect(r.jumpBoostCleared, 'a clean fixed-height bounce, not a held-jump boost').toBe(true);
+    expect(r.noDoubleBounce, 'the same swing cannot bounce twice').toBe(true);
+    expect(r.groundedNoBounce, 'a grounded down-swing never bounces').toBe(true);
+    expect(r.sideNoBounce, 'a non-downward swing never bounces').toBe(true);
+    expect(r.untargetableNoBounce, 'a fading/untargetable boss cannot be pogoed off').toBe(true);
+    expect(r.invulnerableStillBounces, 'a merely-invulnerable (blocked) boss still bounces the player').toBe(true);
+    expect(r.damageNotDoubled, 'the pogo check never deals damage itself').toBe(true);
+    expect(r.alsoBouncedWithDamage).toBe(true);
+    expect(r.nonHostBounces, 'the bounce works the same whether this client is host or not').toBe(true);
   });
 
   test('WPN-20 the player is drawn smaller, feet-anchored, with a Hollow Knight-style face and horns', async ({ page }) => {
