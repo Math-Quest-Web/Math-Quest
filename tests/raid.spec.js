@@ -379,7 +379,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       await T.setupRaid('grinmaw');
       raidLocal.facing = 1;
       raidTryDash();
-      const out = { cooldown: raidLocal.dashCooldown, invincible: raidLocal.invincible, vx: raidLocal.vx };
+      const out = { cooldown: raidLocal.dashCooldown, invincible: raidLocal.invincible, vx: raidLocal.vx, dashSpeed: RAID_DASH_SPEED };
       raidLocal.vx = 0; raidTryDash(); out.secondBlocked = raidLocal.vx === 0;
       for (let i = 0; i < 179; i++) raidUpdateLocal();
       out.almost = raidLocal.dashCooldown;
@@ -387,7 +387,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       out.ready = raidLocal.dashCooldown; out.hud = (raidUpdateUI(), document.getElementById('raidDashState').textContent);
       return out;
     });
-    expect(r).toEqual({ cooldown: 180, invincible: 14, vx: 12, secondBlocked: true, almost: 1, ready: 0, hud: 'READY' });
+    expect(r).toEqual({ cooldown: 180, invincible: 14, vx: r.dashSpeed, dashSpeed: r.dashSpeed, secondBlocked: true, almost: 1, ready: 0, hud: 'READY' });
+    expect(r.dashSpeed, 'the dash is faster than the old 12 px/frame').toBeGreaterThan(12);
   });
 
   test('RAI-16 the dash burst is not immediately undone by the normal running speed cap, and leaves a trail', async ({ page }) => {
@@ -410,7 +411,50 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(Math.abs(r.vxSettled)).toBeLessThanOrEqual(7); // back under normal control once the dash ends
   });
 
-  test('RAI-17 movement tops out at 7 px/frame and a jump rises about 210 px', async ({ page }) => {
+  test('RAI-16 a dash keeps your height - no gravity while it lasts - and carries a little farther than before', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.facing = 1;
+      raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false };
+
+      // airborne and falling: the dash holds the exact height for its whole length
+      T.place(300, raidGROUND_Y - 48 - 90);
+      raidLocal.onGround = false; raidLocal.vy = 5; raidLocal.dashCooldown = 0;
+      const y0 = raidLocal.y, x0 = raidLocal.x;
+      raidTryDash();
+      const ys = [];
+      for (let i = 0; i < RAID_DASH_FRAMES; i++) { raidUpdateLocal(); ys.push(raidLocal.y); }
+      const heldHeight = ys.every((y) => y === y0);
+      const vyDuring = raidLocal.vy;
+      const distance = raidLocal.x - x0;
+      raidUpdateLocal(); raidUpdateLocal();
+      const fallsAgainAfter = raidLocal.y > y0;
+
+      // grounded: stays grounded the whole dash (not flickering airborne)
+      T.place(300);
+      raidLocal.onGround = true; raidLocal.vy = 0; raidLocal.dashCooldown = 0;
+      raidTryDash();
+      const groundedStates = [];
+      for (let i = 0; i < RAID_DASH_FRAMES; i++) { raidUpdateLocal(); groundedStates.push(raidLocal.onGround); }
+
+      // the jump key does nothing mid-dash (it would be zeroed next frame anyway)
+      T.place(300);
+      raidLocal.onGround = true; raidLocal.vy = 0; raidLocal.dashCooldown = 0;
+      raidTryDash();
+      raidLocal.input.jump = true; raidUpdateLocal(); raidLocal.input.jump = false;
+      const noJumpMidDash = raidLocal.vy === 0 && raidLocal.y === raidGROUND_Y - 48;
+      return { heldHeight, vyDuring, distance, fallsAgainAfter, groundedAll: groundedStates.every((g) => g === true), noJumpMidDash };
+    });
+    expect(r.heldHeight, 'gravity does not move you during a dash').toBe(true);
+    expect(r.vyDuring).toBe(0);
+    expect(r.distance, 'a little farther than the old 120 px dash').toBeGreaterThan(135);
+    expect(r.distance).toBeLessThan(190);
+    expect(r.fallsAgainAfter, 'gravity takes over again once the dash ends').toBe(true);
+    expect(r.groundedAll, 'a grounded dash never counts as airborne').toBe(true);
+    expect(r.noJumpMidDash).toBe(true);
+  });
+
+  test('RAI-17 running tops out near 3 px/frame and a tap jump rises about 100 px', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       T.place(100);
@@ -425,10 +469,10 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       for (let i = 0; i < 120; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
       return { maxV, rise: groundY - minY, backOnGround: raidLocal.y === groundY };
     });
-    expect(r.maxV).toBeLessThanOrEqual(7);
-    expect(r.maxV).toBeGreaterThan(3);
-    expect(r.rise).toBeGreaterThan(190);
-    expect(r.rise).toBeLessThan(230);
+    expect(r.maxV, 'a bit slower than the old ~4 px/frame').toBeLessThan(3.6);
+    expect(r.maxV).toBeGreaterThan(2.5);
+    expect(r.rise, 'much lower than the old ~210 px jump').toBeGreaterThan(85);
+    expect(r.rise).toBeLessThan(125);
     expect(r.backOnGround).toBe(true);
   });
 
@@ -454,12 +498,11 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
       };
     });
-    expect(r.constants).toEqual({ grav: 0.4, vy: -13, holdGrav: 0.16, holdFrames: 18 });
-    // a tap behaves like the old fixed jump (unaffected by the new hold mechanic)
-    expect(r.tap).toBeGreaterThan(190);
-    expect(r.tap).toBeLessThan(230);
-    expect(r.fullHold, 'holding the whole way up rises well beyond a tap').toBeGreaterThan(r.tap + 60);
-    expect(r.fullHold).toBeLessThan(380);
+    expect(r.constants).toEqual({ grav: 0.4, vy: -9, holdGrav: 0.16, holdFrames: 10 });
+    expect(r.tap).toBeGreaterThan(85);
+    expect(r.tap).toBeLessThan(125);
+    expect(r.fullHold, 'holding the whole way up still rises beyond a tap').toBeGreaterThan(r.tap + 30);
+    expect(r.fullHold, 'but a full jump is still low').toBeLessThan(190);
   });
 
   test('RAI-18 the boss hit area is sized per boss - the Wyrm is wider than the old fixed 50px box', async ({ page }) => {
@@ -1116,7 +1159,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.maxHealth = raidMaxHealthForLoadout(); // 5 + 1
 
       raidLocal.utility = 'util_feather';
-      out.jumpHold = raidJumpHoldFrames(); // round(18 * 1.3)
+      out.jumpHold = raidJumpHoldFrames(); out.baseHold = RAID_JUMP_HOLD_FRAMES;
 
       raidLocal.utility = 'util_hands';
       out.reloadFrames = raidReloadFrames(); // round(100 * 0.8)
@@ -1142,7 +1185,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     });
     expect(r.dashCooldown).toBe(135);
     expect(r.maxHealth).toBe(6);
-    expect(r.jumpHold).toBe(23);
+    expect(r.jumpHold).toBe(Math.round(r.baseHold * 1.3)); // Feather Cloak: +30% hold time
     expect(r.reloadFrames).toBe(80);
     expect(r.reloadDefault).toBe(100);
     expect(r.wardAbsorbed, 'the first hit is absorbed and marks wardUsed').toBe(true);
@@ -1157,6 +1200,12 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
 
       raidLocal.utility = 'util_boots2';
       out.maxSpeed = raidMaxSpeed(); // 7 * 1.15
+      const runTop = () => { T.place(100); raidLocal.vx = 0; raidLocal.input = { left: false, right: true, up: false, down: false, jump: false, space: false }; let m = 0; for (let i = 0; i < 80; i++) { raidUpdateLocal(); m = Math.max(m, raidLocal.vx); } raidLocal.input.right = false; return m; };
+      const saveUtil = raidLocal.utility;
+      raidLocal.utility = null; const baseRun = runTop();
+      raidLocal.utility = 'util_boots2'; const nimbleRun = runTop();
+      raidLocal.utility = saveUtil;
+      out.runFaster = nimbleRun > baseRun * 1.1;
 
       raidLocal.utility = 'util_iron';
       out.knockbackMult = raidKnockbackMult(); // 0.5
@@ -1192,6 +1241,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       return out;
     });
     expect(r.maxSpeed).toBeCloseTo(8.05, 5);
+    expect(r.runFaster, 'Nimble Treads really make the player run faster').toBe(true);
     expect(r.knockbackMult).toBe(0.5);
     expect(r.shieldDuration).toBe(117);
     expect(r.shieldRegen).toBe(280);
@@ -1230,7 +1280,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.utility = 'util_double';
       T.place(500, raidGROUND_Y - 48 - 100); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 2;
       pressJump();
-      const afterAirJump = { vy: raidLocal.vy, used: raidLocal.airJumpsUsed };
+      const afterAirJump = { vy: raidLocal.vy, used: raidLocal.airJumpsUsed, boosting: raidLocal.jumpBoosting };
       // a second air jump is blocked (only one charge) - still falling, no second boost
       raidLocal.vy = 2;
       pressJump();
@@ -1239,11 +1289,25 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       T.place(500, raidGROUND_Y - 48); raidLocal.onGround = false;
       raidUpdateLocal(); // lands, onGround becomes true, airJumpsUsed resets
       const refilled = raidLocal.airJumpsUsed === 0;
-      return { noCharmBlocked, afterAirJump, secondBlocked, refilled };
+      // how high does an air jump carry compared with the first (ground) jump?
+      const rise = (airborne) => {
+        raidLocal.utility = 'util_double';
+        if (airborne) { T.place(500, 150); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 0; raidLocal.input.jump = false; raidLocal.wasJumpPressed = false; }
+        else { T.place(500); raidLocal.onGround = true; raidLocal.jumpBoosting = false; }
+        const y0 = raidLocal.y; let minY = y0;
+        raidLocal.input.jump = true; raidUpdateLocal(); raidLocal.input.jump = false;
+        for (let i = 0; i < 80; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        return y0 - minY;
+      };
+      const groundRise = rise(false), airRise = rise(true);
+      return { noCharmBlocked, afterAirJump, secondBlocked, refilled, groundRise, airRise };
     });
     expect(r.noCharmBlocked, 'no extra jump without the charm').toBe(true);
     expect(r.afterAirJump.vy).toBeLessThan(0);
     expect(r.afterAirJump.used).toBe(1);
+    expect(r.afterAirJump.boosting, 'an air jump is a fixed small hop - holding does not boost it').toBe(false);
+    expect(r.airRise, 'the double jump does not jump as far as the first jump').toBeLessThan(r.groundRise * 0.75);
+    expect(r.airRise).toBeGreaterThan(20);
     expect(r.secondBlocked, 'only one air jump per landing').toBe(true);
     expect(r.refilled, 'landing refills the air jump').toBe(true);
   });

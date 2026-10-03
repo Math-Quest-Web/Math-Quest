@@ -3688,18 +3688,20 @@ let raidReloadTimer = 0; // frames left while reloading; 0 = not reloading
 let raidFireCooldown = 0;
 let raidShotsRef = null;
 
-// Movement/jump tuning (RAI-17). A tap of the jump key rises ~210px (RAID_JUMP_VY under normal
+// Movement/jump tuning (RAI-17). A tap of the jump key rises ~100px (RAID_JUMP_VY under normal
 // gravity); holding it applies reduced gravity for up to RAID_JUMP_HOLD_FRAMES frames instead,
-// reaching roughly 320-340px.
+// reaching roughly 150px. The jump is deliberately low - the bosses hover near the ground (BOS-44).
 const RAID_GRAVITY = 0.4;
-const RAID_JUMP_VY = -13;
+const RAID_JUMP_VY = -9;
+const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.7; // Second Wind (WPN-06): a smaller hop than the first jump, never held
 const RAID_JUMP_HOLD_GRAVITY = 0.16;
-const RAID_JUMP_HOLD_FRAMES = 18;
+const RAID_JUMP_HOLD_FRAMES = 10;
 
 // Dash tuning (RAI-16): a committed burst - see raidUpdateLocal, which is what RAI-16's fix
 // keeps from being immediately undone by the normal running speed cap.
-const RAID_DASH_FRAMES = 10;
-const RAID_DASH_SPEED = 12;
+const RAID_DASH_FRAMES = 11;
+const RAID_DASH_SPEED = 14;
+const RAID_ACCEL = 0.55; // running acceleration (scaled by Nimble Treads); steady run speed is ~RAID_ACCEL*0.85/0.15
 const RAID_DASH_TRAIL_LIFE = 14; // frames each afterimage stays visible
 
 // Game state
@@ -5758,7 +5760,7 @@ function raidUpdateLocal() {
   // Decremented up front so a squash/stretch pop set fresh later THIS frame (landing, jumping)
   // still reads as its full RAID_SQUASH_FRAMES value for the frame it starts on.
   if (p.squashTimer > 0) p.squashTimer--;
-  const accel = 0.7;
+  const accel = RAID_ACCEL * raidMaxSpeed() / 7; // Nimble Treads (move_speed) really speeds up running
   const friction = 0.85;
   // A dash is a committed burst: fixed velocity for the whole window, immune to the normal
   // speed cap below (the bug this fixes - vx=12 was clamped straight back to 7 one frame
@@ -5801,10 +5803,13 @@ function raidUpdateLocal() {
       p.jumpBoosting = false;
     }
   }
+  // A dash keeps your height: no gravity and no vertical speed for as long as it lasts (RAI-16).
+  const dashing = p.dashTimer > 0;
+  if (dashing) { gravity = 0; p.vy = 0; p.jumpBoosting = false; }
   p.vy += gravity;
   p.y += p.vy;
   const wasOnGround = p.onGround; // RAI-21: edge-detect the landing transition, for squash-stretch
-  if (p.y > raidGROUND_Y - p.h) {
+  if (p.y >= raidGROUND_Y - p.h) { // >= so a grounded dash (no gravity pushing past the floor) still counts as grounded
     p.y = raidGROUND_Y - p.h;
     p.vy = 0;
     p.onGround = true;
@@ -5814,7 +5819,9 @@ function raidUpdateLocal() {
   } else {
     p.onGround = false;
   }
-  if (p.input.jump && p.onGround) {
+  if (dashing) {
+    // no jumping mid-dash
+  } else if (p.input.jump && p.onGround) {
     p.vy = RAID_JUMP_VY;
     p.onGround = false;
     p.jumpBoosting = true;
@@ -5824,8 +5831,8 @@ function raidUpdateLocal() {
     // Second Wind (WPN-06): one extra jump while airborne, edge-detected on the key press so
     // holding jump doesn't spend it repeatedly the instant it becomes eligible (e.g. at the
     // apex of the ground jump).
-    p.vy = RAID_JUMP_VY;
-    p.jumpBoosting = true;
+    p.vy = RAID_AIR_JUMP_VY; // smaller than the first jump, and holding the key does not boost it
+    p.jumpBoosting = false;
     p.jumpHoldTimer = 0;
     p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
