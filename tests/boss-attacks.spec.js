@@ -232,7 +232,7 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
         out['pillars' + phase] = T.hazardSpawns.filter((h) => h.kind === 'pillar').length;
       }
       const ember = T.spawns.find((p) => p.kind === 'ember');
-      out.ember = { gravity: ember.gravity, onLand: ember.onLand, life: ember.life };
+      out.ember = { gravity: ember.gravity, onLand: ember.onLand, life: ember.life, vy: ember.vy, rise: ember.vy < 0 ? (ember.vy * ember.vy) / (2 * ember.gravity) : 0, wanted: RAID_LOB_RISE };
       // the pillar: marker 32 frames, erupts 32-59; only hurts nearby, low players
       const pillar = (dx, airborne) => {
         T.prepBoss('wyrm', 1); raidLocal.health = 5;
@@ -251,7 +251,11 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
     expect(r.embers2).toBe(3);
     expect(r.pillars1).toBe(2);
     expect(r.pillars2).toBe(3);
-    expect(r.ember).toEqual({ gravity: 0.1, onLand: 'pillar', life: 66 });
+    expect(r.ember.onLand).toBe('pillar');
+    expect(r.ember.life).toBe(66);
+    expect(r.ember.gravity, 'the fireball is lobbed up and over, not flung flat').toBeGreaterThan(0.1);
+    expect(r.ember.vy, 'it launches upward').toBeLessThan(0);
+    expect(Math.abs(r.ember.rise - r.ember.wanted), 'and peaks about RAID_LOB_RISE above the launch point').toBeLessThan(8);
     expect(r.hitStanding).toBeGreaterThanOrEqual(31);
     expect(r.hitStanding).toBeLessThanOrEqual(34);
     expect(r.hitNear).toBeGreaterThanOrEqual(31);
@@ -587,9 +591,10 @@ test.describe('Ground-anchored bosses (BOS-43)', () => {
     expect(r.max, 'stays within its own half-height plus a few px of bob').toBeLessThan(85 + 10);
   });
 
-  test('BOS-43 Grinmaw (a floating boss, for contrast) stays far above the ground', async ({ page }) => {
+  test('BOS-43 Grinmaw (a floating boss, for contrast) hovers clear of the floor - but low (BOS-44)', async ({ page }) => {
     const r = await heightAboveGround(page, 'grinmaw');
-    expect(r.min).toBeGreaterThan(380);
+    expect(r.min, 'still floats above the floor').toBeGreaterThan(130);
+    expect(r.max, 'but nowhere near the old ~420px - a small hop reaches it').toBeLessThan(260);
   });
 
   const canMeleeGrounded = async (page, type) => page.evaluate(async (t) => {
@@ -621,4 +626,34 @@ test.describe('Ground-anchored bosses (BOS-43)', () => {
   test('BOS-43 a grounded player cannot melee a floating boss (Grinmaw) without jumping', async ({ page }) => {
     expect(await canMeleeGrounded(page, 'grinmaw')).toBe(false);
   });
+});
+
+test.describe('Bosses hover near the ground (BOS-44)', () => {
+  // For every boss: can a player whose body centre is at a given height reach it with a swing?
+  const reach = (page, type, playerCentreY, dir) => page.evaluate(async ([t, y, d]) => {
+    await T.setupRaid(t);
+    T.step(2); // let the boss settle into its idle position
+    const b = raidG.boss;
+    const p = { x: b.x - 18, y: y - 24, facing: 1, swingDir: d, utility: '' }; // y is the player's centre
+    const box = raidSwordHitbox(p);
+    const h = raidBossHalfExtent(b.type);
+    return Math.abs(box.cx - b.x) < h.hw + box.hw && Math.abs(box.cy - b.y) < h.hh + box.hh;
+  }, [type, playerCentreY, dir]);
+  // body-centre height: standing / at the top of a tap jump / at the top of a full held jump
+  const STAND = 500 - 24, HOP = 500 - 24 - 100, FULL = 500 - 24 - 150;
+  const FLOATERS = ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon'];
+
+  for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon', 'bramblehide', 'colossus']) {
+    test('BOS-44 ' + boss + ' can be hit with a swing from the top of a small hop', async ({ page }) => {
+      expect(await reach(page, boss, HOP, 'side'), 'a tap-height jump reaches it').toBe(true);
+    });
+    test('BOS-44 ' + boss + ' can be pogoed from the top of a held jump', async ({ page }) => {
+      expect(await reach(page, boss, FULL, 'down'), 'a down swing from a full jump reaches it').toBe(true);
+    });
+  }
+  for (const boss of FLOATERS) {
+    test('BOS-44 ' + boss + ' still floats - it cannot be hit while standing on the ground', async ({ page }) => {
+      expect(await reach(page, boss, STAND, 'side')).toBe(false);
+    });
+  }
 });

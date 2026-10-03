@@ -4109,6 +4109,21 @@ function raidDamagePlayer(id, p, amount) {
   }
 }
 
+// Lobbed boss shots (fireballs, bubbles, feathers) must rise and then drop onto their landing spot.
+// With the bosses hovering low (BOS-44) a flat arc would sweep sideways through the player's body,
+// so this picks the gravity that gives a flight of T frames covering a fall of d pixels a peak
+// RISE pixels above the launch point - they only threaten the player near where they land.
+function raidLobGravity(d, T, rise) {
+  let lo = 0.02, hi = 2;
+  for (let i = 0; i < 40; i++) {
+    const g = (lo + hi) / 2;
+    const vy0 = d / T - g * (T + 1) / 2; // launch speed that lands after exactly T frames
+    if (-vy0 > Math.sqrt(2 * g * rise)) hi = g; else lo = g; // rises higher than wanted -> less gravity
+  }
+  return (lo + hi) / 2;
+}
+const RAID_LOB_RISE = 70;
+
 function raidHazard(props) {
   raidG.hazards.push(Object.assign({ life: 60, timer: 0 }, props));
 }
@@ -4132,6 +4147,12 @@ function resetBossFlow(b) {
 // silhouette (RAI-18) - not just its sprite scale, since e.g. the Wyrm's three heads spread much
 // wider than its body is tall. The same box is used whether the sprite or fallback art is shown
 // (BOS-33: hitboxes are not changed by the art).
+// Where each floating boss hovers while idle (BOS-44). Deliberately low: with the player's low jump
+// (RAI-17) a small hop reaches every boss with a swing, and a held jump puts the player above it
+// for a pogo - yet they are still clear of the floor, so you cannot hit them standing. The two
+// ground-anchored bosses sit on the floor instead (BOS-43).
+const BOSS_HOVER_Y = { grinmaw: 320, warden: 310, wyrm: 300, glutton: 345, griffon: 305 };
+
 const BOSS_HITBOX = {
   grinmaw: { hw: 58, hh: 58 },
   warden: { hw: 50, hh: 65 },
@@ -4459,7 +4480,7 @@ function wyrmFireShot(b, kind, index) {
     const pick = raidRandomPlayer();
     const tx = clampX((pick ? raidPx(pick.p) : 500) + (Math.random() - 0.5) * 180, 60, 940);
     const hx = b.x, hy = b.y + 20;
-    const T = 60, g = 0.1;
+    const T = 60, g = raidLobGravity((raidGROUND_Y - 12) - hy, T, RAID_LOB_RISE);
     raidG.projectiles.push({
       x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 12) - hy - g * T * (T + 1) / 2) / T, gravity: g,
       r: 11, life: T + 6, isWarning: false, owner: 'ember', isBossProjectile: true, kind: 'ember', onLand: 'pillar'
@@ -4486,7 +4507,7 @@ function wyrmUltimate(b) {
 const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb'];
 
 function wyrmPathPos() {
-  return { x: 500 + Math.sin(raidG.frame * 0.01) * 260, y: 110 + Math.sin(raidG.frame * 0.03) * 18 };
+  return { x: 500 + Math.sin(raidG.frame * 0.01) * 260, y: BOSS_HOVER_Y.wyrm + Math.sin(raidG.frame * 0.03) * 18 };
 }
 
 function updateWyrmAnimation(b) {
@@ -4581,8 +4602,8 @@ function gluttonBubbleFan(b) {
 
 // Solves the launch velocity so the bubble lands on the floor at tx after T frames.
 function gluttonLobBubble(b, tx, T) {
-  const g = 0.11;
   const hx = b.x, hy = b.y - 5;
+  const g = raidLobGravity((raidGROUND_Y - 20) - hy, T, RAID_LOB_RISE);
   raidG.projectiles.push({
     x: hx, y: hy,
     vx: (tx - hx) / T,
@@ -4949,7 +4970,7 @@ function griffonWindDive(b) {
 function griffonGaleStorm(b) {
   for (let i = 0; i < 5; i++) {
     const tx = clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960);
-    const hx = b.x, hy = b.y + 10, T = 55, g = 0.1;
+    const hx = b.x, hy = b.y + 10, T = 55, g = raidLobGravity((raidGROUND_Y - 30) - hy, T, RAID_LOB_RISE);
     raidG.projectiles.push({
       x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 30) - hy - g * T * (T + 1) / 2) / T, gravity: g,
       r: 9, life: T + 10, isWarning: false, owner: 'feather', isBossProjectile: true, kind: 'feather'
@@ -4967,7 +4988,7 @@ function griffonUltimate(b) {
 const GRIFFON_POSITIONAL = ['swoop', 'plunge', 'thud', 'soar'];
 
 function griffonPathPos() {
-  return { x: 500 + Math.sin(raidG.frame * 0.011) * 240, y: 90 + Math.sin(raidG.frame * 0.025) * 16 };
+  return { x: 500 + Math.sin(raidG.frame * 0.011) * 240, y: BOSS_HOVER_Y.griffon + Math.sin(raidG.frame * 0.025) * 16 };
 }
 
 function updateGriffonAnimation(b) {
@@ -5281,7 +5302,7 @@ function raidBossUpdate() {
   if (b.type === 'warden') {
     if (!WARDEN_POSITIONAL.includes(b.anim.state)) {
       b.x += Math.sin(raidG.frame * 0.014) * 1.1;
-      b.y = 90 + Math.sin(raidG.frame * 0.02) * 24;
+      b.y = BOSS_HOVER_Y.warden + Math.sin(raidG.frame * 0.02) * 24;
     }
     if (b.anim.state !== 'idle') updateWardenAnimation(b);
     if (!WARDEN_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
@@ -5297,7 +5318,7 @@ function raidBossUpdate() {
   } else if (b.type === 'glutton') {
     if (!GLUTTON_POSITIONAL.includes(b.anim.state)) {
       b.x = 500 + Math.sin(raidG.frame * 0.012) * 60;
-      b.y = 95 + Math.sin(raidG.frame * 0.02) * 6;
+      b.y = BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6;
     }
     if (b.anim.state !== 'idle') updateGluttonAnimation(b);
   } else if (b.type === 'bramblehide') {
@@ -5322,7 +5343,7 @@ function raidBossUpdate() {
     if (!GRIFFON_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
   } else {
     b.x += Math.sin(raidG.frame * 0.018) * 0.8;
-    b.y = 80 + Math.sin(raidG.frame * 0.025) * 12;
+    b.y = BOSS_HOVER_Y.grinmaw + Math.sin(raidG.frame * 0.025) * 12;
     if (b.anim.state !== 'idle') updateGrinmawAnimation(b);
     b.y += b.animOffsetY || 0;
   }

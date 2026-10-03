@@ -61,7 +61,7 @@ window.T = {
     b.phase = phase; b.lastPhase = phase;
     b.exposed = 0; b.transition = 0; b.attackTimer = 99999; b.invulnerable = false;
     b.feastCooldown = 99999; b.comboPending = false; b.lastAttack = '';
-    b.x = 500; b.y = 90;
+    b.x = 500; b.y = BOSS_HOVER_Y[type] || 90; // a floating boss's idle height (BOS-44)
     raidG.hazards = []; raidG.projectiles = []; raidG.slamAnimations = []; raidG.playerProjectiles = [];
     raidG.mathEvent = null; raidG.gameOver = false; raidG.victory = false;
     raidLocal.health = 5;
@@ -155,7 +155,20 @@ window.T = {
         if (['sink', 'swim', 'rise'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.targetX, r: 100 });
         if (['swoop', 'plunge', 'thud'].includes(a.state) && b.type === 'griffon') dangers.push({ x: a.targetX, r: 110 });
       }
-      raidG.projectiles.forEach((p) => { if (p.isBossProjectile && p.life > 0 && p.y > raidGROUND_Y - 260) dangers.push({ x: p.x + (p.vx || 0) * 12, r: 60 }); });
+      raidG.projectiles.forEach((p) => {
+        if (!p.isBossProjectile || !(p.life > 0)) return;
+        if (p.gravity) {
+          // A lobbed shot (fireball, bubble, feather) is only a threat where it comes down, so a
+          // sensible player steps away from its landing spot once it is close to landing.
+          const g = p.gravity, vy = p.vy, d = (raidGROUND_Y - 14) - p.y;
+          const disc = vy * vy + 2 * g * d;
+          if (disc < 0) return;
+          const t = (-vy + Math.sqrt(disc)) / g; // frames until it reaches the floor
+          if (t < 50) dangers.push({ x: p.x + (p.vx || 0) * t, r: 70 });
+        } else if (p.y > raidGROUND_Y - 260) {
+          dangers.push({ x: p.x + (p.vx || 0) * 12, r: 60 });
+        }
+      });
       let wantJump = false;
       raidG.hazards.forEach((h) => {
         if ((h.kind === 'shockwave' || h.kind === 'imp' || h.kind === 'quake') && Math.abs(x - h.x) < 55) wantJump = true;

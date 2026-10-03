@@ -365,7 +365,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
       const out = {};
       for (const s of ['fade', 'ghost', 'materialize']) out['warden_' + s] = hitFor('warden', s);
       for (const s of ['sink', 'swim', 'rise']) out['glutton_' + s] = hitFor('glutton', s);
-      out.idle = (() => { T.prepBoss('glutton', 1); const b = raidG.boss; const hp0 = b.hp; b.x = 500; b.y = 95; raidG.playerProjectiles = [{ x: 500, y: 95, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }]; raidBossUpdate(); return { hit: hp0 - raidG.boss.hp }; })();
+      out.idle = (() => { T.prepBoss('glutton', 1); const b = raidG.boss; const hp0 = b.hp; b.x = 500; b.y = BOSS_HOVER_Y.glutton; raidG.playerProjectiles = [{ x: 500, y: BOSS_HOVER_Y.glutton, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }]; raidBossUpdate(); return { hit: hp0 - raidG.boss.hp }; })();
       out.helper = ['grinmaw', 'wyrm', 'bramblehide', 'colossus', 'griffon'].map((t) => { T.prepBoss(t, 1); raidG.boss.anim.state = 'dive'; return raidBossUntargetable(raidG.boss); });
       return out;
     });
