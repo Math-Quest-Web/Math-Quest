@@ -1131,6 +1131,126 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.defaultDashIframes).toBe(14);
   });
 
+  test('WPN-13 several worn charms all apply at once, for every player (host-side effects read the synced list)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      raidLocal.utility = 'util_boots,util_heart,util_boots2,util_iron';
+      out.dash = raidDashCooldownFrames(); out.hearts = raidMaxHealthForLoadout(); out.speed = raidMaxSpeed(); out.knock = raidKnockbackMult();
+      // an explicit list (a teammate's synced charms) is honoured by the per-player readers
+      out.range = raidAttackRangeMult('util_boots,util_range');
+      out.rangeBox = raidSwordHitbox({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: 'util_coin,util_range' }).hw;
+      out.noRange = raidAttackRangeMult('util_boots,util_coin');
+      // Warding Sigil among other charms still absorbs the first hit
+      raidLocal.utility = 'util_boots,util_ward';
+      const p = Object.assign({}, T.me(), { utility: 'util_boots,util_ward', wardUsed: false, shield: false, invincible: 0 });
+      raidDamagePlayer(raidMyId, p, 1);
+      out.warded = p.wardUsed === true && p.health === 5;
+      // the Familiar is spawned for a player wearing it alongside others
+      raidG.players[raidMyId].utility = 'util_boots,util_minion';
+      raidG.minions = []; raidUpdateMinions(raidG.boss);
+      out.minions = raidG.minions.length;
+      raidLocal.utility = null;
+      return out;
+    });
+    expect(r.dash).toBe(135);
+    expect(r.hearts).toBe(6);
+    expect(r.speed).toBeCloseTo(8.05, 5);
+    expect(r.knock).toBe(0.5);
+    expect(r.range).toBe(1.25);
+    expect(r.rangeBox).toBe(100 * 1.25);
+    expect(r.noRange).toBe(1);
+    expect(r.warded).toBe(true);
+    expect(r.minions).toBe(1);
+  });
+
+  test('WPN-14 the ten new charms each apply their effect (and nothing changes without them)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      const none = () => { raidLocal.utility = ''; };
+      // Quick Hands: shorter sword cooldown
+      none(); raidLocal.swordCooldown = 0; raidSwordSwing(); out.cdBase = raidLocal.swordCooldown;
+      raidLocal.utility = 'util_hands'; raidLocal.swordCooldown = 0; raidSwordSwing(); out.cdHands = raidLocal.swordCooldown;
+      // Whetstone: more sword damage; Opportunist: more damage while the boss is stunned
+      const swordHit = (utility, exposed) => {
+        T.prepBoss('grinmaw', 1); raidG.boss.x = 500; raidG.boss.y = 300; raidG.boss.exposed = exposed;
+        T.place(500 - 50, 300 - 24, { utility, swingTimer: RAID_SWORD_HIT_WINDOW_START, swingDir: 'right', facing: 1 });
+        raidSendLocalState();
+        raidG.players[raidMyId].swingTimer = RAID_SWORD_HIT_WINDOW_START; raidG.players[raidMyId].swingDir = 'right'; raidG.players[raidMyId].utility = utility;
+        raidSwingHitState = {};
+        const hp0 = raidG.boss.hp;
+        raidCheckSwordSwings(raidG.boss);
+        return hp0 - raidG.boss.hp;
+      };
+      out.hitBase = swordHit('', 0); out.hitWhet = swordHit('util_whet', 0);
+      out.stunBase = swordHit('', 100); out.stunHunter = swordHit('util_hunter', 100);
+      out.stunBoth = swordHit('util_whet,util_hunter', 100);
+      // Pogo Spring: a higher bounce
+      none(); out.pogoBase = raidPogoVy(); raidLocal.utility = 'util_spring'; out.pogoSpring = raidPogoVy();
+      // Light Step: gravity is lighter while falling (and unchanged while rising)
+      const fall = (utility) => {
+        raidLocal.utility = utility; raidLocal.dashTimer = 0; raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false };
+        T.place(500, 100); raidLocal.onGround = false; raidLocal.vy = 0; raidLocal.jumpBoosting = false;
+        for (let i = 0; i < 20; i++) raidUpdateLocal();
+        return raidLocal.y;
+      };
+      out.fallBase = fall(''); out.fallLight = fall('util_cloud');
+      raidLocal.utility = 'util_cloud'; T.place(500, 300); raidLocal.onGround = false; raidLocal.vy = -5; raidUpdateLocal();
+      out.riseGravity = raidLocal.vy - (-5); // still RAID_GRAVITY going up
+      // Long Stride: a longer dash
+      none(); raidLocal.dashCooldown = 0; raidTryDash(); out.dashBase = raidLocal.dashTimer;
+      raidLocal.utility = 'util_stride'; raidLocal.dashCooldown = 0; raidLocal.dashTimer = 0; raidTryDash(); out.dashStride = raidLocal.dashTimer;
+      // Thick Skin: longer invincibility after being hit
+      const hurtFrames = (utility) => { const p = Object.assign({}, T.me(), { utility, wardUsed: true, shield: false, invincible: 0, health: 5 }); raidDamagePlayer(raidMyId, p, 1); return p.invincible; };
+      out.hurtBase = hurtFrames(''); out.hurtHide = hurtFrames('util_hide');
+      // Golden Idol: +25% coins (adds to Lucky Charm's +10%)
+      const coins = (utility) => { mqProfile.equipped.utility = utility; currentDifficulty = 'normal'; raidLocal.health = raidLocal.maxHealth = 5; return mqAwardRaidVictory().coins; };
+      out.coinBase = coins(''); out.coinIdol = coins('util_idol'); out.coinBoth = coins('util_coin,util_idol');
+      // Titan Heart: +2 hearts, stacks with Vital Core
+      raidLocal.utility = 'util_titan'; out.titan = raidMaxHealthForLoadout();
+      raidLocal.utility = 'util_titan,util_heart'; out.titanHeart = raidMaxHealthForLoadout();
+      // Deflector: parries reach further
+      const parried = (utility, gap) => {
+        T.prepBoss('grinmaw', 1); raidG.boss.x = 900; raidG.boss.y = 300;
+        T.place(300, undefined, { swingTimer: RAID_SWORD_HIT_WINDOW_START, swingDir: 'right', facing: 1, utility });
+        raidG.players[raidMyId].swingTimer = RAID_SWORD_HIT_WINDOW_START; raidG.players[raidMyId].swingDir = 'right'; raidG.players[raidMyId].utility = utility;
+        const box = raidSwordHitbox(raidG.players[raidMyId]);
+        raidG.projectiles = [{ x: box.cx + box.hw + 12 + gap, y: box.cy, vx: 0, vy: 0, r: 12, life: 50, isWarning: false, isBossProjectile: true, kind: 'candy' }];
+        raidParryProjectiles();
+        return raidG.projectiles.length === 0;
+      };
+      out.parryBase = parried('', 14); out.parryDeflect = parried('util_deflect', 14); out.parryFar = parried('util_deflect', 90);
+      out.parryTouching = parried('', -10);
+      none();
+      out.rangeBase = raidSwordHitbox({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: '' }).hw;
+      return out;
+    });
+    expect(r.cdBase).toBe(26);
+    expect(r.cdHands, 'Quick Hands: cooldown -25%').toBe(Math.round(26 * 0.75));
+    expect(r.hitBase).toBe(4);
+    expect(r.hitWhet, 'Whetstone: +25% sword damage').toBe(5);
+    expect(r.stunBase).toBe(8);
+    expect(r.stunHunter, 'Opportunist: +50% on a stunned boss').toBe(12);
+    expect(r.stunBoth).toBe(15);
+    expect(r.pogoSpring, 'Pogo Spring: +30% bounce').toBeCloseTo(r.pogoBase * 1.3, 5);
+    expect(r.fallLight, 'Light Step: a falling player has dropped less far after 20 frames').toBeLessThan(r.fallBase);
+    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25, 5);
+    expect(r.dashStride, 'Long Stride: +30% dash length').toBe(Math.round(r.dashBase * 1.3));
+    expect(r.hurtBase).toBe(30);
+    expect(r.hurtHide, 'Thick Skin: +50% invincibility after a hit').toBe(45);
+    expect(r.coinBase).toBe(170);
+    expect(r.coinIdol, 'Golden Idol: +25% coins').toBe(213);
+    expect(r.coinBoth, 'with Lucky Charm the bonuses add: +35%').toBe(230);
+    expect(r.titan).toBe(7);
+    expect(r.titanHeart).toBe(8);
+    expect(r.parryBase, 'without Deflector a shot just outside the blade is not parried').toBe(false);
+    expect(r.parryDeflect, 'Deflector: the parry reaches further').toBe(true);
+    expect(r.parryFar).toBe(false);
+    expect(r.parryTouching).toBe(true);
+    expect(r.rangeBase).toBe(r.rangeBase); // sanity: no charm, no change
+  });
+
   test('WPN-06 Second Wind grants exactly one extra jump in the air, refilled on landing, and only while equipped', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
@@ -1503,6 +1623,10 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         out.iconAnimates[id] = i1.m !== i2.m;
       }
       out.unique = seen.size;
+      // three charms at once: a comma-separated list draws every effect
+      const combo = body(40, 'util_boots,util_ward,util_heart');
+      const combos = ['util_boots', 'util_ward', 'util_heart'].map((id) => mask(combo, body(40, id)).n);
+      out.comboDiffers = combos.every((n) => n > 40);
       // no charm: nothing changes (an unknown id too)
       out.noneSame = mask(body(40, ''), body(40, undefined)).n === 0 && mask(body(40, ''), body(40, 'util_unknown')).n === 0;
       // a charm never paints over a ghost afterimage or a shop skin preview (noCharm)
@@ -1526,14 +1650,15 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.loadoutShowsCharm = mask(withCharm, lc.getContext('2d').getImageData(0, 0, 400, 400).data).n > 50;
       return out;
     });
-    expect(r.ids.length, 'all 13 charms').toBe(13);
+    expect(r.ids.length, 'all 23 charms').toBe(23);
     for (const id of r.ids) {
       expect(r.onPlayer[id], id + ' draws something on the player').toBeGreaterThan(40);
       expect(r.onPlayerAnimates[id], id + ' animates on the player').toBe(true);
       expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
       expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
     }
-    expect(r.unique, 'every charm looks different on the player').toBe(13);
+    expect(r.unique, 'every charm looks different on the player').toBe(23);
+    expect(r.comboDiffers, 'three worn charms are drawn together, differently from any single one').toBe(true);
     expect(r.noneSame, 'no charm (or an unknown one) changes nothing').toBe(true);
     expect(r.noCharmSame, 'noCharm switches the effect off').toBe(true);
     expect(r.drewAll, 'the raid draws every charm on both players without error').toBe(true);

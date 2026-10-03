@@ -138,24 +138,36 @@ lives in section `raid`.
 | WPN-09 | **Slash impact (placeholder animation):** a sword hit on the boss adds a short white slash-impact burst at the contact point - streaks fanning out along the swing's own direction (all around for the default side swing) plus a bright core flash - on top of the generic impact spark, visible to every client. Hits with no direction (a Familiar bolt) keep only the generic spark. | Done |
 | WPN-10 | **Long, sweeping slash:** every swing direction reaches farther than the original swing, though shorter than the first long version (left, right, up and down are one shape turned to face each way, so the player always has the same reach - 100 px out from the body along the swing and 62 px either side of it; diagonals reach 80 px with a 52 px half-extent), so the hitbox covers the whole visible slash. The live player draws a large white slash (radius 115 px, scaled by Long Reach): a forward arc of about 160 degrees centred on the swing's own direction - it does not surround the player - compressed vertically (squashed to 55% across its direction, so its top and bottom ends sit close together while the forward reach is unchanged) that sweeps from its top end to its bottom end as the swing plays (head runs ahead, tail follows and fades it away). It is fat near the top, narrows through its farthest point and tapers to nothing at the bottom, and is mirrored for a left-facing player. Every direction is the same slash turned to face it (rotated, then squashed across its direction), so up and down are the side slash pointing up or down - same shape, same reach. This slash is the whole live swing animation: the old sweeping blade and small trail arcs are gone, and the blade just rests at its held angle. Dash afterimages draw no slash; only the shop preview (which has no room for it) keeps the old small swing. The slash is original art. | Done |
 | WPN-11 | **Parry:** while a player's blade is out (the same few frames as WPN-02), every boss projectile the swing hitbox (WPN-05) touches is destroyed - aimed shots (candy, fangs, void shots, bolts, plumes) and lobbed ones (embers, bubbles, pods, feathers) alike. A parried lob never erupts into its pillar or thorn spike. Each parry shows a white-blue ring and glint at the shot and a 2-frame hit-stop, works even while the boss is untargetable, does not damage the boss, and a single swing can parry several shots. Host-resolved from the synced swing state like WPN-02. Telegraphed hazards (pillars, thorns, ground waves, charges) are not projectiles and cannot be parried. | Done |
-| WPN-12 | **Charm animations:** every one of the 13 charms (WPN-03) has its own looping animation on the player wearing it, visible to teammates and in the loadout preview, and its own animated glyph in the shop icon instead of one shared badge. Swift Boots: ankle wings and speed lines. Lucky Charm: orbiting spinning coin and twinkle. Feather Cloak: drifting feathers. Vital Core: a beating heart with a ring. Warding Sigil: a turning rune circle. Nimble Treads: dust puffs and ankle swirls (more when running). Iron Skin: studs and a sweeping glint. Reinforced Plating: a hexagon with a chasing light. Mending Charm: rising green pluses. Long Reach: chevrons streaming from the sword hand. Phantom Step: flickering ghost copies. Second Wind: back wings (beating faster in the air) and a wind ring. Spectral Familiar: a spirit circle with rising wisps. Subtle by design; not drawn on dash afterimages. Cosmetic only. | Done |
-| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). 13 charms across all 5 rarities: | Done |
+| WPN-12 | **Charm animations:** every one of the 23 charms (WPN-03, WPN-14) has its own looping animation on the player wearing it, visible to teammates and in the loadout preview, and its own animated glyph in the shop icon instead of one shared badge. Swift Boots: ankle wings and speed lines. Lucky Charm: orbiting spinning coin and twinkle. Feather Cloak: drifting feathers. Vital Core: a beating heart with a ring. Warding Sigil: a turning rune circle. Nimble Treads: dust puffs and ankle swirls (more when running). Iron Skin: studs and a sweeping glint. Reinforced Plating: a hexagon with a chasing light. Mending Charm: rising green pluses. Long Reach: chevrons streaming from the sword hand. Phantom Step: flickering ghost copies. Second Wind: back wings (beating faster in the air) and a wind ring. Spectral Familiar: a spirit circle with rising wisps. Quick Hands: flickering arcs round the sword hand. Long Stride: long comet streaks behind. Pogo Spring: a coil under the feet. Deflector: parry brackets shimmering ahead of the sword. Whetstone: sparks off the blade. Light Step: a cloud puff and bubbles under the feet. Opportunist: a spinning crosshair. Thick Skin: a pulsing shell outline with studs. Golden Idol: a bobbing gold idol with twinkles. Titan Heart: a great heart beating on the chest. When several charms are worn, all their animations play together. Subtle by design; not drawn on dash afterimages. Cosmetic only. | Done |
+| WPN-13 | **Charm loadout: 3 slots, 5 charm points.** A player can wear up to **3 charms at once**, and every charm costs **1, 2 or 3 charm points** (WPN-03 table); the worn charms' points may add up to at most **5**. Equipping a charm that would need a fourth slot, or more points than are left, is refused with a message saying which limit was hit (so one 3-point charm leaves room for two 1-pointers or one 2-pointer, and two 3-point charms never fit together). Clicking a worn charm takes it off. The loadout is saved as a comma-separated list of charm ids in the profile's `equipped.utility` (a lone id from an older save is still valid) and checked on load: unknown or unowned ids and duplicates are dropped, then charms are kept in order while they still fit. My Items shows the worn charms with the points used (e.g. "Charm points: 4 / 5") and every charm card shows its cost. In a raid every worn charm applies at once; the whole list is synced to teammates in the player's `utility` field, so the effects the host resolves (sword damage, stun bonus, Warding Sigil, Thick Skin, Deflector, the Familiar) read the swinger's or victim's own list. | Done |
+| WPN-14 | **Ten more charms**, each with its own effect and animation (WPN-12): Quick Hands (sword cooldown -25%), Long Stride (dash 30% longer), Pogo Spring (pogo bounce +30%), Deflector (parry reach +40%), Whetstone (+25% sword damage), Light Step (falls with 0.7x gravity; rising is unchanged), Opportunist (+50% damage to a stunned boss, so a stunned hit does triple instead of double), Thick Skin (post-hit invincibility 45 frames instead of 30), Golden Idol (+25% coins, added to Lucky Charm's +10%), Titan Heart (+2 max hearts, added to Vital Core's +1). Costs in WPN-03. | Done |
+| WPN-03 | **Charms:** the optional third equip area (separate from the weapon and skin slots): items with a small persistent effect. 23 charms across all 5 rarities - see the loadout rules in WPN-13. Clicking a worn charm takes it off (the only area that can be empty); the new ten are WPN-14. | Done |
 
-| Item | Rarity | Effect |
-|------|--------|--------|
-| Swift Boots | Common | Dash cooldown -25% |
-| Lucky Charm | Common | +10% coins from every win |
-| Nimble Treads | Common | +15% move speed |
-| Iron Skin | Common | Half the knockback when you are hit |
-| Reinforced Plating | Uncommon | Shield blocks 30% longer |
-| Mending Charm | Uncommon | Shield recharges 50% faster |
-| Feather Cloak | Rare | Hold jump 30% longer for extra height |
-| Long Reach | Rare | +25% sword reach (and a bigger slash) |
-| Phantom Step | Rare | Dash invincibility lasts 50% longer |
-| Vital Core | Epic | +1 max heart |
-| Warding Sigil | Legendary | Absorbs the first hit taken each raid |
-| Second Wind | Legendary | Adds one extra jump in the air (WPN-06) |
-| Spectral Familiar | Legendary | A companion that orbits you and fires at the boss for you (WPN-07) |
+| Item | Rarity | Cost | Effect |
+|------|--------|------|--------|
+| Swift Boots | Common | 1 | Dash cooldown -25% |
+| Lucky Charm | Common | 1 | +10% coins from every win |
+| Nimble Treads | Common | 1 | +15% move speed |
+| Iron Skin | Common | 1 | Half the knockback when you are hit |
+| Quick Hands | Common | 1 | Sword cooldown -25% (26 to 20 frames) |
+| Long Stride | Common | 1 | Dash lasts 30% longer (11 to 14 frames) |
+| Reinforced Plating | Uncommon | 1 | Shield blocks 30% longer |
+| Mending Charm | Uncommon | 1 | Shield recharges 50% faster |
+| Pogo Spring | Uncommon | 1 | Pogo bounces 30% higher (WPN-08) |
+| Deflector | Uncommon | 1 | Parries reach 40% further (WPN-11) |
+| Whetstone | Uncommon | 2 | +25% sword damage (4 to 5) |
+| Feather Cloak | Rare | 1 | Hold jump 30% longer for extra height |
+| Long Reach | Rare | 2 | +25% sword reach (and a bigger slash) |
+| Phantom Step | Rare | 2 | Dash invincibility lasts 50% longer |
+| Light Step | Rare | 2 | Fall 30% more gently (gravity x0.7 while falling) |
+| Opportunist | Rare | 2 | +50% damage to a stunned boss (triple instead of double) |
+| Vital Core | Epic | 2 | +1 max heart |
+| Thick Skin | Epic | 2 | Invincible 50% longer after you are hit (30 to 45 frames) |
+| Golden Idol | Epic | 2 | +25% coins from every win (adds to Lucky Charm: both together +35%) |
+| Warding Sigil | Legendary | 3 | Absorbs the first hit taken each raid |
+| Second Wind | Legendary | 3 | Adds one extra jump in the air (WPN-06) |
+| Spectral Familiar | Legendary | 3 | A companion that orbits you and fires at the boss for you (WPN-07) |
+| Titan Heart | Legendary | 3 | +2 max hearts (adds to Vital Core) |
 
 | ID | Requirement | Status |
 |----|-------------|--------|
@@ -243,20 +255,20 @@ Frame counts are the durations of each animation state (60 frames = 1 second).
 | SHP-03 | Each crate has an **Odds** button showing every item's exact percentage, grouped by rarity with rarity totals; each crate's odds sum to 100%. | Done |
 | SHP-04 | Opening a crate deducts the price, plays an animation (shake, lid pops, flash), then reveals the item with a rarity banner and confetti that scales with rarity. Insufficient coins shows a message and does nothing. | Done |
 | SHP-05 | **Duplicates convert to coins:** Common 10, Uncommon 25, Rare 60, Epic 150, Legendary 350. | Done |
-| SHP-06 | **My Items** shows a 3-row loadout (Player skin, Slot 1: Weapon, Slot 2: Utility) with an animated preview (the equipped sword swinging), filters (All / Player Skins / Weapons / Utility), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, each card's blurb, and an Equip button per owned item. | Done |
-| SHP-07 | One player skin and one weapon (a sword) are always equipped; the utility slot is optional and can be unequipped by clicking it again. Only owned items can be equipped; the default skin and sword are always owned. | Done |
-| SHP-08 | Equipped items are used in every raid and shown to all players (skin, sword look, utility effect). | Done |
-| SHP-09 | Skins are cosmetic only - no stat effects. Utility items are the exception (WPN-03): they have a small real effect, but which one is purely a player choice, not tied to a skin or weapon. | Done |
+| SHP-06 | **My Items** shows a 3-row loadout (Player skin, Slot 1: Weapon, Slot 2: Charms (3 slots, 5 charm points)) with an animated preview (the equipped sword swinging), filters (All / Player Skins / Weapons / Charms), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, each card's blurb, and an Equip button per owned item. | Done |
+| SHP-07 | One player skin and one weapon (a sword) are always equipped; the charm area is optional - up to three charms within 5 charm points (WPN-13), each taken off by clicking it again. Only owned items can be equipped; the default skin and sword are always owned. | Done |
+| SHP-08 | Equipped items are used in every raid and shown to all players (skin, sword look, charm effects). | Done |
+| SHP-09 | Skins are cosmetic only - no stat effects. Charms are the exception (WPN-03): they have a small real effect, but which one is purely a player choice, not tied to a skin or weapon. | Done |
 
 Crates:
 
 | Crate | Price | Pool | Rarity weights |
 |-------|-------|------|----------------|
-| Starter Crate | 100 | Skins, swords and utility items (24) | Common 64, Uncommon 27, Rare 8, Epic 1 |
+| Starter Crate | 100 | Skins, swords and charms (33) | Common 64, Uncommon 27, Rare 8, Epic 1 |
 | Hero Crate | 250 | Player skins only (10) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Arsenal Crate | 250 | Swords and charms (13) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
+| Arsenal Crate | 250 | Swords and charms (21) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
 | Cosmic Crate | 400 | Items tagged "cosmic" (4): Astronaut, Galaxy Walker, Voidbone Fang, Dawnbreaker | Rare 60, Epic 32, Legendary 8 |
-| Legend Crate | 700 | Skins, swords and utility items (17) | Rare 46, Epic 39, Legendary 15 |
+| Legend Crate | 700 | Skins, swords and charms (22) | Rare 46, Epic 39, Legendary 15 |
 
 ### 10.3 Items
 
@@ -285,9 +297,9 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | Firestore `publicSets/<id>` | Community question sets (`ownerId`, `name`, `questions`, ...). |
 | RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `raidStart`, `players`. |
 | RTDB `bossRaid/<code>/gameState` | Host-published boss, projectiles, hazards, slam effects, `gameOver`, `victory`. |
-| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a sword id), utility, `wardUsed`). |
+| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a sword id), utility (comma-separated worn charm ids), `wardUsed`). |
 | RTDB `bossRaid/<code>/presence`, `mathHits` | Heartbeats and math answers (math off). Melee hits resolve straight from synced player state (WPN-02), so there is no shot relay. |
-| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility), `stats`. |
+| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility = comma-separated worn charm ids), `stats`. |
 
 | ID | Requirement | Status |
 |----|-------------|--------|
@@ -365,5 +377,7 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-10 | A little more jump height (RAI-17): launch speed -7.7 (was -7), so a tap rises about 120 px (was 100) and a held jump about 170 px (was 145). Gravity unchanged. |
 | 2026-10 | Parry and pogo now only work on the **large** boss shots (WPN-11, WPN-08): candy, embers and bubbles, which are drawn with a white ring; small shots and shockwaves must be dodged. A downward air-swing can also bounce off a large shot. |
 | 2026-10 | **Better boss warnings and new moves** (BOS-40, BOS-41, BOS-42, BOS-45): every floor strike now uses one clear, flashing hit-width marker; Bramblehide's thorns warn for 60 frames (was 32) with a lock-on ring and rumbling tips, and its charge is marked, has a longer windup and runs about half as fast; the Griffon's wind dive now hovers high looking straight down and tracks its target for 2.5 s before locking on and diving. New moves: Colossus boulder hurl (large, parryable) and seismic march (phase 2+); Griffon strafing run and feather rain (phase 2+). |
+| 2026-10 | **Ten new charms and a charm loadout** (WPN-03, WPN-13, WPN-14): charms now cost 1-3 charm points; wear up to three at once as long as their points add up to 5 or less. New charms: Quick Hands, Long Stride, Pogo Spring, Deflector, Whetstone, Light Step, Opportunist, Thick Skin, Golden Idol and Titan Heart, each with its own animation (23 charms in all; crate pools grew to Starter 33, Arsenal 21, Legend 22). |
+
 
 
