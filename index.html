@@ -5560,11 +5560,6 @@ const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
 const RAID_SWORD_RANGE_X = 130;
 const RAID_SWORD_RANGE_Y = 85; // matches the compressed slash below: R * sin(span) * RAID_SWORD_SLASH_SQUASH
-// Up/down swings (WPN-05) are narrower and reach only in their own direction, instead of the
-// side swing's box centered symmetrically on the player.
-const RAID_SWORD_UP_HALF_X = 70;
-const RAID_SWORD_UP_REACH = 90; // up/down swings are compressed vertically like the side swing: low...
-const RAID_SWORD_UPDOWN_HALF_X = 140; // ...and wide, spanning the whole low arc
 // The blade is only actually "out" for a window in the middle of the swing (matches where the
 // crescent trail is visibly drawn) - this is when a hit can land, not the whole 14 frames.
 const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
@@ -5622,18 +5617,16 @@ function raidSwordHitbox(p) {
   const dir = p.swingDir || 'side';
   const cx = raidPx(p);
   const mult = raidAttackRangeMult(p.utility); // Long Reach (WPN-03)
-  if (dir === 'up') {
-    const reach = RAID_SWORD_UP_REACH * mult;
-    return { cx, cy: p.y - reach / 2, hw: RAID_SWORD_UPDOWN_HALF_X * mult, hh: reach / 2 };
-  }
-  if (dir === 'down') {
-    const reach = RAID_SWORD_UP_REACH * mult;
-    return { cx, cy: p.y + 24 + reach / 2, hw: RAID_SWORD_UPDOWN_HALF_X * mult, hh: reach / 2 };
-  }
-  if (dir === 'left' || dir === 'right') {
+  // The four cardinal swings are one shape turned to face each way, so the player always has the
+  // same reach: RAID_SWORD_RANGE_X out from the body along the swing, RAID_SWORD_RANGE_Y either
+  // side of it (the same height as the side swing's own box).
+  if (dir === 'up' || dir === 'down' || dir === 'left' || dir === 'right') {
+    const reach = RAID_SWORD_RANGE_X * mult, half = RAID_SWORD_RANGE_Y * mult;
+    const mid = p.y + 24; // the body's vertical centre, where every swing starts from
+    if (dir === 'up') return { cx, cy: mid - reach / 2, hw: half, hh: reach / 2 };
+    if (dir === 'down') return { cx, cy: mid + reach / 2, hw: half, hh: reach / 2 };
     const sgn = dir === 'left' ? -1 : 1;
-    const reach = RAID_SWORD_RANGE_X * mult;
-    return { cx: cx + sgn * reach / 2, cy: p.y + 24, hw: reach / 2, hh: RAID_SWORD_UP_HALF_X * mult };
+    return { cx: cx + sgn * reach / 2, cy: mid, hw: reach / 2, hh: half };
   }
   if (RAID_SWORD_DIR_VECTORS[dir]) { // the 4 diagonals
     const v = RAID_SWORD_DIR_VECTORS[dir];
@@ -9395,12 +9388,11 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
       const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
       const R = RAID_SWORD_SLASH_R * slashScale;
       const span = 1.4; // a forward arc of about 160 degrees - it does not surround the player
-      // Up and down are compressed vertically in screen space, exactly like the side swing - a wide,
-      // low dome over (or dish under) the player - so they use world angles and no rotation. Every
-      // other direction rotates the frame to its own direction and squashes across it.
-      const flat = dir === 'up' || dir === 'down';
-      const frameAng = flat ? 0 : phi;
-      let aStart = flat ? phi - span : -span, aEnd = flat ? phi + span : span;
+      // Every direction is the same slash turned to face it: the frame is rotated to the swing's
+      // direction and the arc squashed across it, so the player always has the same reach and the
+      // side slash simply points up or down for those swings.
+      const frameAng = phi;
+      let aStart = -span, aEnd = span;
       // start at whichever end is higher on screen, so the swing always goes top to bottom
       if (Math.sin(frameAng + aStart) - Math.sin(frameAng + aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
       // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing

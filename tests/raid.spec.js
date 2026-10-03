@@ -800,7 +800,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
       // far enough that the wider-but-shallower side box does not): an up-swing should connect,
       // a plain side swing should not.
-      raidG.boss.x = 500; raidG.boss.y = 325;
+      raidG.boss.x = 500; raidG.boss.y = 310;
       T.place(500);
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidLocal.swordCooldown = 0;
@@ -890,7 +890,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const pRight = { x: 300, y: 452, facing: 1, swingDir: 'right', utility: '' };
       const boxRight = raidSwordHitbox(pRight);
       out.rightOffsetPositive = boxRight.cx > raidPx(pRight);
-      out.rightNarrowVertically = boxRight.hh === RAID_SWORD_UP_HALF_X;
+      out.rightNarrowVertically = boxRight.hh === RAID_SWORD_RANGE_Y; // same height as the side swing
 
       const pDiag = { x: 300, y: 452, facing: 1, swingDir: 'downright', utility: '' };
       const boxDiag = raidSwordHitbox(pDiag);
@@ -1014,10 +1014,12 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         return n;
       };
       const widthNearTop = widthAt(0.35), widthAtApex = widthAt(0.5);
-      // up / down get the same vertical compression: a wide, low arc over (or under) the player
+      // up / down are the side slash rotated a quarter turn: same shape, same reach
       const upPt = (dir, swing, u, rad) => {
-        const phi = dir === 'up' ? -Math.PI / 2 : Math.PI / 2, ang = phi - 1.4 + u * 2.8;
-        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH), 'sword_training', dir);
+        const ang = -1.4 + u * 2.8;
+        const lx = R * rad * Math.cos(ang), ly = R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH; // the side arc, before rotating
+        const [wx, wy] = dir === 'up' ? [ly, -lx] : [-ly, lx]; // rotated a quarter turn up / down
+        return alphaAt(1, swing, 1, Math.round(wx), Math.round(wy), 'sword_training', dir);
       };
       const upApex = upPt('up', 0.45, 0.5, 0.9), upWide = upPt('up', 0.45, 0.7, 0.96), upWideEarly = upPt('up', 0.2, 0.7, 0.96);
       const downApex = upPt('down', 0.45, 0.5, 0.9);
@@ -1027,13 +1029,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     });
     expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
     expect(r.reachRight).toBeGreaterThanOrEqual(120);
-    expect(r.upHh * 2, 'the up/down swings are compressed vertically like the side swing').toBeLessThanOrEqual(r.slashHeight);
-    expect(r.downHh * 2).toBeLessThanOrEqual(r.slashHeight);
-    expect(r.upHw, 'and wide instead, spanning the whole low arc').toBeGreaterThanOrEqual(120);
-    expect(r.downHw).toBeGreaterThanOrEqual(120);
-    expect(r.upApex.a, 'the up slash is a low dome over the player').toBeGreaterThan(40);
-    expect(r.downApex.a, 'the down slash is a low dish under the player').toBeGreaterThan(40);
-    expect(r.upWide.a, 'a wide arc, reaching far out to the side').toBeGreaterThan(40);
+    expect(r.upHh * 2, 'up reaches exactly as far as the side swing - the player always has the same reach').toBe(r.reachSide);
+    expect(r.downHh * 2, 'and so does down').toBe(r.reachSide);
+    expect(r.upHw, 'up/down are the side swing turned a quarter - same height becomes their width').toBe(r.sideHh);
+    expect(r.downHw).toBe(r.sideHh);
+    expect(r.upApex.a, 'the up slash is the side slash rotated up: its far point is straight above').toBeGreaterThan(40);
+    expect(r.downApex.a, 'the down slash points straight down').toBeGreaterThan(40);
+    expect(r.upWide.a, 'it has the same arc shape, swept round the head').toBeGreaterThan(40);
     expect(r.upWideEarly.a, 'and it sweeps across rather than appearing all at once').toBe(0);
     expect(r.R, 'the crescent is sized to the reach').toBeGreaterThanOrEqual(120);
     expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
