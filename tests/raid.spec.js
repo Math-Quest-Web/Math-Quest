@@ -390,32 +390,41 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.fullHold, 'but a full jump is still low').toBeLessThan(190);
   });
 
-  test('RAI-18 the boss hit area is sized per boss - the Wyrm is wider than the old fixed 50px box', async ({ page }) => {
+  test('RAI-18 the boss hit area is the boss silhouette itself: shots hit inside it and miss beside it, so the wide Wyrm is hit at its wing where Grinmaw is not', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('wyrm');
-      const out = { table: JSON.parse(JSON.stringify(BOSS_HITBOX)) };
+      const out = {};
+      // a point in the middle of the widest stored rectangle (inside), and one 25 px past the silhouette (outside)
+      // settle the boss into its idle spot, then fire a bolt at (dx, dy) from its centre; the boss then moves a
+      // pixel or two on the same update, so inside points are the middle of the widest rectangle
+      const settle = (type) => { T.prepBoss(type, 1); T.step(1); raidG.boss.animScale = 1; return raidG.boss; };
       const hitAt = (type, dx, dy) => {
-        T.prepBoss(type, 1);
-        const b = raidG.boss;
+        const b = settle(type);
         const hp0 = b.hp;
         raidG.playerProjectiles = [{ x: b.x + dx, y: b.y + dy, vx: 0, vy: 0, life: 50, damage: 3, r: 6 }];
         raidBossUpdate();
         return hp0 - b.hp;
       };
-      out.wyrmWideEdge = hitAt('wyrm', 80, 0); // outside the old fixed box, inside the Wyrm's wider one
-      out.wyrmBeyond = hitAt('wyrm', 140, 0); // outside even the wider box
-      out.grinmawNear = hitAt('grinmaw', 40, 0);
-      out.grinmawBeyond = hitAt('grinmaw', 80, 0); // same spot that hits the wider Wyrm misses the narrower Grinmaw
+      for (const type of ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon']) {
+        const b = settle(type);
+        const rects = raidBossRects(b);
+        const widest = rects.reduce((m, q) => (q[2] - q[0] > m[2] - m[0] ? q : m), rects[0]);
+        const inside = [(widest[0] + widest[2]) / 2 - b.x, (widest[1] + widest[3]) / 2 - b.y];
+        out[type] = { inside: hitAt(type, inside[0], inside[1]), outside: hitAt(type, BOSS_HURT[type].bounds.x1 + 25, 0) };
+      }
+      // the Wyrm's wing tips are far out; the same spot is empty air beside Grinmaw
+      out.wyrmWing = hitAt('wyrm', 90, 20);
+      out.grinmawSameSpot = hitAt('grinmaw', 90, 20);
+      out.bounds = Object.fromEntries(Object.keys(BOSS_HURT).map((t) => [t, BOSS_HURT[t].bounds]));
       return out;
     });
-    expect(r.table).toEqual({
-      grinmaw: { hw: 58, hh: 58 }, warden: { hw: 50, hh: 65 }, wyrm: { hw: 105, hh: 55 }, glutton: { hw: 58, hh: 58 },
-      bramblehide: { hw: 70, hh: 50 }, colossus: { hw: 55, hh: 85 }, griffon: { hw: 95, hh: 60 }
-    });
-    expect(r.wyrmWideEdge).toBe(3);
-    expect(r.wyrmBeyond).toBe(0);
-    expect(r.grinmawNear).toBe(3);
-    expect(r.grinmawBeyond).toBe(0);
+    for (const t of ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon']) {
+      expect(r[t].inside, t + ': a shot inside the silhouette hits').toBe(3);
+      expect(r[t].outside, t + ': a shot beside it misses').toBe(0);
+    }
+    expect(r.wyrmWing, 'the Wyrm is wide enough to be hit at its wing').toBe(3);
+    expect(r.grinmawSameSpot, 'where Grinmaw is not').toBe(0);
+    expect(r.bounds.wyrm.x1 - r.bounds.wyrm.x0, 'the Wyrm is wider than Grinmaw even at 0.75x').toBeGreaterThan(r.bounds.grinmaw.x1 - r.bounds.grinmaw.x0);
   });
 
   test('RAI-19 taking a hit knocks the player back, flashes white and briefly freezes the game (hit-stop)', async ({ page }) => {
@@ -771,10 +780,9 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         }
       };
 
-      // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
-      // far enough that the wider-but-shallower side box does not): an up-swing should connect,
-      // a plain side swing should not.
-      raidG.boss.x = 500; raidG.boss.y = 340;
+      // Grounded, boss directly overhead (its body bottom close enough for the up slash to reach,
+      // far enough that the side slash does not): an up-swing should connect, a plain side swing not.
+      raidG.boss.x = 500; raidG.boss.y = 276; // the body spans y 196..400 (grinmaw, BOSS_HURT)
       T.place(500);
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidLocal.swordCooldown = 0;
@@ -845,6 +853,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         raidResolveSwingDir(Object.assign({ left: false, right: false, up: false, down: false }, held)));
       out.expected = combos.map(([, dir]) => dir);
 
+      const extent = (p, dir, s) => {
+        const poly = raidSlashWorldPoly(Object.assign({}, p, { swingDir: dir }), s);
+        const xs = poly.map((q) => q[0]), ys = poly.map((q) => q[1]);
+        const far = poly.reduce((m, q) => (q[0] > m[0] ? q : m), poly[0]);
+        return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), hand: poly.hand, farRight: far };
+      };
+
       // Absolute, not facing-relative: facing right but holding Left must still aim left.
       raidLocal.gun = 'sword_training';
       raidLocal.facing = 1;
@@ -852,26 +867,21 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.swordCooldown = 0;
       raidSwordSwing();
       out.dirWasLeft = raidLocal.swingDir === 'left';
-      const boxLeft = raidSwordHitbox(raidLocal);
-      out.hitboxLeftOfCenter = boxLeft.cx < raidPx(raidLocal);
-
-      // Same again facing left (mirrored) - the hitbox offset must be identical (still absolute).
+      const cx = raidPx(raidLocal);
+      out.leftOfCentre = extent(raidLocal, raidLocal.swingDir, 0.43).x0 < cx - 60;
+      // Same again facing left (mirrored) - still absolute: it still reaches well to the left.
       raidLocal.facing = -1;
-      const boxLeftMirrored = raidSwordHitbox(raidLocal);
-      out.hitboxUnaffectedByFacing = boxLeftMirrored.cx === boxLeft.cx;
+      out.leftWhenFacingLeft = extent(raidLocal, 'left', 0.43).x0 < cx - 60;
+      raidLocal.facing = 1;
 
-      // Direct raidSwordHitbox checks for 'right' and one diagonal.
-      const pRight = { x: 300, y: 452, facing: 1, swingDir: 'right', utility: '' };
-      const boxRight = raidSwordHitbox(pRight);
-      out.rightOffsetPositive = boxRight.cx > raidPx(pRight);
-      out.rightNarrowVertically = boxRight.hh === RAID_SWORD_RANGE_Y; // same height as the side swing
+      // 'right' reaches forward along the hand's own height; a diagonal reaches right and down.
+      const right = extent(raidLocal, 'right', 0.43);
+      out.rightReaches = right.x1 > cx + 60;
+      out.rightOnHandLine = Math.abs(right.farRight[1] - right.hand[1]) < 25; // within the slash's own height (the body leans a little as it swings)
+      const dr = extent(raidLocal, 'downright', 0.43);
+      out.diagRightAndDown = dr.x1 > cx + 30 && dr.y1 > raidLocal.y + 24 + 40;
 
-      const pDiag = { x: 300, y: 452, facing: 1, swingDir: 'downright', utility: '' };
-      const boxDiag = raidSwordHitbox(pDiag);
-      out.diagOffsetRightAndDown = boxDiag.cx > raidPx(pDiag) && boxDiag.cy > pDiag.y + 24;
-
-      // Connect/miss: place the boss diagonally down-right of the player, downright swing connects,
-      // a plain up swing does not.
+      // Connect/miss: boss on the downright slash, downright swing connects, a plain up swing does not.
       const stepSwing = () => {
         for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
           if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
@@ -879,8 +889,9 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
           raidCheckSwordSwings(raidG.boss);
         }
       };
-      raidG.boss.x = 500 + RAID_SWORD_DIAG_REACH; raidG.boss.y = 452 + RAID_SWORD_DIAG_REACH;
       T.place(500);
+      const spot = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'downright' }));
+      raidG.boss.x = spot.x; raidG.boss.y = spot.y;
       raidLocal.input = { left: false, right: true, up: false, down: true, space: false };
       raidLocal.swordCooldown = 0;
       let hpBefore = raidG.boss.hp;
@@ -892,7 +903,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
 
       raidLocal.swordCooldown = 0;
       raidLocal.input.up = true;
-      raidG.boss.y += 60; // clearly below the player, well outside an upward box
+      raidG.boss.y += 120; // clearly below the player, well outside an upward slash
       hpBefore = raidG.boss.hp;
       raidSwordSwing();
       raidLocal.input.up = false;
@@ -903,14 +914,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     });
     expect(r.resolved).toEqual(r.expected);
     expect(r.dirWasLeft).toBe(true);
-    expect(r.hitboxLeftOfCenter, 'holding Left aims left regardless of facing').toBe(true);
-    expect(r.hitboxUnaffectedByFacing, 'the hitbox is absolute, not mirrored by facing').toBe(true);
-    expect(r.rightOffsetPositive).toBe(true);
-    expect(r.rightNarrowVertically).toBe(true);
-    expect(r.diagOffsetRightAndDown).toBe(true);
+    expect(r.leftOfCentre, 'holding Left aims left regardless of facing').toBe(true);
+    expect(r.leftWhenFacingLeft, 'and it is the same when facing left: absolute, not mirrored by facing').toBe(true);
+    expect(r.rightReaches).toBe(true);
+    expect(r.rightOnHandLine, 'the right slash points along the hand\'s own height').toBe(true);
+    expect(r.diagRightAndDown).toBe(true);
     expect(r.dirWasDownright).toBe(true);
     expect(r.downrightConnects, 'a downright swing reaches a target diagonally down-right').toBe(true);
-    expect(r.upMissesDiagonalTarget, 'a plain up swing does not reach a diagonal target').toBe(true);
+    expect(r.upMissesDiagonalTarget, 'a plain up swing does not reach a target below').toBe(true);
   });
 
   test('WPN-04 the sword swing\'s slash trail is white regardless of the blade\'s own color', async ({ page }) => {
@@ -931,109 +942,58 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.whitePixel, 'the slash trail renders a bright white stroke').toBe(true);
   });
 
-  test('WPN-10 the swing reaches far: a wide hitbox and a big white crescent that covers it', async ({ page }) => {
+  test('WPN-10 the swing reaches far: a big white crescent in front of the hand, swept top to bottom, with the same reach in every direction', async ({ page }) => {
     const r = await page.evaluate(() => {
       const base = { x: 300, y: 452, facing: 1, utility: '' };
-      const side = raidSwordHitbox(Object.assign({ swingDir: 'side' }, base));
-      const right = raidSwordHitbox(Object.assign({ swingDir: 'right' }, base));
-      const up = raidSwordHitbox(Object.assign({ swingDir: 'up' }, base));
       const cx = raidPx(base);
-      const reachSide = (side.cx + side.hw) - cx;
-      const reachRight = (right.cx + right.hw) - cx;
-      const reachUp = (base.y - (up.cy - up.hh)); // how far above the player's top edge the up box extends
-      const down = raidSwordHitbox(Object.assign({ swingDir: 'down' }, base));
-
-      // Draws the swing at its peak and returns the pixel alpha at (dx, dy) from the hand.
-      const alphaAt = (facing, swing, slashScale, dx, dy, id, dir) => {
+      const ext = (dir, s, over) => {
+        const poly = raidSlashWorldPoly(Object.assign({ swingDir: dir }, base, over || {}), s);
+        const xs = poly.map((q) => q[0]), ys = poly.map((q) => q[1]);
+        const cyAvg = ys.reduce((a, b) => a + b, 0) / ys.length;
+        return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), hand: poly.hand, R: poly.R, cyAvg };
+      };
+      const side = ext('side', 0.45), right = ext('right', 0.45), left = ext('left', 0.45), up = ext('up', 0.45), down = ext('down', 0.45);
+      const flipped = ext('side', 0.45, { facing: -1 });
+      const early = ext('side', 0.2), late = ext('side', 0.65);
+      const out = {
+        reachSide: side.x1 - side.hand[0], reachFromBody: side.x1 - cx, sameAsRight: Math.abs(side.x1 - right.x1) < 0.01,
+        reachLeft: left.hand[0] - left.x0, reachUp: up.hand[1] - up.y0, reachDown: down.y1 - down.hand[1],
+        R: side.R, height: side.y1 - side.y0, behindHand: Math.max(0, side.hand[0] - side.x0),
+        mirrored: flipped.hand[0] - flipped.x0, earlyY: early.cyAvg, lateY: late.cyAvg,
+        notYet: raidSlashWorldPoly(Object.assign({ swingDir: 'side' }, base), 0), faded: raidSlashWorldPoly(Object.assign({ swingDir: 'side' }, base), 0.95),
+        squash: RAID_SWORD_SLASH_SQUASH
+      };
+      // The live weapon no longer draws the crescent itself (drawPlayerCuphead fills it from the polygon):
+      // the blade rests at its held angle, the old small trail arcs are gone, the shop preview keeps its own.
+      const alphaAt = (swing, slashScale, dx, dy, id) => {
         const c = document.createElement('canvas'); c.width = 500; c.height = 500;
         const ctx = c.getContext('2d');
-        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, swing, 5, dir || 'side', slashScale);
-        const px = ctx.getImageData(250 + dx, 250 + dy, 1, 1).data;
-        return { a: px[3], rgb: [px[0], px[1], px[2]] };
+        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, 1, swing, 5, 'side', slashScale);
+        return ctx.getImageData(250 + dx, 250 + dy, 1, 1).data[3];
       };
-      const R = RAID_SWORD_SLASH_R;
-      const far = alphaAt(1, 0.45, 1, Math.round(R * 0.9), 0);       // inside the big crescent, forward
-      const farMirror = alphaAt(-1, 0.45, 1, -Math.round(R * 0.9), 0); // mirrored for a left-facing player
-      const off = alphaAt(1, 0.45, 0, Math.round(R * 0.9), 0);         // crescent off (shop preview, ghosts)
-      const idle = alphaAt(1, 0, 1, Math.round(R * 0.9), 0);           // no swing, nothing drawn
-      const behind = alphaAt(1, 0.45, 1, -Math.round(R * 0.9), 0);     // the crescent is in front, not behind
-      // The old small swing is gone from the live swing: where the swinging blade and its little
-      // trail arcs used to be (forward of the hand, ~42px out) is empty now, and the blade just
-      // rests at its held angle (up and back from the hand) instead of sweeping.
-      const oldTrailSpot = alphaAt(1, 0.45, 1, 40, -11, 'sword_training');
-      const restingBlade = alphaAt(1, 0.45, 1, -19, -23, 'sword_training');
-      const previewTrailSpot = alphaAt(1, 0.45, undefined, 40, -11, 'sword_training'); // the shop preview (no slashScale) keeps its small swing
-      // The slash is a forward arc (about 160 degrees) that sweeps from the TOP to the BOTTOM as
-      // the swing plays, and does not surround the player. ptAt samples a point at fraction u along
-      // the arc (0 = top end, 1 = bottom end) at a fraction of the radius.
-      const ptAt = (swing, u, rad) => {
-        const ang = -1.4 + u * 2.8;
-        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH));
-      };
-      const topEarly = ptAt(0.2, 0.1, 0.9);
-      const bottomEarly = ptAt(0.2, 0.65, 0.95);
-      const topLate = ptAt(0.6, 0.1, 0.9);
-      const bottomLate = ptAt(0.6, 0.65, 0.95);
-      const backAng = (150 * Math.PI) / 180; // well behind the swing, round toward the player
-      const surrounds = alphaAt(1, 0.45, 1, Math.round(R * 0.9 * Math.cos(backAng)), Math.round(R * 0.9 * Math.sin(backAng)));
-      // thickness along the ray through the arc at fraction u (swing 0.45: both u are drawn)
-      const widthAt = (u) => {
-        const c = document.createElement('canvas'); c.width = 500; c.height = 500;
-        const ctx = c.getContext('2d');
-        mqDrawWeapon(ctx, 'sword_frost', 250, 250, 1, 0.45, 5, 'side', 1);
-        const ang = -1.4 + u * 2.8; let n = 0;
-        for (let rr = R * 0.4; rr < R * 1.1; rr += 1) {
-          const px = ctx.getImageData(250 + Math.round(rr * Math.cos(ang)), 250 + Math.round(rr * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH), 1, 1).data;
-          if (px[3] > 25) n++;
-        }
-        return n;
-      };
-      const widthNearTop = widthAt(0.35), widthAtApex = widthAt(0.5);
-      // up / down are the side slash rotated a quarter turn: same shape, same reach
-      const upPt = (dir, swing, u, rad) => {
-        const ang = -1.4 + u * 2.8;
-        const lx = R * rad * Math.cos(ang), ly = R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH; // the side arc, before rotating
-        const [wx, wy] = dir === 'up' ? [ly, -lx] : [-ly, lx]; // rotated a quarter turn up / down
-        return alphaAt(1, swing, 1, Math.round(wx), Math.round(wy), 'sword_training', dir);
-      };
-      const upApex = upPt('up', 0.45, 0.5, 0.9), upWide = upPt('up', 0.45, 0.7, 0.96), upWideEarly = upPt('up', 0.2, 0.7, 0.96);
-      const downApex = upPt('down', 0.45, 0.5, 0.9);
-      // compressed vertically: the top and bottom ends sit close together (well inside the radius)
-      const slashHeight = 2 * R * Math.sin(1.4) * RAID_SWORD_SLASH_SQUASH;
-      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex, slashHeight, sideHh: side.hh, upHw: up.hw, upHh: up.hh, downHw: down.hw, downHh: down.hh, upApex, upWide, upWideEarly, downApex, squash: RAID_SWORD_SLASH_SQUASH };
+      out.oldTrailSpot = alphaAt(0.45, 1, 40, -11, 'sword_training');
+      out.restingBlade = alphaAt(0.45, 1, -19, -23, 'sword_training');
+      out.previewTrailSpot = alphaAt(0.45, undefined, 40, -11, 'sword_training');
+      return out;
     });
-    expect(r.reachSide, 'side swing reach was lessened from the previous 130px').toBeLessThan(130);
-    expect(r.reachSide).toBeGreaterThanOrEqual(80);
-    expect(r.reachRight).toBe(r.reachSide);
-    expect(r.upHh * 2, 'up reaches exactly as far as the side swing - the player always has the same reach').toBe(r.reachSide);
-    expect(r.downHh * 2, 'and so does down').toBe(r.reachSide);
-    expect(r.upHw, 'up/down are the side swing turned a quarter - same height becomes their width').toBe(r.sideHh);
-    expect(r.downHw).toBe(r.sideHh);
-    expect(r.upApex.a, 'the up slash is the side slash rotated up: its far point is straight above').toBeGreaterThan(40);
-    expect(r.downApex.a, 'the down slash points straight down').toBeGreaterThan(40);
-    expect(r.upWide.a, 'it has the same arc shape, swept round the head').toBeGreaterThan(40);
-    expect(r.upWideEarly.a, 'and it sweeps across rather than appearing all at once').toBe(0);
-    expect(r.R, 'the crescent is sized to the reach: a little past it, and smaller than before').toBeGreaterThanOrEqual(r.reachSide);
+    expect(r.reachFromBody, 'it reaches about 125 px out from the body, as drawn').toBeGreaterThan(100);
+    expect(r.reachFromBody).toBeLessThan(140);
+    expect(r.sameAsRight).toBe(true);
+    expect(Math.abs(r.reachUp - r.reachSide), 'up and down are the side slash turned a quarter: the same reach').toBeLessThan(10);
+    expect(Math.abs(r.reachDown - r.reachSide)).toBeLessThan(10);
+    expect(Math.abs(r.reachLeft - r.reachSide), 'and so is left').toBeLessThan(2);
+    expect(r.R, 'the crescent radius is the scaled slash radius').toBeGreaterThan(90);
     expect(r.R).toBeLessThan(150);
-    expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
-    expect(Math.min(...r.far.rgb), 'and it is white, not the blade\'s own colour').toBeGreaterThan(200);
-    expect(r.farMirror.a, 'mirrored for a left-facing player').toBeGreaterThan(60);
-    expect(r.off.a, 'no crescent when slashScale is 0 (dash afterimages)').toBe(0);
-    expect(r.idle.a, 'nothing when not swinging').toBe(0);
-    expect(r.behind.a, 'the crescent sweeps in front of the player').toBe(0);
-    expect(r.oldTrailSpot.a, 'the old small trail arcs are gone from the live swing').toBe(0);
-    expect(r.restingBlade.a, 'the blade rests at its held angle instead of swinging').toBeGreaterThan(100);
-    expect(r.previewTrailSpot.a, 'the shop preview still draws its own small swing').toBeGreaterThan(0);
-    expect(r.topEarly.a, 'the swing starts at the top of the arc').toBeGreaterThan(40);
-    expect(r.bottomEarly.a, 'and has not reached the bottom yet').toBe(0);
-    expect(r.bottomLate.a, 'it sweeps down to the bottom').toBeGreaterThan(40);
-    expect(r.topLate.a, 'and the top has faded away by then').toBe(0);
-    expect(r.surrounds.a, 'the slash does not wrap round behind the player').toBe(0);
-    expect(r.widthAtApex, 'the slash is narrower at its farthest point than near its top').toBeLessThan(r.widthNearTop);
-    expect(r.widthAtApex).toBeGreaterThan(5);
-    expect(r.squash, 'the arc is compressed vertically so its top and bottom sit closer together').toBeLessThan(0.7);
-    expect(r.slashHeight, 'the whole slash is much shorter than it is far-reaching').toBeLessThan(r.R * 1.2);
-    expect(r.sideHh, 'the side hitbox is no taller than the slash it covers').toBeLessThanOrEqual(r.slashHeight / 2 + 10);
+    expect(r.height, 'the arc is compressed across its direction: shorter than it is far-reaching').toBeLessThan(r.R * 1.2);
+    expect(r.squash).toBeLessThan(0.7);
+    expect(r.behindHand, 'the slash does not wrap round behind the hand').toBeLessThan(2);
+    expect(r.mirrored, 'mirrored for a left-facing player').toBeGreaterThan(90);
+    expect(r.lateY, 'it sweeps from the top of the arc to the bottom').toBeGreaterThan(r.earlyY + 10);
+    expect(r.notYet, 'nothing yet before the swing opens up').toBeNull();
+    expect(r.faded, 'and nothing once it has faded away').toBeNull();
+    expect(r.oldTrailSpot, 'the old small trail arcs are gone from the live swing').toBe(0);
+    expect(r.restingBlade, 'the blade rests at its held angle instead of swinging').toBeGreaterThan(100);
+    expect(r.previewTrailSpot, 'the shop preview still draws its own small swing').toBeGreaterThan(0);
   });
 
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
@@ -1099,8 +1059,8 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
 
       raidLocal.utility = 'util_range';
       out.attackRangeMult = raidAttackRangeMult(); // 1.25
-      out.swordHitbox = raidSwordHitbox({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: 'util_range' });
-      out.expectedSwordHitbox = { cx: 318, cy: 476, hw: RAID_SWORD_RANGE_X * 1.25, hh: RAID_SWORD_RANGE_Y * 1.25 }; // Long Reach: +25% on the base box
+      const reachOf = (u) => { const poly = raidSlashWorldPoly({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: u }, 0.43); return poly.reduce((m, q) => Math.max(m, q[0]), -1e9) - poly.hand[0]; };
+      out.reachRatio = reachOf('util_range') / reachOf(''); // Long Reach: +25% on the drawn slash and so on its hit area
 
       raidLocal.utility = 'util_dashi';
       out.dashIframes = raidDashInvincibleFrames(); // round(14 * 1.5)
@@ -1120,7 +1080,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.shieldDuration).toBe(117);
     expect(r.shieldRegen).toBe(280);
     expect(r.attackRangeMult).toBe(1.25);
-    expect(r.swordHitbox).toEqual(r.expectedSwordHitbox);
+    expect(r.reachRatio, 'Long Reach grows the slash (and so the hit area) by 25%').toBeCloseTo(1.25, 2);
     expect(r.dashIframes).toBe(21);
     // defaults (no utility equipped) are unaffected
     expect(r.defaultSpeed).toBe(7);
@@ -1129,6 +1089,130 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.defaultShieldRegen).toBe(420);
     expect(r.defaultRangeMult).toBe(1);
     expect(r.defaultDashIframes).toBe(14);
+  });
+
+  test('WPN-13 several worn charms all apply at once, for every player (host-side effects read the synced list)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      raidLocal.utility = 'util_boots,util_heart,util_boots2,util_iron';
+      out.dash = raidDashCooldownFrames(); out.hearts = raidMaxHealthForLoadout(); out.speed = raidMaxSpeed(); out.knock = raidKnockbackMult();
+      // an explicit list (a teammate's synced charms) is honoured by the per-player readers
+      out.range = raidAttackRangeMult('util_boots,util_range');
+      const reachOf = (u) => { const poly = raidSlashWorldPoly({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: u }, 0.43); return poly.reduce((m, q) => Math.max(m, q[0]), -1e9) - poly.hand[0]; };
+      out.rangeBox = reachOf('util_coin,util_range') / reachOf('');
+      out.noRange = raidAttackRangeMult('util_boots,util_coin');
+      // Warding Sigil among other charms still absorbs the first hit
+      raidLocal.utility = 'util_boots,util_ward';
+      const p = Object.assign({}, T.me(), { utility: 'util_boots,util_ward', wardUsed: false, shield: false, invincible: 0 });
+      raidDamagePlayer(raidMyId, p, 1);
+      out.warded = p.wardUsed === true && p.health === 5;
+      // the Familiar is spawned for a player wearing it alongside others
+      raidG.players[raidMyId].utility = 'util_boots,util_minion';
+      raidG.minions = []; raidUpdateMinions(raidG.boss);
+      out.minions = raidG.minions.length;
+      raidLocal.utility = null;
+      return out;
+    });
+    expect(r.dash).toBe(135);
+    expect(r.hearts).toBe(6);
+    expect(r.speed).toBeCloseTo(8.05, 5);
+    expect(r.knock).toBe(0.5);
+    expect(r.range).toBe(1.25);
+    expect(r.rangeBox, 'Long Reach among other charms still grows the slash').toBeCloseTo(1.25, 2);
+    expect(r.noRange).toBe(1);
+    expect(r.warded).toBe(true);
+    expect(r.minions).toBe(1);
+  });
+
+  test('WPN-14 the ten new charms each apply their effect (and nothing changes without them)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      const none = () => { raidLocal.utility = ''; };
+      // Quick Hands: shorter sword cooldown
+      none(); raidLocal.swordCooldown = 0; raidSwordSwing(); out.cdBase = raidLocal.swordCooldown;
+      raidLocal.utility = 'util_hands'; raidLocal.swordCooldown = 0; raidSwordSwing(); out.cdHands = raidLocal.swordCooldown;
+      // Whetstone: more sword damage; Opportunist: more damage while the boss is stunned
+      const swordHit = (utility, exposed) => {
+        T.prepBoss('grinmaw', 1); raidG.boss.x = 500; raidG.boss.y = 300; raidG.boss.exposed = exposed;
+        T.place(500 - 50, 300 - 24, { utility, swingTimer: RAID_SWORD_HIT_WINDOW_START, swingDir: 'right', facing: 1 });
+        raidSendLocalState();
+        raidG.players[raidMyId].swingTimer = RAID_SWORD_HIT_WINDOW_START; raidG.players[raidMyId].swingDir = 'right'; raidG.players[raidMyId].utility = utility;
+        raidSwingHitState = {};
+        const hp0 = raidG.boss.hp;
+        raidCheckSwordSwings(raidG.boss);
+        return hp0 - raidG.boss.hp;
+      };
+      out.hitBase = swordHit('', 0); out.hitWhet = swordHit('util_whet', 0);
+      out.stunBase = swordHit('', 100); out.stunHunter = swordHit('util_hunter', 100);
+      out.stunBoth = swordHit('util_whet,util_hunter', 100);
+      // Pogo Spring: a higher bounce
+      none(); out.pogoBase = raidPogoVy(); raidLocal.utility = 'util_spring'; out.pogoSpring = raidPogoVy();
+      // Light Step: gravity is lighter while falling (and unchanged while rising)
+      const fall = (utility) => {
+        raidLocal.utility = utility; raidLocal.dashTimer = 0; raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false };
+        T.place(500, 100); raidLocal.onGround = false; raidLocal.vy = 0; raidLocal.jumpBoosting = false;
+        for (let i = 0; i < 20; i++) raidUpdateLocal();
+        return raidLocal.y;
+      };
+      out.fallBase = fall(''); out.fallLight = fall('util_cloud');
+      raidLocal.utility = 'util_cloud'; T.place(500, 300); raidLocal.onGround = false; raidLocal.vy = -5; raidUpdateLocal();
+      out.riseGravity = raidLocal.vy - (-5); // still RAID_GRAVITY going up
+      // Long Stride: a longer dash
+      none(); raidLocal.dashCooldown = 0; raidTryDash(); out.dashBase = raidLocal.dashTimer;
+      raidLocal.utility = 'util_stride'; raidLocal.dashCooldown = 0; raidLocal.dashTimer = 0; raidTryDash(); out.dashStride = raidLocal.dashTimer;
+      // Thick Skin: longer invincibility after being hit
+      const hurtFrames = (utility) => { const p = Object.assign({}, T.me(), { utility, wardUsed: true, shield: false, invincible: 0, health: 5 }); raidDamagePlayer(raidMyId, p, 1); return p.invincible; };
+      out.hurtBase = hurtFrames(''); out.hurtHide = hurtFrames('util_hide');
+      // Golden Idol: +25% coins (adds to Lucky Charm's +10%)
+      const coins = (utility) => { mqProfile.equipped.utility = utility; currentDifficulty = 'normal'; raidLocal.health = raidLocal.maxHealth = 5; return mqAwardRaidVictory().coins; };
+      out.coinBase = coins(''); out.coinIdol = coins('util_idol'); out.coinBoth = coins('util_coin,util_idol');
+      // Titan Heart: +2 hearts, stacks with Vital Core
+      raidLocal.utility = 'util_titan'; out.titan = raidMaxHealthForLoadout();
+      raidLocal.utility = 'util_titan,util_heart'; out.titanHeart = raidMaxHealthForLoadout();
+      // Deflector: parries reach further
+      const tipOf = (p) => { let tip = null; for (let t = 12; t >= 3; t--) { const poly = raidSlashWorldPoly(p, raidSwingProgress(t)); if (poly) poly.forEach((q) => { if (!tip || q[0] > tip[0]) tip = q; }); } return tip; };
+      const parried = (utility, gap) => {
+        T.prepBoss('grinmaw', 1); raidG.boss.x = 900; raidG.boss.y = 300;
+        T.place(300, undefined, { swingTimer: 0, swingDir: 'right', facing: 1, utility });
+        const me = raidG.players[raidMyId];
+        const tip = tipOf(Object.assign({}, me, { swingDir: 'right', facing: 1, utility })); // the farthest the plain slash ever reaches
+        raidG.projectiles = [{ x: tip[0] + 12 + gap, y: tip[1], vx: 0, vy: 0, r: 12, life: 50, isWarning: false, isBossProjectile: true, kind: 'candy' }];
+        raidParryState = {};
+        for (let t = RAID_SWORD_SWING_FRAMES; t >= 0; t--) { // the host's parry check, one frame at a time through the swing
+          Object.assign(raidG.players[raidMyId], { swingTimer: t, swingDir: 'right', facing: 1, utility });
+          raidParryProjectiles();
+        }
+        return raidG.projectiles.length === 0;
+      };
+      out.parryBase = parried('', 14); out.parryDeflect = parried('util_deflect', 14); out.parryFar = parried('util_deflect', 90);
+      out.parryTouching = parried('', -10);
+      none();
+      return out;
+    });
+    expect(r.cdBase).toBe(26);
+    expect(r.cdHands, 'Quick Hands: cooldown -25%').toBe(Math.round(26 * 0.75));
+    expect(r.hitBase).toBe(4);
+    expect(r.hitWhet, 'Whetstone: +25% sword damage').toBe(5);
+    expect(r.stunBase).toBe(8);
+    expect(r.stunHunter, 'Opportunist: +50% on a stunned boss').toBe(12);
+    expect(r.stunBoth).toBe(15);
+    expect(r.pogoSpring, 'Pogo Spring: +30% bounce').toBeCloseTo(r.pogoBase * 1.3, 5);
+    expect(r.fallLight, 'Light Step: a falling player has dropped less far after 20 frames').toBeLessThan(r.fallBase);
+    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25, 5);
+    expect(r.dashStride, 'Long Stride: +30% dash length').toBe(Math.round(r.dashBase * 1.3));
+    expect(r.hurtBase).toBe(30);
+    expect(r.hurtHide, 'Thick Skin: +50% invincibility after a hit').toBe(45);
+    expect(r.coinBase).toBe(170);
+    expect(r.coinIdol, 'Golden Idol: +25% coins').toBe(213);
+    expect(r.coinBoth, 'with Lucky Charm the bonuses add: +35%').toBe(230);
+    expect(r.titan).toBe(7);
+    expect(r.titanHeart).toBe(8);
+    expect(r.parryBase, 'without Deflector a shot just outside the blade is not parried').toBe(false);
+    expect(r.parryDeflect, 'Deflector: the parry reaches further').toBe(true);
+    expect(r.parryFar).toBe(false);
+    expect(r.parryTouching).toBe(true);
   });
 
   test('WPN-06 Second Wind grants exactly one extra jump in the air, refilled on landing, and only while equipped', async ({ page }) => {
@@ -1238,7 +1322,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.onGround = false;
       raidLocal.vy = 4;
       primeDownSwing();
-      const box = raidSwordHitbox(raidLocal);
+      const box = (() => { const s = T.slashPoint(raidLocal, 8); return { cx: s.x, cy: s.y }; })(); // a spot inside the drawn slash
       raidG.boss.type = 'grinmaw';
       raidG.boss.x = box.cx; raidG.boss.y = box.cy;
       raidG.boss.anim = { state: 'idle', timer: 0 }; raidG.boss.invulnerable = false; raidG.boss.transition = 0;
@@ -1265,7 +1349,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.swordCooldown = 0;
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidSwordSwing();
-      const sideBox = raidSwordHitbox(raidLocal);
+      const sideBox = (() => { const s = T.slashPoint(raidLocal, 8); return { cx: s.x, cy: s.y }; })();
       raidG.boss.x = sideBox.cx; raidG.boss.y = sideBox.cy;
       stepPogo();
       const sideNoBounce = raidLocal.vy === 4;
@@ -1348,7 +1432,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         raidLocal.input = { left: false, right: false, up: false, down: true, space: false };
         raidSwordSwing();
         raidLocal.input.down = false;
-        const box = raidSwordHitbox(raidLocal);
+        const box = (() => { const s = T.slashPoint(raidLocal, 8); return { cx: s.x, cy: s.y }; })();
         proj.x = box.cx; proj.y = box.cy;
         raidG.projectiles = proj.kind ? [proj] : [];
         raidG.hazards = hazards || [];
@@ -1397,13 +1481,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         }
       };
       const out = {};
-      // every kind, one at a time, inside the right-swing hitbox
+      // every kind, one at a time, on the drawn right-swing slash
       T.place(300, 300);
       const px = raidPx(raidLocal);
+      const spot = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }));
       out.parried = {};
       let sparks = 0;
       for (const kind of kinds) {
-        raidG.projectiles = [mk(kind, px + 50, raidLocal.y + 24)];
+        raidG.projectiles = [mk(kind, spot.x, spot.y)];
         raidG.slamAnimations = [];
         raidLocal.swordCooldown = 0;
         raidSwordSwing();
@@ -1416,31 +1501,41 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // a shockwave rolling along the floor through the blade is a hazard, not a shot: untouched
       T.place(300);
       raidG.projectiles = [];
-      raidG.hazards = [{ kind: 'shockwave', x: px + 40, dir: 1, speed: 2, life: 100 }];
+      raidG.hazards = [{ kind: 'shockwave', x: spot.x, dir: 1, speed: 2, life: 100 }];
       raidLocal.swordCooldown = 0;
       raidSwordSwing();
       stepSwing();
       out.shockwaveStays = raidG.hazards.length === 1 && raidG.hazards[0].life === 100;
       T.place(300, 300);
-      // a shot outside the hitbox and one behind the player survive; the two touched in one swing go
-      raidG.projectiles = [mk('candy', px + 50, raidLocal.y + 24), mk('fang', px + 70, raidLocal.y + 20), mk('candy', px + 400, raidLocal.y + 24), mk('candy', px - 60, raidLocal.y + 24)];
+      // a shot outside the slash and one behind the player survive; the large one touched in one swing goes
+      raidG.projectiles = [mk('candy', spot.x, spot.y), mk('fang', spot.x + 6, spot.y - 4), mk('candy', px + 400, raidLocal.y + 24), mk('candy', px - 60, raidLocal.y + 24)];
       raidLocal.swordCooldown = 0;
       raidSwordSwing();
       stepSwing();
       out.survivors = raidG.projectiles.filter((p) => p.life > 0).map((p) => Math.round(p.x - px)).sort((a, b) => a - b);
+      out.expectedSurvivors = [-60, Math.round(spot.x + 6 - px), 400].sort((a, b) => a - b);
       // before/after the blade is out nothing is parried
-      raidG.projectiles = [mk('candy', px + 50, raidLocal.y + 24)];
-      raidLocal.swingTimer = RAID_SWORD_SWING_FRAMES; raidLocal.swingDir = 'side';
-      raidSendLocalState(); raidParryProjectiles(); // first frame of the swing: blade not out yet
-      out.earlySafe = raidG.projectiles[0].life > 0;
-      raidLocal.swingTimer = 0; raidSendLocalState(); raidParryProjectiles();
-      out.idleSafe = raidG.projectiles[0].life > 0;
-      // a parried lob does not leave its pillar behind, even when it was about to land
-      T.place(300); // on the ground, so the shot lands inside the blade's reach
+      raidG.projectiles = [mk('candy', spot.x, spot.y)];
+      raidLocal.swingTimer = RAID_SWORD_SWING_FRAMES; raidLocal.swingDir = 'right';
+      raidParryState = {};
+      raidSendLocalState(); Object.assign(raidG.players[raidMyId], { swingTimer: RAID_SWORD_SWING_FRAMES, swingDir: 'right' });
+      raidParryProjectiles(); // first frame of the swing: blade not out yet
+      out.earlySafe = raidG.projectiles.length === 1 && raidG.projectiles[0].life > 0;
+      raidLocal.swingTimer = 0; raidSendLocalState(); raidG.players[raidMyId].swingTimer = 0; raidParryState = {};
+      raidParryProjectiles();
+      out.idleSafe = raidG.projectiles.length === 1 && raidG.projectiles[0].life > 0;
+      // a parried lob does not leave its pillar behind, even when it was already about to land: the
+      // ember sits on the slash, a pixel above where it would touch down, as the blade reaches it
+      T.place(300);
+      const trial = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }));
+      T.place(300, raidLocal.y + (raidGROUND_Y - 12 - trial.y)); // slide the player so that spot is at floor level
+      const landing = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }));
       raidG.hazards = [];
-      raidG.projectiles = [Object.assign(mk('ember', px + 50, raidGROUND_Y - 30), { gravity: 0.3, vy: 3 })];
+      raidG.projectiles = [Object.assign(mk('ember', landing.x, landing.y), { gravity: 0.3, vy: 5 })];
       raidLocal.swingTimer = 0; raidLocal.swordCooldown = 0;
       raidSwordSwing();
+      raidLocal.swingTimer = 9; // the next frame brings it to 8, the spot's own frame
+      raidParryState = {};
       for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
         if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
         raidSendLocalState();
@@ -1460,7 +1555,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     }
     expect(r.shockwaveStays, 'a shockwave cannot be parried').toBe(true);
     expect(r.sparks, 'a parry leaves a spark').toBeGreaterThan(0);
-    expect(r.survivors, 'only the large shots the blade actually touched are destroyed').toEqual([-60, 70, 400]);
+    expect(r.survivors, 'only the large shots the blade actually touched are destroyed').toEqual(r.expectedSurvivors);
     expect(r.earlySafe, 'the blade is not out on the first frame').toBe(true);
     expect(r.idleSafe, 'no swing, no parry').toBe(true);
     expect(r.pillars, 'a parried ember never erupts').toBe(0);
@@ -1503,6 +1598,10 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         out.iconAnimates[id] = i1.m !== i2.m;
       }
       out.unique = seen.size;
+      // three charms at once: a comma-separated list draws every effect
+      const combo = body(40, 'util_boots,util_ward,util_heart');
+      const combos = ['util_boots', 'util_ward', 'util_heart'].map((id) => mask(combo, body(40, id)).n);
+      out.comboDiffers = combos.every((n) => n > 40);
       // no charm: nothing changes (an unknown id too)
       out.noneSame = mask(body(40, ''), body(40, undefined)).n === 0 && mask(body(40, ''), body(40, 'util_unknown')).n === 0;
       // a charm never paints over a ghost afterimage or a shop skin preview (noCharm)
@@ -1526,14 +1625,15 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.loadoutShowsCharm = mask(withCharm, lc.getContext('2d').getImageData(0, 0, 400, 400).data).n > 50;
       return out;
     });
-    expect(r.ids.length, 'all 13 charms').toBe(13);
+    expect(r.ids.length, 'all 23 charms').toBe(23);
     for (const id of r.ids) {
       expect(r.onPlayer[id], id + ' draws something on the player').toBeGreaterThan(40);
       expect(r.onPlayerAnimates[id], id + ' animates on the player').toBe(true);
       expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
       expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
     }
-    expect(r.unique, 'every charm looks different on the player').toBe(13);
+    expect(r.unique, 'every charm looks different on the player').toBe(23);
+    expect(r.comboDiffers, 'three worn charms are drawn together, differently from any single one').toBe(true);
     expect(r.noneSame, 'no charm (or an unknown one) changes nothing').toBe(true);
     expect(r.noCharmSame, 'noCharm switches the effect off').toBe(true);
     expect(r.drewAll, 'the raid draws every charm on both players without error').toBe(true);
@@ -1622,7 +1722,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidG.slamAnimations = [];
 
       // a real connecting right-swing leaves a slashHit tagged with its own direction
-      T.place(500 - RAID_SWORD_RANGE_X / 2, 300 - 24);
+      T.place(500 - 60, 300 - 24); // the right slash reaches out to the boss's side
       raidLocal.swordCooldown = 0;
       raidLocal.input = { left: false, right: true, up: false, down: false, space: false };
       raidSwordSwing();

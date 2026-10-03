@@ -1107,6 +1107,8 @@ body {
 .inv-lock { position: absolute; top: 68px; left: 0; right: 0; font-size: 2em; pointer-events: none; }
 .inv-name { color: white; font-size: 1em; margin-top: 2px; }
 .inv-type { font-family: Arial, sans-serif; font-size: 0.72em; color: #8a8ab0; margin-bottom: 8px; }
+.inv-cost { font-family: Arial, sans-serif; font-size: 0.74em; font-weight: bold; color: #ffd84d; margin: 0 0 4px; }
+.charm-points { font-family: Arial, sans-serif; font-size: 0.8em; font-weight: bold; color: #ffd84d; margin-top: 4px; }
 .inv-blurb { font-family: Arial, sans-serif; font-size: 0.72em; color: #b6b6d6; margin: 2px 10px 6px; line-height: 1.3; }
 
 .inv-equip {
@@ -2239,8 +2241,8 @@ textarea.community-input {
         <h3>Your Loadout</h3>
         <div class="loadout-row">Player skin<br><span id="loadoutSkin"></span></div>
         <div class="loadout-row">Slot 1: Weapon<br><span id="loadoutGun"></span></div>
-        <div class="loadout-row">Slot 2: Utility<br><span id="loadoutUtility"></span></div>
-        <div class="loadout-note">Skins are cosmetic only. Utility items have a small real effect (see their card). Your loadout shows up in every raid - other players see it too.</div>
+        <div class="loadout-row">Slot 2: Charms (3 slots, 5 charm points)<br><span id="loadoutUtility"></span></div>
+        <div class="loadout-note">Skins are cosmetic only. Charms have a small real effect (see their card) and cost 1-3 charm points - wear up to three, as long as their points add up to 5 or less. Your loadout shows up in every raid - other players see it too.</div>
       </div>
     </div>
 
@@ -2248,7 +2250,7 @@ textarea.community-input {
       <button id="invF_all" class="inv-filter active" onclick="mqSetFilter('all')">All</button>
       <button id="invF_skin" class="inv-filter" onclick="mqSetFilter('skin')">🧍 Player Skins</button>
       <button id="invF_weapon" class="inv-filter" onclick="mqSetFilter('weapon')">⚔️ Weapons</button>
-      <button id="invF_utility" class="inv-filter" onclick="mqSetFilter('utility')">🧰 Utility</button>
+      <button id="invF_utility" class="inv-filter" onclick="mqSetFilter('utility')">🧰 Charms</button>
       <label class="inv-check"><input type="checkbox" id="invHideLocked" onchange="mqToggleHideLocked(this.checked)"> Hide locked</label>
       <span class="inv-count" id="invCount"></span>
     </div>
@@ -3518,6 +3520,7 @@ function resetRaidState() {
   raidLocal.squashTimer = 0;
   raidLocal.squashKind = null;
   raidSwingHitState = {};
+  raidParryState = {};
   raidChargeHitState = {};
   raidDisplayPos = {};
   raidDisplaySwing = {};
@@ -3681,7 +3684,7 @@ let countdownInterval = null;
 // reaching roughly 150px. The jump is deliberately low - the bosses hover near the ground (BOS-44).
 const RAID_GRAVITY = 0.25;
 const RAID_JUMP_VY = -7.7;
-const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.7; // Second Wind (WPN-06): a smaller hop than the first jump, never held
+const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.85; // Second Wind (WPN-06): a little smaller than the first jump, never held
 const RAID_JUMP_HOLD_GRAVITY = 0.1;
 const RAID_JUMP_HOLD_FRAMES = 12;
 
@@ -3857,6 +3860,7 @@ function raidSendLocalState() {
     x: raidLocal.x,
     y: raidLocal.y,
     vx: raidLocal.vx,
+    vy: raidLocal.vy, // so teammates (and the host's hit test) lean the swinging body exactly as it is drawn (WPN-15)
     onGround: raidLocal.onGround,
     health: raidLocal.health,
     maxHealth: raidLocal.maxHealth,
@@ -4072,8 +4076,8 @@ function raidDamagePlayer(id, p, amount) {
   // in this same host frame - or before the Firebase round-trip lands - sees invincible>0 right
   // away, instead of racing the async .update() below.
   // Warding Sigil absorbs exactly one hit per raid (WPN-03).
-  const u = MQ_UTILITY_MAP[p.utility];
-  if (u && u.effect === 'first_hit_ward' && !p.wardUsed) {
+  const inv = raidHurtInvincibleFrames(p.utility); // Thick Skin (WPN-14)
+  if (raidCharmOf(p.utility, 'first_hit_ward') && !p.wardUsed) {
     p.wardUsed = true;
     p.invincible = 30;
     raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
@@ -4081,8 +4085,8 @@ function raidDamagePlayer(id, p, amount) {
   }
   const newHealth = Math.max(0, (p.health || 5) - (amount || 1));
   p.health = newHealth;
-  p.invincible = 30;
-  raidPlayerRef.child(id).update({ health: newHealth, invincible: 30 });
+  p.invincible = inv;
+  raidPlayerRef.child(id).update({ health: newHealth, invincible: inv });
   if (newHealth <= 0) {
     raidG.gameOver = true;
     raidSendBossState();
@@ -4131,19 +4135,395 @@ function resetBossFlow(b) {
 // (RAI-17) a small hop reaches every boss with a swing, and a held jump puts the player above it
 // for a pogo - yet they are still clear of the floor, so you cannot hit them standing. The two
 // ground-anchored bosses sit on the floor instead (BOS-43).
-const BOSS_HOVER_Y = { grinmaw: 320, warden: 310, wyrm: 300, glutton: 345, griffon: 305 };
-
-const BOSS_HITBOX = {
-  grinmaw: { hw: 58, hh: 58 },
-  warden: { hw: 50, hh: 65 },
-  wyrm: { hw: 105, hh: 55 },
-  glutton: { hw: 58, hh: 58 },
-  bramblehide: { hw: 70, hh: 50 },
-  colossus: { hw: 55, hh: 85 },
-  griffon: { hw: 95, hh: 60 }
+// Boss hurt areas (BOS-46): exactly what is drawn. Each boss's silhouette (alpha >= 50%, over its idle
+// and enraged frames, as drawn - the Wyrm at its 0.75x size) is stored as horizontal bands 4 px tall:
+// [y0, y1, x0, x1, x0, x1, ...] with the runs of that band, all relative to (boss.x, boss.y) at
+// animation scale 1. A hit is any overlap with these rectangles - not a box around the middle.
+// Rebuild after changing boss art: MEASURE_HURT=<file>.json npx playwright test hitboxes -g measure
+const BOSS_HURT = {
+  grinmaw: { bounds: { x0: -81, x1: 79, y0: -80, y1: 124 }, bands: [
+    [-80,-76,-52,-46,46,50],
+    [-76,-72,-56,-42,42,58],
+    [-72,-68,-58,-38,40,60],
+    [-68,-64,-59,-36,38,61],
+    [-64,-60,-60,-36,38,61],
+    [-60,-56,-60,-36,-11,12,38,61],
+    [-56,-52,-60,-36,-12,14,38,61],
+    [-52,-48,-60,-36,-25,27,38,61],
+    [-48,-44,-59,-37,-25,27,39,61],
+    [-44,-40,-58,-39,-25,27,42,61],
+    [-40,-36,-57,-38,-27,27,39,60],
+    [-36,-32,-60,59,70,77],
+    [-32,-28,-81,-72,-60,59,69,77],
+    [-28,-24,-81,-72,-60,60,70,77],
+    [-24,-20,-80,-73,-60,61],
+    [-20,-16,-61,61],
+    [-16,-12,-74,-67,-61,62],
+    [-12,-8,-74,65],
+    [-8,-4,-74,65],
+    [-4,0,-72,64],
+    [0,4,-62,63],
+    [4,8,-62,63,71,77],
+    [8,12,-62,63,70,79],
+    [12,16,-62,63,70,79],
+    [16,20,-62,63],
+    [20,24,-80,-72,-62,63],
+    [24,28,-80,-71,-62,63],
+    [28,32,-80,-71,-62,63],
+    [32,36,-62,63],
+    [36,40,-62,63],
+    [40,44,-70,69],
+    [44,48,-70,79],
+    [48,52,-70,79],
+    [52,56,-62,64,72,79],
+    [56,60,-62,64],
+    [60,64,-71,64],
+    [64,68,-73,63],
+    [68,72,-73,63],
+    [72,76,-72,63],
+    [76,80,-62,63],
+    [80,84,-62,63],
+    [84,88,-62,63],
+    [88,92,-62,63],
+    [92,96,-62,63],
+    [96,100,-62,63],
+    [100,104,-62,63],
+    [104,108,-62,63],
+    [108,112,-63,65],
+    [112,116,-63,65],
+    [116,120,-63,65],
+    [120,124,-60,62]
+  ] },
+  warden: { bounds: { x0: -75, x1: 74, y0: -68, y1: 108 }, bands: [
+    [-68,-64,-73,-57,-31,-25,57,73],
+    [-64,-60,-74,-56,-33,-24,56,74],
+    [-60,-56,-75,-56,-42,-23,56,74],
+    [-56,-52,-75,-56,-46,-23,45,74],
+    [-52,-48,-74,-56,-47,-23,41,74],
+    [-48,-44,-71,-55,-47,-24,-18,-9,9,19,33,71],
+    [-44,-40,-70,-55,-47,-34,-19,-8,8,20,29,71],
+    [-40,-36,-70,-53,-46,-35,-20,-7,8,20,28,70],
+    [-36,-32,-69,-34,-20,20,28,70],
+    [-32,-28,-68,20,28,41,55,68],
+    [-28,-24,-68,22,28,40,53,72],
+    [-24,-20,-68,40,51,73],
+    [-20,-16,-68,-44,-35,74],
+    [-16,-12,-68,-41,-35,74],
+    [-12,-8,-68,74],
+    [-8,-4,-67,74],
+    [-4,0,-66,74],
+    [0,4,-64,71],
+    [4,8,-64,68],
+    [8,12,-64,68],
+    [12,16,-63,68],
+    [16,20,-62,68],
+    [20,24,-61,65],
+    [24,28,-60,65],
+    [28,32,-59,60],
+    [32,36,-58,58],
+    [36,40,-61,59],
+    [40,44,-64,64],
+    [44,48,-64,64],
+    [48,52,-64,64],
+    [52,56,-63,64],
+    [56,60,-61,61],
+    [60,64,-58,57],
+    [64,68,-47,46],
+    [68,72,-47,46],
+    [72,76,-47,46],
+    [76,80,-47,46],
+    [80,84,-46,46],
+    [84,88,-51,51],
+    [88,92,-61,61],
+    [92,96,-63,-26,2,10,32,63],
+    [96,100,-63,-37,3,9,37,63],
+    [100,104,-63,-40,40,63],
+    [104,108,-62,-46,47,62]
+  ] },
+  wyrm: { bounds: { x0: -111, x1: 105, y0: -56, y1: 128 }, bands: [
+    [-56,-52,-36,-19],
+    [-52,-48,-36,-10],
+    [-48,-44,-44,29],
+    [-44,-40,-50,38],
+    [-40,-36,-50,50],
+    [-36,-32,-81,-73,-50,56,71,79],
+    [-32,-28,-81,-73,-53,58,70,79],
+    [-28,-24,-81,-73,-55,60,70,79],
+    [-24,-20,-57,62],
+    [-20,-16,-72,67],
+    [-16,-12,-105,94],
+    [-12,-8,-109,101],
+    [-8,-4,-110,105],
+    [-4,0,-111,105],
+    [0,4,-111,105],
+    [4,8,-111,105],
+    [8,12,-111,104],
+    [12,16,-110,102],
+    [16,20,-107,98],
+    [20,24,-93,87],
+    [24,28,-90,84],
+    [28,32,-90,84],
+    [32,36,-90,84],
+    [36,40,-90,84],
+    [40,44,-90,84],
+    [44,48,-90,84],
+    [48,52,-90,84],
+    [52,56,-90,84],
+    [56,60,-90,84],
+    [60,64,-86,80],
+    [64,68,-82,69],
+    [68,72,-81,64],
+    [72,76,-69,63],
+    [76,80,-69,71],
+    [80,84,-68,73],
+    [84,88,-69,49,65,74],
+    [88,92,-69,74],
+    [92,96,-67,-60,-54,87],
+    [96,100,-54,94],
+    [100,104,-56,94],
+    [104,108,-56,94],
+    [108,112,-56,94],
+    [112,116,-56,64,73,94],
+    [116,120,-53,48,74,85],
+    [120,124,-50,44],
+    [124,128,-12,8]
+  ] },
+  glutton: { bounds: { x0: -95, x1: 95, y0: -100, y1: 68 }, bands: [
+    [-100,-96,-9,-1],
+    [-96,-92,-54,-47,-9,-1],
+    [-92,-88,-69,-61,-54,-47,-9,41,52,58],
+    [-88,-84,-69,-61,-54,-47,-1,60,81,92],
+    [-84,-80,-69,-61,-9,60,81,93],
+    [-80,-76,-23,-17,-10,58,81,93],
+    [-76,-72,-91,-83,-68,-62,-24,-16,-10,17,24,59,81,92],
+    [-72,-68,-93,-78,-68,-62,-24,11,31,60,81,93],
+    [-68,-64,-93,-77,-68,-62,-17,60,81,93],
+    [-64,-60,-93,-77,-28,59,81,93],
+    [-60,-56,-93,-77,-40,57,81,93],
+    [-56,-52,-93,-77,-45,54,79,93],
+    [-52,-48,-93,-77,-58,53,67,94],
+    [-48,-44,-94,-77,-69,56,67,94],
+    [-44,-40,-94,61,67,94],
+    [-40,-36,-94,68,79,95],
+    [-36,-32,-94,95],
+    [-32,-28,-95,95],
+    [-28,-24,-95,95],
+    [-24,-20,-95,95],
+    [-20,-16,-95,95],
+    [-16,-12,-95,95],
+    [-12,-8,-95,95],
+    [-8,-4,-95,95],
+    [-4,0,-95,95],
+    [0,4,-95,95],
+    [4,8,-95,94],
+    [8,12,-94,94],
+    [12,16,-92,93],
+    [16,20,-89,90],
+    [20,24,-87,87],
+    [24,28,-82,82],
+    [28,32,-77,77],
+    [32,36,-71,70],
+    [36,40,-68,63],
+    [40,44,-65,59],
+    [44,48,-61,59],
+    [48,52,-72,70],
+    [52,56,-75,72],
+    [56,60,-74,73],
+    [60,64,-68,67],
+    [64,68,-47,44]
+  ] },
+  bramblehide: { bounds: { x0: -107, x1: 106, y0: -52, y1: 56 }, bands: [
+    [-52,-48,-10,10],
+    [-48,-44,-30,30],
+    [-44,-40,-103,-95,-46,46,92,100],
+    [-40,-36,-103,-95,-51,51,92,100],
+    [-36,-32,-103,-95,-53,53,92,100],
+    [-32,-28,-103,-95,-83,-76,-57,57,92,100],
+    [-28,-24,-103,-94,-85,-76,-61,61,92,101],
+    [-24,-20,-103,-94,-87,-77,-64,64,92,101],
+    [-20,-16,-104,-94,-88,-78,-66,66,91,101],
+    [-16,-12,-104,-94,-88,-79,-68,68,91,101],
+    [-12,-8,-104,-79,-69,69,91,102],
+    [-8,-4,-104,-93,-87,-76,-70,70,91,102],
+    [-4,0,-104,-93,-85,70,91,102],
+    [0,4,-104,-93,-83,70,91,102],
+    [4,8,-105,-92,-79,70,90,103],
+    [8,12,-105,-92,-74,69,90,103],
+    [12,16,-105,-92,-68,68,90,103],
+    [16,20,-105,-92,-66,66,90,103],
+    [20,24,-105,-91,-64,64,90,104],
+    [24,28,-106,-91,-61,61,89,104],
+    [28,32,-106,-91,-57,57,89,104],
+    [32,36,-106,-90,-54,54,89,105],
+    [36,40,-106,-90,-54,54,89,105],
+    [40,44,-106,-90,-54,54,89,105],
+    [44,48,-106,-90,-54,-36,-30,30,36,54,89,105],
+    [48,52,-107,-89,-53,-36,-24,24,36,53,88,106],
+    [52,56,-51,-39,-21,-8,8,21,39,51]
+  ] },
+  colossus: { bounds: { x0: -92, x1: 92, y0: -92, y1: 88 }, bands: [
+    [-92,-88,-25,25],
+    [-88,-84,-36,36],
+    [-84,-80,-40,40],
+    [-80,-76,-47,47],
+    [-76,-72,-60,60],
+    [-72,-68,-68,68],
+    [-68,-64,-68,68],
+    [-64,-60,-67,67],
+    [-60,-56,-66,66],
+    [-56,-52,-65,65],
+    [-52,-48,-91,-75,-65,65,75,91],
+    [-48,-44,-92,-74,-64,64,74,92],
+    [-44,-40,-92,-74,-63,63,74,92],
+    [-40,-36,-92,-74,-62,62,74,92],
+    [-36,-32,-92,-74,-62,-51,-44,44,51,62,74,92],
+    [-32,-28,-92,-74,-44,44,74,92],
+    [-28,-24,-92,-74,-44,44,74,92],
+    [-24,-20,-92,-74,-44,44,74,92],
+    [-20,-16,-92,-74,-44,44,74,92],
+    [-16,-12,-92,-74,-44,44,74,92],
+    [-12,-8,-92,-74,-44,44,74,92],
+    [-8,-4,-92,-74,-44,44,74,92],
+    [-4,0,-92,-74,-45,49,74,92],
+    [0,4,-92,-74,-45,49,74,92],
+    [4,8,-92,-74,-45,49,74,92],
+    [8,12,-92,-74,-45,49,74,92],
+    [12,16,-92,-74,-45,49,74,92],
+    [16,20,-92,-74,-44,49,74,92],
+    [20,24,-92,-74,-44,44,74,92],
+    [24,28,-92,-74,-44,44,74,92],
+    [28,32,-92,-74,-44,44,74,92],
+    [32,36,-92,-74,-44,44,74,92],
+    [36,40,-92,-74,-44,44,74,92],
+    [40,44,-92,-74,-44,44,74,92],
+    [44,48,-92,-74,-44,44,74,92],
+    [48,52,-92,-74,-44,44,74,92],
+    [52,56,-92,-74,-44,44,74,92],
+    [56,60,-92,-74,-42,42,74,92],
+    [60,64,-92,-74,-45,45,74,92],
+    [64,68,-92,-74,-46,46,74,92],
+    [68,72,-92,-74,-46,-10,10,46,74,92],
+    [72,76,-92,-74,-46,-10,10,46,74,92],
+    [76,80,-92,-74,-46,-10,10,46,74,92],
+    [80,84,-90,-76,-45,-11,11,45,76,90],
+    [84,88,-40,-16,16,40]
+  ] },
+  griffon: { bounds: { x0: -97, x1: 97, y0: -44, y1: 52 }, bands: [
+    [-44,-40,-11,-8,-1,1,8,11],
+    [-40,-36,-11,11],
+    [-36,-32,-14,14],
+    [-32,-28,-24,24],
+    [-28,-24,-29,29],
+    [-24,-20,-34,34],
+    [-20,-16,-71,-53,-37,37,53,71],
+    [-16,-12,-82,82],
+    [-12,-8,-88,88],
+    [-8,-4,-91,91],
+    [-4,0,-94,94],
+    [0,4,-96,96],
+    [4,8,-97,97],
+    [8,12,-82,82],
+    [12,16,-79,-77,-64,-63,-56,56,63,64,77,79],
+    [16,20,-37,37],
+    [20,24,-34,34],
+    [24,28,-33,29],
+    [28,32,-35,24],
+    [32,36,-37,14],
+    [36,40,-38,-10,10,14],
+    [40,44,-40,-28,-20,-15],
+    [44,48,-42,-36,-21,-17],
+    [48,52,-42,-41]
+  ] }
 };
+// Floating bosses idle with the BOTTOM of their body this high (BOS-44), so the player has to jump
+// to reach them: the highest a swing from the floor ever reaches is about y 364, and the idle bob
+// adds up to ~18, so the bottom of the body idles at 336 (never lower than ~354).
+const BOSS_FLOAT_BOTTOM_Y = 336;
+const BOSS_HOVER_Y = {};
+['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon'].forEach(t => { BOSS_HOVER_Y[t] = BOSS_FLOAT_BOTTOM_Y - BOSS_HURT[t].bounds.y1; });
+
+// Half extents of the whole silhouette about the boss's position (for sizing and ground anchoring).
 function raidBossHalfExtent(type) {
-  return BOSS_HITBOX[type] || BOSS_HITBOX.grinmaw;
+  const b = (BOSS_HURT[type] || BOSS_HURT.grinmaw).bounds;
+  return { hw: Math.max(-b.x0, b.x1), hh: Math.max(-b.y0, b.y1) };
+}
+// The boss's hurt area right now, as world rectangles [x0, y0, x1, y1]: its stored silhouette at its
+// position, scaled by its animation scale (windups swell it) about its centre.
+function raidBossRects(b) {
+  const h = BOSS_HURT[b.type] || BOSS_HURT.grinmaw, k = b.animScale || 1, out = [];
+  for (let i = 0; i < h.bands.length; i++) {
+    const band = h.bands[i], y0 = b.y + band[0] * k, y1 = b.y + band[1] * k;
+    for (let j = 2; j < band.length; j += 2) out.push([b.x + band[j] * k, y0, b.x + band[j + 1] * k, y1]);
+  }
+  return out;
+}
+// Cheap whole-silhouette box test before the per-rectangle work.
+function raidBossBoundsHit(b, x0, y0, x1, y1) {
+  const h = (BOSS_HURT[b.type] || BOSS_HURT.grinmaw).bounds, k = b.animScale || 1;
+  return x1 >= b.x + h.x0 * k && x0 <= b.x + h.x1 * k && y1 >= b.y + h.y0 * k && y0 <= b.y + h.y1 * k;
+}
+// Does a circle (radius 0 = a point) touch the boss's hurt area?
+function raidCircleHitsBoss(x, y, r, b) {
+  if (!raidBossBoundsHit(b, x - r, y - r, x + r, y + r)) return false;
+  const rects = raidBossRects(b);
+  for (let i = 0; i < rects.length; i++) {
+    const q = rects[i];
+    const dx = x - Math.max(q[0], Math.min(x, q[2])), dy = y - Math.max(q[1], Math.min(y, q[3]));
+    if (dx * dx + dy * dy <= r * r) return true;
+  }
+  return false;
+}
+
+// ---- polygon helpers (the slash is a polygon) ----
+function raidPointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+// Liang-Barsky: does the segment (ax,ay)-(bx,by) touch the rectangle?
+function raidSegHitsRect(ax, ay, bx, by, q) {
+  let t0 = 0, t1 = 1;
+  const dx = bx - ax, dy = by - ay;
+  const p = [-dx, dx, -dy, dy], d = [ax - q[0], q[2] - ax, ay - q[1], q[3] - ay];
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) { if (d[i] < 0) return false; }
+    else {
+      const t = d[i] / p[i];
+      if (p[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+      else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+  }
+  return true;
+}
+function raidPolyHitsRect(poly, q) {
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (raidSegHitsRect(poly[j][0], poly[j][1], poly[i][0], poly[i][1], q)) return true;
+  }
+  return raidPointInPoly(q[0], q[1], poly); // a rectangle sitting wholly inside the polygon
+}
+function raidPolyBounds(poly) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (let i = 0; i < poly.length; i++) { x0 = Math.min(x0, poly[i][0]); x1 = Math.max(x1, poly[i][0]); y0 = Math.min(y0, poly[i][1]); y1 = Math.max(y1, poly[i][1]); }
+  return { x0: x0, y0: y0, x1: x1, y1: y1 };
+}
+function raidPolyHitsBoss(poly, b) {
+  const bb = raidPolyBounds(poly);
+  if (!raidBossBoundsHit(b, bb.x0, bb.y0, bb.x1, bb.y1)) return false;
+  const rects = raidBossRects(b);
+  for (let i = 0; i < rects.length; i++) if (raidPolyHitsRect(poly, rects[i])) return true;
+  return false;
+}
+function raidPolyHitsCircle(poly, x, y, r) {
+  if (raidPointInPoly(x, y, poly)) return true;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const ax = poly[j][0], ay = poly[j][1], dx = poly[i][0] - ax, dy = poly[i][1] - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+    if (Math.hypot(x - ax - t * dx, y - ay - t * dy) <= r) return true;
+  }
+  return false;
 }
 
 // Shared "a hit lands on the boss" resolution (BOS-13): used by both Familiar bolts and sword swings -
@@ -4154,7 +4534,7 @@ function raidHitBoss(b, proj) {
     return;
   }
   const bigHit = b.exposed > 0;
-  b.hp -= (proj.damage || 5) * (bigHit ? 2 : 1);
+  b.hp -= (proj.damage || 5) * (bigHit ? 2 * (proj.stunBonus || 1) : 1); // Opportunist: a bigger stun bonus (WPN-14)
   if (b.hp < 0) b.hp = 0;
   b.hitFlash = 10;
   raidTriggerHitStop(bigHit ? 8 : 5);
@@ -4473,7 +4853,8 @@ function updateWardenAnimation(b) {
 // Trio, the Three-Headed Wyrm - flying, three independent heads
 // ------------------------------------------------------------
 
-const WYRM_HEAD_OFFSETS = [-70, 0, 70];
+// The Wyrm is drawn at 0.75x (BOS-46) and its heads sit at 0.75x of their old spread to match.
+const WYRM_HEAD_OFFSETS = [-52.5, 0, 52.5];
 
 function wyrmAttack(b) {
   const options = ['volley', 'fire'];
@@ -5417,8 +5798,7 @@ function raidUpdateMinions(b) {
   const owners = new Set();
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
-    const u = p && MQ_UTILITY_MAP[p.utility];
-    if (u && u.effect === 'minion') owners.add(id);
+    if (p && raidCharmOf(p.utility, 'minion')) owners.add(id);
   });
   raidG.minions = raidG.minions.filter(m => owners.has(m.ownerId));
   owners.forEach(id => {
@@ -5507,13 +5887,13 @@ function raidBossUpdate() {
     // Ground-anchored (BOS-43): sits at floor height with only a small sway, no floating drift,
     // so a grounded player can melee or shoot it without needing to jump.
     b.x = 500 + Math.sin(raidG.frame * 0.008) * 20;
-    b.y = raidGROUND_Y - BOSS_HITBOX.bramblehide.hh + Math.sin(raidG.frame * 0.03) * 3;
+    b.y = raidGROUND_Y - BOSS_HURT.bramblehide.bounds.y1 + Math.sin(raidG.frame * 0.03) * 3;
     if (b.anim.state !== 'idle') updateBramblehideAnimation(b);
     b.x += b.animOffsetX || 0;
   } else if (b.type === 'colossus') {
     // Ground-anchored (BOS-43), same as Bramblehide.
     b.x = 500 + Math.sin(raidG.frame * 0.006) * 14;
-    b.y = raidGROUND_Y - BOSS_HITBOX.colossus.hh + Math.sin(raidG.frame * 0.025) * 2;
+    b.y = raidGROUND_Y - BOSS_HURT.colossus.bounds.y1 + Math.sin(raidG.frame * 0.025) * 2;
     if (b.anim.state !== 'idle') updateColossusAnimation(b);
     b.y += b.animOffsetY || 0;
   } else if (b.type === 'griffon') {
@@ -5641,8 +6021,7 @@ function raidBossUpdate() {
     proj.life--;
 
     if (raidBossUntargetable(b)) return;
-    const bhb = raidBossHalfExtent(b.type);
-    if (Math.abs(proj.x - b.x) < bhb.hw && Math.abs(proj.y - b.y) < bhb.hh) {
+    if (raidCircleHitsBoss(proj.x, proj.y, 0, b)) {
       proj.life = 0;
       raidHitBoss(b, proj);
     }
@@ -5728,12 +6107,11 @@ const RAID_WEAPON_LENGTH = 38;
 const RAID_SWORD_SWING_FRAMES = 14; // how long the visible swing animation plays
 const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
-const RAID_SWORD_RANGE_X = 100;
-const RAID_SWORD_RANGE_Y = 62; // matches the compressed slash below: R * sin(span) * RAID_SWORD_SLASH_SQUASH
-// The blade is only actually "out" for a window in the middle of the swing (matches where the
-// crescent trail is visibly drawn) - this is when a hit can land, not the whole 14 frames.
-const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
-const RAID_SWORD_HIT_WINDOW_END = RAID_SWORD_SWING_FRAMES - 9;
+// The sword hits exactly where the slash is drawn (WPN-15): the hit area IS the drawn crescent, on every
+// frame it is in view. The slash is visible from swing progress 0.12 to 0.8, which is swingTimer
+// 12 down to 3 - so a hit can land while START >= swingTimer > END.
+const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 2; // swingTimer counts down, so "start" is the higher value
+const RAID_SWORD_HIT_WINDOW_END = 2;
 
 // 8-way swing aiming (WPN-05): absolute world-space unit vectors for every direction the swing
 // can aim, keyed the same way p.swingDir already is. up/down are here too (even though their own
@@ -5744,10 +6122,8 @@ const RAID_SWORD_DIR_VECTORS = {
   upleft: [-0.7071, -0.7071], upright: [0.7071, -0.7071],
   downleft: [-0.7071, 0.7071], downright: [0.7071, 0.7071]
 };
-const RAID_SWORD_DIAG_REACH = 80; // player-centre to diagonal-hitbox-centre distance
-const RAID_SWORD_DIAG_HALF = 52;  // diagonal hitbox half-extent (both axes)
 const RAID_SWORD_SLASH_SQUASH = 0.55; // the slash arc is squashed across its direction, bringing its two ends closer together
-const RAID_SWORD_SLASH_R = 115; // radius of the big white crescent drawn with a swing (WPN-10), sized to the reach above
+const RAID_SWORD_SLASH_R = 115; // radius of the big white crescent drawn with a swing (WPN-10); it is also the hit area (WPN-15)
 const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
 
 // Absolute swing direction from whichever movement keys are held at the instant the attack starts
@@ -5771,7 +6147,7 @@ function raidSwordSwing() {
   if (countdownActive) return;
   const p = raidLocal;
   if (p.swordCooldown > 0) return;
-  p.swordCooldown = RAID_SWORD_COOLDOWN_FRAMES;
+  p.swordCooldown = raidSwordCooldownFrames(); // Quick Hands (WPN-14)
   p.swingTimer = RAID_SWORD_SWING_FRAMES;
   // Direction is read once, at the moment the swing starts (WPN-05), so releasing the key
   // mid-swing doesn't change an already-playing animation.
@@ -5783,27 +6159,90 @@ function raidSwordSwing() {
 // The player's world-space melee hitbox for the swing direction chosen when the swing started
 // (WPN-02/WPN-05) - a simple offset rectangle, not a new shape system. `p` is any synced player
 // object (x, y, facing, swingDir), local or remote.
-function raidSwordHitbox(p) {
-  const dir = p.swingDir || 'side';
-  const cx = raidPx(p);
-  const mult = raidAttackRangeMult(p.utility); // Long Reach (WPN-03)
-  // The four cardinal swings are one shape turned to face each way, so the player always has the
-  // same reach: RAID_SWORD_RANGE_X out from the body along the swing, RAID_SWORD_RANGE_Y either
-  // side of it (the same height as the side swing's own box).
-  if (dir === 'up' || dir === 'down' || dir === 'left' || dir === 'right') {
-    const reach = RAID_SWORD_RANGE_X * mult, half = RAID_SWORD_RANGE_Y * mult;
-    const mid = p.y + 24; // the body's vertical centre, where every swing starts from
-    if (dir === 'up') return { cx, cy: mid - reach / 2, hw: half, hh: reach / 2 };
-    if (dir === 'down') return { cx, cy: mid + reach / 2, hw: half, hh: reach / 2 };
-    const sgn = dir === 'left' ? -1 : 1;
-    return { cx: cx + sgn * reach / 2, cy: mid, hw: reach / 2, hh: half };
+// The slash (WPN-10, WPN-15): one shape, used both to DRAW the swing and to decide what it hits, so
+// they can never disagree. It is a crescent of radius RAID_SWORD_SLASH_R (x the Long Reach scale)
+// about the hand, turned to face the swing and squashed across it; as the swing plays out the head of
+// the crescent runs ahead and the tail eats it away (visible from swing progress 0.12 to 0.8).
+
+// The crescent as a polygon of offsets from the hand, in the player's own (unscaled) drawing space.
+// null when no slash is in view at this swing progress.
+function raidSlashLocal(dir, facing, swing, scale) {
+  const head = Math.min(1, Math.max(0, (swing - 0.12) / 0.4));
+  const tail = Math.min(1, Math.max(0, (swing - 0.3) / 0.5));
+  if (!(swing > 0) || !(scale > 0) || !(head > tail)) return null;
+  const vec = RAID_SWORD_DIR_VECTORS[dir];
+  const thetaC = dir === 'up' ? 0 : dir === 'down' ? Math.PI
+    : vec ? Math.atan2(vec[0] * facing, -vec[1])
+    : Math.PI / 2; // the default swing slashes straight ahead
+  const frameAng = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
+  const R = RAID_SWORD_SLASH_R * scale;
+  const span = 1.4; // a forward arc of about 160 degrees - it does not surround the player
+  let aStart = -span, aEnd = span;
+  // start at whichever end is higher on screen, so the swing always goes top to bottom
+  if (Math.sin(frameAng + aStart) - Math.sin(frameAng + aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
+  // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing through
+  // the farthest point and tapering to nothing at the bottom
+  const widthAt = (u) => 0.5 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6);
+  const steps = 28, outer = [], inner = [];
+  for (let i = 0; i <= steps; i++) {
+    const u = tail + (head - tail) * (i / steps);
+    const ang = aStart + (aEnd - aStart) * u;
+    outer.push([Math.cos(ang) * R, Math.sin(ang) * R]);
+    const ri = R * (1 - widthAt(u));
+    inner.push([Math.cos(ang) * ri, Math.sin(ang) * ri]);
   }
-  if (RAID_SWORD_DIR_VECTORS[dir]) { // the 4 diagonals
-    const v = RAID_SWORD_DIR_VECTORS[dir];
-    const reach = RAID_SWORD_DIAG_REACH * mult, half = RAID_SWORD_DIAG_HALF * mult;
-    return { cx: cx + v[0] * reach, cy: p.y + 24 + v[1] * reach, hw: half, hh: half };
+  const pts = outer.concat(inner.reverse());
+  // squash across the swing direction (not along it), turn to face it, mirror for facing
+  const cs = Math.cos(frameAng), sn = Math.sin(frameAng), SQ = RAID_SWORD_SLASH_SQUASH;
+  return pts.map(q => { const x1 = q[0], y1 = q[1] * SQ; return [facing * (cs * x1 - sn * y1), sn * x1 + cs * y1]; });
+}
+
+// The crescent in world coordinates for a player described by g = { x, y (top-left), facing, dir,
+// scale, vx, vy, onGround, invincible }, with the same body pose the drawing applies (lunge, crouch,
+// lean, hurt flinch) so the polygon sits exactly on the drawn slash. The idle bob (+-3 px, driven by
+// each client's own frame counter) and the local landing squash are cosmetic and not part of it.
+// poly.hand is the hand's world position, poly.R the crescent's world radius.
+function raidSlashPolyAt(g, swing) {
+  const loc = raidSlashLocal(g.dir, g.facing, swing, g.scale);
+  if (!loc) return null;
+  const S = MQ_PLAYER_SCALE, cx = g.x + 18, feet = g.y + 48;
+  const atk = raidAttackPose(g.dir, swing, g.facing), hurt = raidHurtPose(g.invincible, g.facing);
+  const lean = (g.onGround ? Math.max(-0.12, Math.min(0.12, (g.vx || 0) * 0.02)) : raidAirLean(g.vy))
+    + raidSwingBodyLean(g.dir, swing, g.facing) + hurt.rot;
+  const sx = S * atk.sx * hurt.sx, sy = S * atk.sy * hurt.sy, ddx = atk.dx + hurt.dx, ddy = atk.dy;
+  const hx = cx + g.facing * RAID_HAND_OFFSET_X, hy = g.y + RAID_HAND_PIVOT_Y;
+  const cr = Math.cos(lean), sr = Math.sin(lean);
+  const to = (ox, oy) => { const ax = (hx + ox + ddx - cx) * sx, ay = (hy + oy + ddy - feet) * sy; return [cx + ax * cr - ay * sr, feet + ax * sr + ay * cr]; };
+  const poly = loc.map(q => to(q[0], q[1]));
+  poly.hand = to(0, 0);
+  poly.R = RAID_SWORD_SLASH_R * g.scale * (sx + sy) / 2;
+  return poly;
+}
+// The same, for a player object (synced state or raidLocal) at swing progress 0..1.
+function raidSlashWorldPoly(p, swing) {
+  return raidSlashPolyAt({
+    x: p.x, y: p.y, facing: p.facing || 1, dir: p.swingDir || 'side', scale: raidAttackRangeMult(p.utility),
+    vx: p.vx || 0, vy: p.vy || 0, onGround: p.onGround !== false, invincible: p.invincible || 0
+  }, swing);
+}
+function raidSwingProgress(timer) { return 1 - timer / RAID_SWORD_SWING_FRAMES; }
+// Would this swing, at any point of its animation, touch the boss? (For where a player can reach.)
+function raidSwingHitsBoss(p, b) {
+  for (let t = RAID_SWORD_SWING_FRAMES; t >= 1; t--) {
+    const poly = raidSlashWorldPoly(p, raidSwingProgress(t));
+    if (poly && raidPolyHitsBoss(poly, b)) return true;
   }
-  return { cx, cy: p.y + 24, hw: RAID_SWORD_RANGE_X * mult, hh: RAID_SWORD_RANGE_Y * mult };
+  return false;
+}
+// Host-side bookkeeping for a swinger whose updates arrive every other frame, or late and batched
+// (WPN-15): the swingTimer values passed since this swinger was last looked at, so a slash that
+// came and went between two updates still gets resolved. st = { lastTimer, hasHit }.
+function raidSwingSteps(st, timer) {
+  const steps = [];
+  if (timer > st.lastTimer) { st.lastTimer = RAID_SWORD_SWING_FRAMES + 1; st.hasHit = false; } // a new swing
+  for (let k = Math.min(st.lastTimer - 1, RAID_SWORD_SWING_FRAMES); k >= timer; k--) steps.push(k);
+  st.lastTimer = timer;
+  return steps;
 }
 
 // Host-only, per-player bookkeeping for "has this swing already hit the boss" - kept outside
@@ -5835,22 +6274,18 @@ function raidCheckLocalPogo() {
   raidPogoState.lastSwingTimer = p.swingTimer;
   if (raidPogoState.bounced) return;
   if (p.swingDir !== 'down' || p.onGround || !(p.swingTimer > 0)) return;
-  if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
   const b = raidG.boss;
-  const box = raidSwordHitbox(p);
+  const poly = raidSlashWorldPoly(p, raidSwingProgress(p.swingTimer)); // the slash as drawn this frame
+  if (!poly) return;
   let touching = false;
-  if (b && !raidBossUntargetable(b)) {
-    const bhb = raidBossHalfExtent(b.type);
-    touching = Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh;
-  }
+  if (b && !raidBossUntargetable(b)) touching = raidPolyHitsBoss(poly, b);
   // WPN-08/WPN-11: a large boss shot is a pogo target too (the host removes it via the parry).
   if (!touching) {
-    touching = raidG.projectiles.some(proj => raidIsParryable(proj) && proj.life > 0 &&
-      Math.abs(box.cx - proj.x) < box.hw + proj.r && Math.abs(box.cy - proj.y) < box.hh + proj.r);
+    touching = raidG.projectiles.some(proj => raidIsParryable(proj) && proj.life > 0 && raidPolyHitsCircle(poly, proj.x, proj.y, proj.r));
   }
   if (touching) {
     raidPogoState.bounced = true;
-    p.vy = RAID_POGO_VY;
+    p.vy = raidPogoVy(); // Pogo Spring bounces higher (WPN-14)
     p.jumpBoosting = false; // a clean fixed-height bounce, not modulated by stale jump-hold
     p.onGround = false;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch'; // reuse the RAI-21 launch pop
@@ -5864,19 +6299,20 @@ function raidCheckLocalPogo() {
 // from their synced state, so there's no separate relay path for melee any more.
 function raidCheckSwordSwings(b) {
   if (raidBossUntargetable(b)) return;
-  const bhb = raidBossHalfExtent(b.type);
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
-    if (!p || !(p.swingTimer > 0)) return;
+    if (!p) return;
+    const timer = p.swingTimer > 0 ? p.swingTimer : 0;
     const st = raidSwingHitState[id] || (raidSwingHitState[id] = { lastTimer: 0, hasHit: false });
-    if (p.swingTimer > st.lastTimer) st.hasHit = false; // a higher timer than last frame means a new swing just started
-    st.lastTimer = p.swingTimer;
-    if (st.hasHit) return;
-    if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
-    const box = raidSwordHitbox(p);
-    if (Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh) {
-      st.hasHit = true;
-      raidHitBoss(b, { x: box.cx, y: box.cy, damage: RAID_SWORD_DAMAGE, dir: p.swingDir || 'side' });
+    if (timer <= 0 && st.lastTimer <= 0) return;
+    // every timer value passed since the last look, not just the current one (WPN-15)
+    const steps = raidSwingSteps(st, timer);
+    for (let i = 0; i < steps.length && !st.hasHit; i++) {
+      const poly = raidSlashWorldPoly(p, raidSwingProgress(steps[i]));
+      if (poly && raidPolyHitsBoss(poly, b)) {
+        st.hasHit = true;
+        raidHitBoss(b, { x: poly.hand[0], y: poly.hand[1], damage: raidSwordDamageFor(p.utility), dir: p.swingDir || 'side', stunBonus: raidStunBonusFor(p.utility) });
+      }
     }
   });
 }
@@ -5894,19 +6330,28 @@ function raidIsParryable(proj) {
 // destroyed - lobbed ones included (a parried ember never erupts, because onLand only runs when
 // the shot reaches the floor). Host-only like the rest of the sim, resolved from the same synced
 // swing state as raidCheckSwordSwings, and runs even while the boss itself is untargetable.
+let raidParryState = {};
 function raidParryProjectiles() {
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
-    if (!p || !(p.swingTimer > 0)) return;
-    if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
-    const box = raidSwordHitbox(p);
-    raidG.projectiles.forEach(proj => {
-      if (proj.life <= 0 || !raidIsParryable(proj)) return;
-      if (Math.abs(box.cx - proj.x) < box.hw + proj.r && Math.abs(box.cy - proj.y) < box.hh + proj.r) {
-        proj.life = 0;
-        raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
-        raidTriggerHitStop(2);
-      }
+    if (!p) return;
+    const timer = p.swingTimer > 0 ? p.swingTimer : 0;
+    const st = raidParryState[id] || (raidParryState[id] = { lastTimer: 0, hasHit: false });
+    if (timer <= 0 && st.lastTimer <= 0) return;
+    const reach = raidParryReachFor(p.utility); // Deflector (WPN-14): the slash, grown about the hand
+    raidSwingSteps(st, timer).forEach(k => {
+      const poly = raidSlashWorldPoly(p, raidSwingProgress(k));
+      if (!poly) return;
+      const hand = poly.hand;
+      const area = reach === 1 ? poly : poly.map(q => [hand[0] + (q[0] - hand[0]) * reach, hand[1] + (q[1] - hand[1]) * reach]);
+      raidG.projectiles.forEach(proj => {
+        if (proj.life <= 0 || !raidIsParryable(proj)) return;
+        if (raidPolyHitsCircle(area, proj.x, proj.y, proj.r)) {
+          proj.life = 0;
+          raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
+          raidTriggerHitStop(2);
+        }
+      });
     });
   });
   raidG.projectiles = raidG.projectiles.filter(proj => proj.life > 0);
@@ -5964,6 +6409,7 @@ function raidUpdateLocal() {
   // A dash keeps your height: no gravity and no vertical speed for as long as it lasts (RAI-16).
   const dashing = p.dashTimer > 0;
   if (dashing) { gravity = 0; p.vy = 0; p.jumpBoosting = false; }
+  else if (p.vy > 0) gravity *= raidFallGravityMult(); // Light Step: a gentler fall (WPN-14)
   p.vy += gravity;
   p.y += p.vy;
   const wasOnGround = p.onGround; // RAI-21: edge-detect the landing transition, for squash-stretch
@@ -6059,7 +6505,7 @@ function raidTryDash() {
   if (countdownActive) return;
   const p = raidLocal;
   if (p.dashCooldown > 0) return;
-  p.dashTimer = RAID_DASH_FRAMES;
+  p.dashTimer = raidDashFrames(); // Long Stride (WPN-14)
   p.dashDir = p.facing;
   p.vx = p.dashDir * RAID_DASH_SPEED;
   p.invincible = Math.max(p.invincible, raidDashInvincibleFrames());
@@ -6068,46 +6514,96 @@ function raidTryDash() {
   raidSendLocalState();
 }
 
-// A player's equipped utility item can shorten the dash cooldown (WPN-03).
+// Charm effect readers (WPN-03, WPN-13). A player can wear several charms, so every reader asks
+// "which of my worn charms has this effect?" - raidCharm() for the local player, raidCharmOf() for
+// a given synced list (a teammate's, for the effects the host resolves).
+function raidCharmOf(utilStr, effect) {
+  const ids = mqCharmIds(utilStr);
+  for (let i = 0; i < ids.length; i++) if (MQ_UTILITY_MAP[ids[i]].effect === effect) return MQ_UTILITY_MAP[ids[i]];
+  return null;
+}
+function raidCharm(effect) { return raidCharmOf(raidLocal.utility, effect); }
+
+// A player's worn charms can shorten the dash cooldown (Swift Boots, WPN-03).
 function raidDashCooldownFrames() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'dash_cooldown' ? Math.round(180 * u.value) : 180;
+  const u = raidCharm('dash_cooldown');
+  return u ? Math.round(180 * u.value) : 180;
 }
 
-// Vital Core's +1 max heart (WPN-03).
+// Vital Core's +1 and Titan Heart's +2 max hearts add together (WPN-03, WPN-14).
 function raidMaxHealthForLoadout() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'max_health' ? 5 + u.value : 5;
+  const a = raidCharm('max_health'), b = raidCharm('max_health_big');
+  return 5 + (a ? a.value : 0) + (b ? b.value : 0);
 }
 
 // Feather Cloak's longer jump hold (WPN-03).
 function raidJumpHoldFrames() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'jump_hold' ? Math.round(RAID_JUMP_HOLD_FRAMES * u.value) : RAID_JUMP_HOLD_FRAMES;
+  const u = raidCharm('jump_hold');
+  return u ? Math.round(RAID_JUMP_HOLD_FRAMES * u.value) : RAID_JUMP_HOLD_FRAMES;
 }
 
 // Nimble Treads' higher move speed cap (WPN-03).
 function raidMaxSpeed() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'move_speed' ? 7 * u.value : 7;
+  const u = raidCharm('move_speed');
+  return u ? 7 * u.value : 7;
 }
 
 // Iron Skin's reduced hit-knockback (WPN-03).
 function raidKnockbackMult() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'knockback_resist' ? u.value : 1;
+  const u = raidCharm('knockback_resist');
+  return u ? u.value : 1;
 }
 
 // Reinforced Plating's longer shield window (WPN-03).
 function raidShieldDurationFrames() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'shield_duration' ? Math.round(90 * u.value) : 90;
+  const u = raidCharm('shield_duration');
+  return u ? Math.round(90 * u.value) : 90;
 }
 
 // Mending Charm's faster shield recharge (WPN-03).
 function raidShieldRegenFrames() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'shield_charge_rate' ? Math.round(RAID_SHIELD_REGEN_FRAMES / u.value) : RAID_SHIELD_REGEN_FRAMES;
+  const u = raidCharm('shield_charge_rate');
+  return u ? Math.round(RAID_SHIELD_REGEN_FRAMES / u.value) : RAID_SHIELD_REGEN_FRAMES;
+}
+
+// ---- the ten WPN-14 charms ----
+function raidSwordCooldownFrames() { // Quick Hands
+  const u = raidCharm('sword_cooldown');
+  return u ? Math.round(RAID_SWORD_COOLDOWN_FRAMES * u.value) : RAID_SWORD_COOLDOWN_FRAMES;
+}
+function raidSwordDamageFor(utilStr) { // Whetstone (host-side: read from the swinger's synced list)
+  const u = raidCharmOf(utilStr, 'sword_damage');
+  return u ? Math.round(RAID_SWORD_DAMAGE * u.value) : RAID_SWORD_DAMAGE;
+}
+function raidStunBonusFor(utilStr) { // Opportunist: extra damage multiplier against a stunned boss
+  const u = raidCharmOf(utilStr, 'stun_bonus');
+  return u ? u.value : 1;
+}
+function raidPogoVy() { // Pogo Spring
+  const u = raidCharm('pogo_power');
+  return RAID_POGO_VY * (u ? u.value : 1);
+}
+function raidFallGravityMult() { // Light Step: only while falling
+  const u = raidCharm('light_fall');
+  return u ? u.value : 1;
+}
+function raidDashFrames() { // Long Stride
+  const u = raidCharm('dash_distance');
+  return u ? Math.round(RAID_DASH_FRAMES * u.value) : RAID_DASH_FRAMES;
+}
+function raidHurtInvincibleFrames(utilStr) { // Thick Skin (host-side: the hit player's synced list)
+  const u = raidCharmOf(utilStr, 'hurt_iframes');
+  return u ? Math.round(30 * u.value) : 30;
+}
+function raidParryReachFor(utilStr) { // Deflector
+  const u = raidCharmOf(utilStr, 'parry_reach');
+  return u ? u.value : 1;
+}
+// Lucky Charm (+10%) and Golden Idol (+25%) add together.
+function mqCoinMultiplier(utilStr) {
+  let m = 1;
+  ['coin_bonus', 'coin_bonus_big'].forEach(e => { const u = raidCharmOf(utilStr, e); if (u) m += u.value - 1; });
+  return m;
 }
 
 // Long Reach's bigger melee hitbox and slash (WPN-03) - one multiplier, shared by the sword
@@ -6116,20 +6612,19 @@ function raidShieldRegenFrames() {
 // every synced player, not just the local one - each player's own equipped charm applies to
 // their own swing.
 function raidAttackRangeMult(utilityId) {
-  const u = MQ_UTILITY_MAP[utilityId !== undefined ? utilityId : raidLocal.utility];
-  return u && u.effect === 'attack_range' ? u.value : 1;
+  const u = raidCharmOf(utilityId !== undefined ? utilityId : raidLocal.utility, 'attack_range');
+  return u ? u.value : 1;
 }
 
 // Phantom Step's longer dash invincibility (WPN-03).
 function raidDashInvincibleFrames() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'dash_iframes' ? Math.round(14 * u.value) : 14;
+  const u = raidCharm('dash_iframes');
+  return u ? Math.round(14 * u.value) : 14;
 }
 
 // Second Wind's one extra air jump (WPN-06).
 function raidMaxAirJumps() {
-  const u = MQ_UTILITY_MAP[raidLocal.utility];
-  return u && u.effect === 'double_jump' ? 1 : 0;
+  return raidCharm('double_jump') ? 1 : 0;
 }
 
 // RAI-21 animation polish - three small pure/testable helpers, same style as the readers above.
@@ -6326,8 +6821,11 @@ function drawBossSprite(ctx, b) {
   return true;
 }
 
+// Whole-body drawing scale per boss, on top of the animation scale (BOS-46: the Wyrm was too big).
+const BOSS_BODY_SCALE = { wyrm: 0.75 };
+
 function drawBossDispatch(ctx, boss) {
-  const scale = boss.animScale !== undefined ? boss.animScale : 1;
+  const scale = (boss.animScale !== undefined ? boss.animScale : 1) * (BOSS_BODY_SCALE[boss.type] || 1);
   const alpha = boss.animAlpha !== undefined ? boss.animAlpha : 1;
   const dazed = boss.exposed > 0;
   // Idle breathing so a resting boss never looks frozen.
@@ -7895,9 +8393,10 @@ function raidDraw() {
     const p = raidG.players[id];
     if (!p) return;
     const dp = raidSmoothPos(id, p.x, p.y);
+    if (p.swingTimer > 0) { dp.x = p.x; dp.y = p.y; } // a swinging teammate is drawn where the host resolves the slash (WPN-15)
     drawPlayerCuphead(raidCtx, dp.x, dp.y, 36, 48, p.facing || 1,
                p.health || 5, p.maxHealth || 5, p.shield || false, p.invincible || 0, false,
-               { skin: p.skin, gun: p.gun, swing: raidDisplaySwingProgress(id, p.swingTimer || 0), swingDir: p.swingDir || 'side', slashScale: raidAttackRangeMult(p.utility), vx: p.vx || 0, onGround: p.onGround !== false, utility: p.utility || '' });
+               { skin: p.skin, gun: p.gun, swing: raidDisplaySwingProgress(id, p.swingTimer || 0), swingDir: p.swingDir || 'side', slashScale: raidAttackRangeMult(p.utility), vx: p.vx || 0, vy: p.vy || 0, onGround: p.onGround !== false, utility: p.utility || '' });
   });
 
   const lp = raidLocal;
@@ -9406,8 +9905,40 @@ const MQ_UTILITY = [
   { id: 'util_double', name: 'Second Wind', rarity: 'legendary', effect: 'double_jump', value: 1,
     color: '#9ef0ff', accent: '#ffffff', blurb: 'Adds one extra jump in the air.' },
   { id: 'util_minion', name: 'Spectral Familiar', rarity: 'legendary', effect: 'minion', value: 1,
-    color: '#c68aff', accent: '#ff8ae0', blurb: 'A spectral companion that fires at the boss for you.' }
+    color: '#c68aff', accent: '#ff8ae0', blurb: 'A spectral companion that fires at the boss for you.' },
+  // WPN-14: ten more charms, each with its own effect.
+  { id: 'util_hands', name: 'Quick Hands', rarity: 'common', effect: 'sword_cooldown', value: 0.75,
+    color: '#ffd9a8', accent: '#ff9a3c', blurb: 'Sword cooldown -25%.' },
+  { id: 'util_stride', name: 'Long Stride', rarity: 'common', effect: 'dash_distance', value: 1.3,
+    color: '#b8f0d0', accent: '#3ddc97', blurb: 'Your dash lasts 30% longer.' },
+  { id: 'util_spring', name: 'Pogo Spring', rarity: 'uncommon', effect: 'pogo_power', value: 1.3,
+    color: '#ffe08a', accent: '#ff7a3d', blurb: 'Pogo bounces 30% higher.' },
+  { id: 'util_deflect', name: 'Deflector', rarity: 'uncommon', effect: 'parry_reach', value: 1.4,
+    color: '#cfe4ff', accent: '#6fb2ff', blurb: 'Your parries reach 40% further.' },
+  { id: 'util_whet', name: 'Whetstone', rarity: 'uncommon', effect: 'sword_damage', value: 1.25,
+    color: '#d6d6e0', accent: '#ff5a3c', blurb: '+25% sword damage.' },
+  { id: 'util_cloud', name: 'Light Step', rarity: 'rare', effect: 'light_fall', value: 0.7,
+    color: '#e6f0ff', accent: '#a8c8ff', blurb: 'You fall 30% more gently.' },
+  { id: 'util_hunter', name: 'Opportunist', rarity: 'rare', effect: 'stun_bonus', value: 1.5,
+    color: '#ffb3b3', accent: '#ff3b3b', blurb: '+50% damage to a stunned boss.' },
+  { id: 'util_hide', name: 'Thick Skin', rarity: 'epic', effect: 'hurt_iframes', value: 1.5,
+    color: '#d9a066', accent: '#ffd199', blurb: 'Invincible 50% longer after you are hit.' },
+  { id: 'util_idol', name: 'Golden Idol', rarity: 'epic', effect: 'coin_bonus_big', value: 1.25,
+    color: '#ffd84d', accent: '#fff3b0', blurb: '+25% coins from every win (adds to Lucky Charm).' },
+  { id: 'util_titan', name: 'Titan Heart', rarity: 'legendary', effect: 'max_health_big', value: 2,
+    color: '#ff4a5e', accent: '#ffd0d6', blurb: '+2 max hearts.' }
 ];
+
+// Charm loadout (WPN-13): up to MQ_CHARM_SLOTS charms at once, but their points may not add up to
+// more than MQ_CHARM_BUDGET. Every charm costs 1-3 points, roughly by how strong it is.
+const MQ_CHARM_SLOTS = 3;
+const MQ_CHARM_BUDGET = 5;
+const MQ_CHARM_COSTS = {
+  util_boots: 1, util_coin: 1, util_boots2: 1, util_iron: 1, util_shield: 1, util_regen: 1, util_feather: 1,
+  util_range: 2, util_dashi: 2, util_heart: 2, util_ward: 3, util_double: 3, util_minion: 3,
+  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3
+};
+MQ_UTILITY.forEach(u => { u.cost = MQ_CHARM_COSTS[u.id] || 1; });
 
 // Tall hats/hair push the floating health bar up so they do not overlap.
 const MQ_BAR_LIFT = { skin_wizard: 42, skin_golden: 24, skin_inferno: 20, skin_frost: 16, skin_sprout: 26, skin_bumblebee: 18, skin_robot: 18, skin_astronaut: 6, skin_galaxy: 18, skin_rainbow: 12 };
@@ -9426,6 +9957,37 @@ MQ_SWORDS.forEach(s => { MQ_SWORD_MAP[s.id] = s; });
 const MQ_WEAPON_MAP = MQ_SWORD_MAP;
 const MQ_UTILITY_MAP = {};
 MQ_UTILITY.forEach(u => { MQ_UTILITY_MAP[u.id] = u; });
+
+// A worn loadout is a comma-separated string of charm ids ('' = none; a lone id is a valid list, so
+// older saves and clients keep working). It is what is saved, and what is synced to teammates.
+const mqCharmIdsCache = {};
+function mqCharmIds(str) {
+  if (typeof str !== 'string' || !str) return [];
+  const hit = mqCharmIdsCache[str];
+  if (hit) return hit;
+  const seen = {};
+  const ids = str.split(',').filter(id => MQ_UTILITY_MAP[id] && !seen[id] && (seen[id] = true));
+  return (mqCharmIdsCache[str] = ids);
+}
+function mqCharmPoints(str) {
+  return mqCharmIds(str).reduce((sum, id) => sum + MQ_UTILITY_MAP[id].cost, 0);
+}
+// Can this charm be added to the worn loadout? { ok: true } or { ok: false, reason: 'slots' | 'points' }.
+function mqCharmEquipCheck(str, id) {
+  const ids = mqCharmIds(str);
+  if (ids.length >= MQ_CHARM_SLOTS) return { ok: false, reason: 'slots' };
+  const need = MQ_UTILITY_MAP[id].cost, left = MQ_CHARM_BUDGET - mqCharmPoints(str);
+  if (need > left) return { ok: false, reason: 'points', need: need, left: left };
+  return { ok: true };
+}
+// Keep only the owned, valid charms of a saved loadout that still fit, in order.
+function mqSanitizeCharms(str, owned) {
+  let out = '';
+  mqCharmIds(str).forEach(id => {
+    if (owned[id] && mqCharmEquipCheck(out, id).ok) out = out ? out + ',' + id : id;
+  });
+  return out;
+}
 
 
 // ============================================================
@@ -9489,61 +10051,8 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
     ctx.restore();
   }
 
-  // The big sweeping slash (WPN-10): a large white crescent centred on the swing's own direction
-  // that opens up and fades as the blade passes through, sized to the hitbox reach. Opt-in via
-  // slashScale (the live player passes it; shop previews and dash ghosts don't).
-  if (swing > 0 && slashScale > 0) {
-    // The slash sweeps along its arc from the top end to the bottom end: the head runs ahead
-    // (swing 0.12 -> 0.52) while the tail follows and eats the arc away (swing 0.3 -> 0.8).
-    const head = Math.min(1, Math.max(0, (swing - 0.12) / 0.4));
-    const tail = Math.min(1, Math.max(0, (swing - 0.3) / 0.5));
-    if (head > tail) {
-      const vec = RAID_SWORD_DIR_VECTORS[dir];
-      const thetaC = dir === 'up' ? 0 : dir === 'down' ? Math.PI
-        : vec ? Math.atan2(vec[0] * facing, -vec[1])
-        : Math.PI / 2; // the default swing slashes straight ahead
-      const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
-      const R = RAID_SWORD_SLASH_R * slashScale;
-      const span = 1.4; // a forward arc of about 160 degrees - it does not surround the player
-      // Every direction is the same slash turned to face it: the frame is rotated to the swing's
-      // direction and the arc squashed across it, so the player always has the same reach and the
-      // side slash simply points up or down for those swings.
-      const frameAng = phi;
-      let aStart = -span, aEnd = span;
-      // start at whichever end is higher on screen, so the swing always goes top to bottom
-      if (Math.sin(frameAng + aStart) - Math.sin(frameAng + aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
-      // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing
-      // through the farthest point and tapering to nothing at the bottom
-      const widthAt = (u) => 0.5 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6);
-      const steps = 28, outer = [], inner = [];
-      for (let i = 0; i <= steps; i++) {
-        const u = tail + (head - tail) * (i / steps);
-        const ang = aStart + (aEnd - aStart) * u;
-        outer.push([Math.cos(ang) * R, Math.sin(ang) * R]);
-        const ri = R * (1 - widthAt(u));
-        inner.push([Math.cos(ang) * ri, Math.sin(ang) * ri]);
-      }
-      ctx.save();
-      ctx.translate(px, py);
-      ctx.scale(facing, 1);
-      // squash across the swing direction (not along it): the ends of the arc move closer
-      // together while the forward reach stays the same
-      ctx.rotate(frameAng);
-      ctx.scale(1, RAID_SWORD_SLASH_SQUASH);
-      const g = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
-      g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(0.6, 'rgba(255,255,255,0.5)');
-      g.addColorStop(1, 'rgba(255,255,255,0.95)');
-      ctx.fillStyle = g;
-      ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
-      ctx.beginPath();
-      outer.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1])));
-      for (let i = inner.length - 1; i >= 0; i--) ctx.lineTo(inner[i][0], inner[i][1]);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-  }
+  // (The big sweeping slash (WPN-10) is no longer drawn here: drawPlayerCuphead fills it from
+  // raidSlashPolyAt - the same polygon that decides what the swing hits - WPN-15.)
 
   ctx.save();
   ctx.translate(px, py);
@@ -9754,8 +10263,28 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   ctx.restore(); // back to unscaled space for the shield ring / health bar below
 
+  // The slash (WPN-10): filled from the very polygon the hit test uses (WPN-15), in world space.
+  if (look.slashScale > 0 && look.swing > 0) {
+    const poly = raidSlashPolyAt({ x: x, y: y, facing: facing, dir: look.swingDir || 'side', scale: look.slashScale,
+      vx: look.vx || 0, vy: look.vy || 0, onGround: look.onGround !== false, invincible: invincible || 0 }, look.swing);
+    if (poly) {
+      const g = ctx.createRadialGradient(poly.hand[0], poly.hand[1], poly.R * 0.5, poly.hand[0], poly.hand[1], poly.R);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+      g.addColorStop(1, 'rgba(255,255,255,0.95)');
+      ctx.save();
+      ctx.fillStyle = g;
+      ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
+      ctx.beginPath();
+      poly.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // WPN-12: the equipped charm's own looping animation (not on dash afterimages or shop skin previews).
-  if (look.utility && !look.noCharm) mqDrawCharmFx(ctx, look.utility, cx, baseY, w, h, t, facing, look);
+  if (look.utility && !look.noCharm) mqCharmIds(look.utility).forEach(cid => mqDrawCharmFx(ctx, cid, cx, baseY, w, h, t, facing, look));
 
   if (shield) {
     ctx.shadowBlur = 30;
@@ -9971,6 +10500,83 @@ function mqDrawCharmFx(ctx, id, cx, baseY, w, h, t, facing, o) {
       ctx.globalAlpha = sin(ph * PI) * 0.8;
       ctx.beginPath(); ctx.arc(cx + sin(ph * 7 + k * 2) * 14, feet - ph * 26, 2.4, 0, PI * 2); ctx.fill();
     }
+  } else if (id === 'util_hands') { // Quick Hands: blurred arcs flicker round the sword hand
+    const hx = cx + facing * 34, hy = baseY + 22;
+    ctx.strokeStyle = acc; ctx.lineWidth = 2.4;
+    for (let k = 0; k < 3; k++) {
+      const a = t * 0.5 + k * 2.1;
+      ctx.globalAlpha = 0.35 + 0.5 * Math.abs(sin(a));
+      ctx.beginPath(); ctx.arc(hx, hy, 10 + k * 4, a, a + 1.0); ctx.stroke();
+    }
+  } else if (id === 'util_stride') { // Long Stride: long comet streaks trail behind at the waist
+    ctx.lineWidth = 2.4;
+    for (let k = 0; k < 3; k++) {
+      const len = 30 + 12 * sin(t * 0.2 + k * 1.7) + (running ? 14 : 0), y = mid + 4 + k * 9;
+      for (let seg = 0; seg < 4; seg++) {
+        ctx.strokeStyle = acc; ctx.globalAlpha = 0.7 * (1 - seg / 4);
+        ctx.beginPath(); ctx.moveTo(cx - facing * (14 + seg * len / 4), y); ctx.lineTo(cx - facing * (14 + (seg + 1) * len / 4), y); ctx.stroke();
+      }
+    }
+  } else if (id === 'util_spring') { // Pogo Spring: a coil under the feet that squashes and stretches
+    const hgt = 11 + 5 * sin(t * 0.22);
+    ctx.strokeStyle = acc; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(cx, feet - 1);
+    for (let k = 0; k < 6; k++) ctx.lineTo(cx + (k % 2 ? 7 : -7), feet - 1 + (k + 1) * hgt / 6);
+    ctx.stroke();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, feet + hgt, 11, 3, 0, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_deflect') { // Deflector: parry brackets shimmer in front of the sword
+    ctx.save(); ctx.translate(cx + facing * 40, baseY + 22); ctx.scale(facing, 1);
+    ctx.strokeStyle = acc; ctx.lineWidth = 2.6;
+    for (let k = 0; k < 2; k++) {
+      const pu = (t * 0.04 + k / 2) % 1;
+      ctx.globalAlpha = (1 - pu) * 0.85;
+      ctx.beginPath(); ctx.arc(-8, 0, 14 + pu * 14, -0.9, 0.9); ctx.stroke();
+    }
+    ctx.restore();
+  } else if (id === 'util_whet') { // Whetstone: sparks fly off the blade
+    const hx = cx + facing * 34, hy = baseY + 22;
+    for (let k = 0; k < 5; k++) {
+      const ph = (t * 0.05 + k / 5) % 1;
+      ctx.globalAlpha = 1 - ph; ctx.fillStyle = k % 2 ? '#ffd24a' : acc;
+      ctx.fillRect(hx + facing * (4 + ph * 22) - 1, hy - 8 - ph * 14 + sin(k * 2) * 4 - 1, 3, 3);
+    }
+    ctx.globalAlpha = 0.6 + 0.4 * sin(t * 0.3); ctx.fillStyle = '#ffffff';
+    mqSparkle(ctx, hx + facing * 10, hy - 14, 3 + 2 * Math.abs(sin(t * 0.17)));
+  } else if (id === 'util_cloud') { // Light Step: a soft cloud puff under the feet, with bubbles drifting up
+    ctx.fillStyle = col; ctx.globalAlpha = 0.55;
+    [[-10, 0, 7], [0, -2, 9], [10, 0, 7]].forEach((c, i) => { ctx.beginPath(); ctx.arc(cx + c[0], feet + 2 + c[1] + sin(t * 0.1 + i) * 1.2, c[2], 0, PI * 2); ctx.fill(); });
+    ctx.strokeStyle = acc; ctx.lineWidth = 1.4;
+    for (let k = 0; k < 3; k++) {
+      const ph = (t * 0.02 + k / 3) % 1;
+      ctx.globalAlpha = sin(ph * PI) * 0.7;
+      ctx.beginPath(); ctx.arc(cx + sin(k * 3 + ph * 4) * 16, feet - ph * 30, 2.5, 0, PI * 2); ctx.stroke();
+    }
+  } else if (id === 'util_hunter') { // Opportunist: a red crosshair spins beside the head
+    ctx.translate(cx + 28, baseY - 24); ctx.rotate(t * 0.04);
+    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.3 * sin(t * 0.2);
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, PI * 2); ctx.stroke();
+    for (let k = 0; k < 4; k++) { ctx.save(); ctx.rotate(k * PI / 2); ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, -4); ctx.stroke(); ctx.restore(); }
+    ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(0, 0, 1.6, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_hide') { // Thick Skin: a toughened shell outline pulses round the body
+    const pu = 0.5 + 0.5 * sin(t * 0.12);
+    ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.globalAlpha = 0.35 + 0.35 * pu;
+    ctx.beginPath(); ctx.rect(cx - w / 2 - 3 - pu * 2, baseY + 2 - pu * 2, w + 6 + pu * 4, h + 2 + pu * 2); ctx.stroke();
+    ctx.fillStyle = col; ctx.globalAlpha = 0.8;
+    [[-1, 0], [1, 0], [-1, 1], [1, 1]].forEach(c => { ctx.beginPath(); ctx.arc(cx + c[0] * (w / 2 + 3), baseY + 6 + c[1] * (h - 8), 2.6, 0, PI * 2); ctx.fill(); });
+  } else if (id === 'util_idol') { // Golden Idol: a small gold idol bobs by the head, with twinkles
+    ctx.translate(cx - 28, baseY - 30 + sin(t * 0.07) * 3);
+    ctx.fillStyle = col; ctx.strokeStyle = '#8a6a10'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, 0); ctx.lineTo(0, 9); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8a6a10'; ctx.fillRect(-3, -2, 2, 2); ctx.fillRect(1, -2, 2, 2);
+    ctx.fillStyle = acc; ctx.globalAlpha = 0.5 + 0.5 * Math.abs(sin(t * 0.15));
+    mqSparkle(ctx, 9, -9, 3);
+  } else if (id === 'util_titan') { // Titan Heart: a great heart beats on the chest, with a ring each beat
+    const beat = Math.max(0, sin(t * 0.14)), sc = 1 + beat * 0.25;
+    ctx.shadowBlur = 14; ctx.shadowColor = col;
+    ctx.save(); ctx.translate(cx, mid + 10); ctx.scale(sc, sc);
+    ctx.fillStyle = col; ctx.strokeStyle = '#6a1530'; ctx.lineWidth = 1.5; mqHeartPath(ctx, 8); ctx.fill(); ctx.stroke();
+    ctx.restore(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = (1 - beat) * beat * 2 * 0.6;
+    ctx.beginPath(); ctx.arc(cx, mid + 10, 10 + beat * 22, 0, PI * 2); ctx.stroke();
   }
   ctx.restore();
 }
@@ -10025,6 +10631,49 @@ function mqDrawCharmGlyph(ctx, item, t) {
   } else if (id === 'util_minion') { // a little spirit orbiting a core
     ctx.beginPath(); ctx.arc(0, 0, 4, 0, PI * 2); ctx.fill();
     ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cos(t * 0.1) * 11, sin(t * 0.1) * 11, 3.2, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_hands') { // a fist with motion arcs
+    ctx.beginPath(); ctx.rect(-6, -5, 12, 11); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    for (let k = 0; k < 2; k++) { const a = t * 0.5 + k * 3; ctx.globalAlpha = 0.4 + 0.5 * Math.abs(sin(a)); ctx.beginPath(); ctx.arc(0, 0, 11 + k * 3, a, a + 1.1); ctx.stroke(); }
+  } else if (id === 'util_stride') { // an arrow with a long tail that streams
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(8, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, -6); ctx.lineTo(10, 0); ctx.lineTo(3, 6); ctx.stroke();
+    ctx.lineWidth = 2; for (let k = 0; k < 2; k++) { const off = (t * 0.6 + k * 5) % 10; ctx.globalAlpha = 1 - off / 10; ctx.beginPath(); ctx.moveTo(-8 - off, -6 + k * 12); ctx.lineTo(-16 - off, -6 + k * 12); ctx.stroke(); }
+  } else if (id === 'util_spring') { // a coil bouncing
+    const hgt = 18 + 6 * sin(t * 0.2);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 10 - hgt);
+    for (let k = 1; k <= 6; k++) ctx.lineTo(k % 2 ? 7 : -7, 10 - hgt + k * hgt / 6);
+    ctx.stroke(); ctx.fillStyle = acc; ctx.beginPath(); ctx.ellipse(0, 11, 9, 3, 0, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_deflect') { // a shot glancing off a bracket
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(-4, 0, 12, -0.9, 0.9); ctx.stroke();
+    const ph = (t * 0.06) % 1; ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 1 - ph;
+    ctx.beginPath(); ctx.arc(14 - ph * 12, -ph * 12, 3, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_whet') { // a blade with sparks
+    ctx.save(); ctx.rotate(-0.8); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.rect(-12, -2, 24, 4); ctx.fill(); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = '#ffd24a';
+    for (let k = 0; k < 3; k++) { const ph = (t * 0.07 + k / 3) % 1; ctx.globalAlpha = 1 - ph; ctx.fillRect(4 + ph * 8 - 1, -4 - ph * 10 - 1, 3, 3); }
+  } else if (id === 'util_cloud') { // a cloud that floats
+    ctx.translate(0, sin(t * 0.08) * 2); ctx.fillStyle = '#ffffff';
+    [[-7, 2, 6], [0, -2, 8], [8, 2, 6]].forEach(c => { ctx.beginPath(); ctx.arc(c[0], c[1], c[2], 0, PI * 2); ctx.fill(); });
+    ctx.stroke();
+  } else if (id === 'util_hunter') { // a crosshair that spins
+    ctx.rotate(t * 0.05); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, PI * 2); ctx.stroke();
+    for (let k = 0; k < 4; k++) { ctx.save(); ctx.rotate(k * PI / 2); ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(0, -5); ctx.stroke(); ctx.restore(); }
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 2, 0, PI * 2); ctx.fill();
+  } else if (id === 'util_hide') { // a tough hide plate with studs that pulse
+    ctx.beginPath(); ctx.rect(-10, -9, 20, 18); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; const pu = 3 + sin(t * 0.15);
+    [[-6, -5], [6, -5], [-6, 5], [6, 5]].forEach(c => { ctx.beginPath(); ctx.arc(c[0], c[1], pu * 0.7, 0, PI * 2); ctx.fill(); });
+  } else if (id === 'util_idol') { // a golden idol, glinting
+    ctx.fillStyle = '#ffd84d'; ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 0); ctx.lineTo(0, 11); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#6a4a00'; ctx.fillRect(-4, -2, 3, 3); ctx.fillRect(1, -2, 3, 3);
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.4 + 0.6 * Math.abs(sin(t * 0.12)); mqSparkle(ctx, 9, -9, 4);
+  } else if (id === 'util_titan') { // a big heart, beating hard
+    const sc = 1 + Math.max(0, sin(t * 0.14)) * 0.3; ctx.scale(sc, sc);
+    ctx.shadowBlur = 8; ctx.shadowColor = '#ff4a5e'; ctx.fillStyle = '#ff3b4f';
+    mqHeartPath(ctx, 11); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
   } else {
     ctx.beginPath(); ctx.arc(0, 0, 8 + sin(t * 0.08) * 1.5, 0, PI * 2); ctx.fill(); // unknown charm: the old generic dot
   }
@@ -10090,7 +10739,7 @@ function mqLoadProfile() {
     if (s.equipped) {
       if (MQ_SKIN_MAP[s.equipped.skin] && p.owned[s.equipped.skin]) p.equipped.skin = s.equipped.skin;
       if (MQ_WEAPON_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
-      if (s.equipped.utility && MQ_UTILITY_MAP[s.equipped.utility] && p.owned[s.equipped.utility]) p.equipped.utility = s.equipped.utility;
+      if (typeof s.equipped.utility === 'string') p.equipped.utility = mqSanitizeCharms(s.equipped.utility, p.owned); // WPN-13
     }
     if (s.stats) {
       p.stats.crates = Math.floor(s.stats.crates) || 0;
@@ -10118,9 +10767,8 @@ function mqAwardRaidVictory() {
   const base = MQ_COIN_REWARD[currentDifficulty] || MQ_COIN_REWARD.normal;
   const hearts = Math.max(0, Math.min(raidLocal.maxHealth || 5, raidLocal.health));
   const bonus = hearts * MQ_HEART_BONUS;
-  // Lucky Charm's coin bonus (WPN-03).
-  const util = MQ_UTILITY_MAP[mqProfile.equipped.utility];
-  const coinMult = util && util.effect === 'coin_bonus' ? util.value : 1;
+  // Lucky Charm and Golden Idol's coin bonuses (WPN-03, WPN-14), added together.
+  const coinMult = mqCoinMultiplier(mqProfile.equipped.utility);
   const total = Math.round((base + bonus) * coinMult);
   mqProfile.coins += total;
   mqProfile.stats.raids++;
@@ -10289,7 +10937,7 @@ function mqRenderCrates() {
     const kinds = [];
     if (!crate.types || crate.types.indexOf('skin') >= 0) kinds.push('🧍 Player skins');
     if (!crate.types || crate.types.indexOf('sword') >= 0) kinds.push('⚔️ Swords');
-    if (!crate.types || crate.types.indexOf('utility') >= 0) kinds.push('🧰 Utility items');
+    if (!crate.types || crate.types.indexOf('utility') >= 0) kinds.push('🧰 Charms');
     const afford = mqProfile.coins >= crate.price;
     return `
       <div class="crate-card" style="--glow:${crate.art.glow}">
@@ -10439,19 +11087,33 @@ function mqBurst(host, rarity) {
   }
 }
 
-// Utility is the one optional slot: clicking an already-equipped utility item unequips it
-// (skin and weapon always have something equipped, so they only ever swap, never clear).
+// Charms are the optional slot: up to 3 can be worn within 5 charm points (WPN-13), and clicking a
+// worn charm takes it off. Skin and weapon always have something equipped, so they only ever swap.
 function mqEquipItem(itemId) {
   const item = MQ_ITEM_MAP[itemId];
   if (!item || !mqProfile.owned[itemId]) return;
-  const key = MQ_SLOT_KEY[item.slot];
-  if (item.slot === 'utility' && mqProfile.equipped.utility === itemId) mqProfile.equipped.utility = '';
-  else mqProfile.equipped[key] = itemId;
+  if (item.slot === 'utility') {
+    const ids = mqCharmIds(mqProfile.equipped.utility);
+    if (ids.indexOf(itemId) >= 0) {
+      mqProfile.equipped.utility = ids.filter(id => id !== itemId).join(',');
+    } else {
+      const chk = mqCharmEquipCheck(mqProfile.equipped.utility, itemId);
+      if (!chk.ok) {
+        mqToast(chk.reason === 'slots'
+          ? 'All ' + MQ_CHARM_SLOTS + ' charm slots are full - take one off first.'
+          : item.name + ' costs ' + chk.need + ' charm points but you only have ' + chk.left + ' left (of ' + MQ_CHARM_BUDGET + ').');
+        return;
+      }
+      mqProfile.equipped.utility = ids.concat(itemId).join(',');
+    }
+  } else {
+    mqProfile.equipped[MQ_SLOT_KEY[item.slot]] = itemId;
+  }
   mqSaveProfile();
   if (mqShopTab === 'inv') mqRenderInventory();
 }
 
-const MQ_TYPE_LABEL = { skin: 'Player Skin', sword: 'Weapon · Sword', utility: 'Utility' };
+const MQ_TYPE_LABEL = { skin: 'Player Skin', sword: 'Weapon · Sword', utility: 'Charm' };
 const MQ_TYPE_ICON = { skin: '🧍', sword: '⚔️', utility: '🧰' };
 const MQ_SLOT_ORDER = { skin: 0, weapon: 1, utility: 2 };
 
@@ -10463,12 +11125,13 @@ function mqRenderInventory() {
   mqEl('invHideLocked').checked = mqHideLocked;
 
   const eqSkin = MQ_SKIN_MAP[mqProfile.equipped.skin], eqGun = MQ_WEAPON_MAP[mqProfile.equipped.gun];
-  const eqUtil = MQ_UTILITY_MAP[mqProfile.equipped.utility];
+  const eqCharms = mqCharmIds(mqProfile.equipped.utility).map(id => MQ_UTILITY_MAP[id]);
   mqEl('loadoutSkin').innerHTML = `<span style="color:${MQ_RARITY[eqSkin.rarity].color}">${eqSkin.name}</span> <small>${MQ_RARITY[eqSkin.rarity].name}</small>`;
   mqEl('loadoutGun').innerHTML = `<span style="color:${MQ_RARITY[eqGun.rarity].color}">${eqGun.name}</span> <small>${MQ_RARITY[eqGun.rarity].name}</small>`;
-  mqEl('loadoutUtility').innerHTML = eqUtil
-    ? `<span style="color:${MQ_RARITY[eqUtil.rarity].color}">${eqUtil.name}</span> <small>${eqUtil.blurb}</small>`
-    : '<span style="opacity:0.6">None equipped</span> <small>optional</small>';
+  mqEl('loadoutUtility').innerHTML = (eqCharms.length
+    ? eqCharms.map(c => `<span style="color:${MQ_RARITY[c.rarity].color}">${c.name}</span> <small>${c.cost} pt${c.cost > 1 ? 's' : ''} · ${c.blurb}</small>`).join('<br>')
+    : '<span style="opacity:0.6">None equipped</span> <small>optional</small>')
+    + `<div class="charm-points">Charm points: ${mqCharmPoints(mqProfile.equipped.utility)} / ${MQ_CHARM_BUDGET} · Slots: ${eqCharms.length} / ${MQ_CHARM_SLOTS}</div>`;
 
   const items = MQ_ITEMS.filter(i => (mqInvFilter === 'all' || i.slot === mqInvFilter) && (!mqHideLocked || mqProfile.owned[i.id]))
     .sort((a, b) => MQ_SLOT_ORDER[a.slot] - MQ_SLOT_ORDER[b.slot] || MQ_RARITY_ORDER.indexOf(b.rarity) - MQ_RARITY_ORDER.indexOf(a.rarity));
@@ -10476,7 +11139,7 @@ function mqRenderInventory() {
   grid.innerHTML = items.map(item => {
     const owned = mqProfile.owned[item.id] || 0;
     const rar = MQ_RARITY[item.rarity];
-    const eq = mqProfile.equipped[MQ_SLOT_KEY[item.slot]] === item.id;
+    const eq = item.slot === 'utility' ? mqCharmIds(mqProfile.equipped.utility).indexOf(item.id) >= 0 : mqProfile.equipped[MQ_SLOT_KEY[item.slot]] === item.id;
     const canUnequip = eq && item.slot === 'utility';
     return `<div class="inv-card ${owned ? '' : 'locked'} ${eq ? 'equipped' : ''}" style="--rc:${rar.color};--rg:${rar.glow}" data-item="${item.id}">
       <div class="inv-rarity">${rar.name}${owned > 1 ? ' · x' + owned : ''}</div>
@@ -10484,6 +11147,7 @@ function mqRenderInventory() {
       ${owned ? '' : '<div class="inv-lock">🔒</div>'}
       <div class="inv-name">${item.name}</div>
       <div class="inv-type">${MQ_TYPE_LABEL[item.type]}</div>
+      ${item.cost ? `<div class="inv-cost">◆ ${item.cost} pt${item.cost > 1 ? 's' : ''}</div>` : ''}
       ${item.blurb ? `<div class="inv-blurb">${item.blurb}</div>` : ''}
       ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq && !canUnequip ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? (canUnequip ? 'Unequip' : 'Equipped ✓') : 'Equip'}</button>` : '<div class="inv-hint">Find in crates</div>'}
     </div>`;

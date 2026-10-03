@@ -63,18 +63,18 @@ test.describe('Shop and crates (spec 10.2)', () => {
     expect(r.crate_cosmic).toMatchObject({ name: 'Cosmic Crate', price: 400, weights: { rare: 60, epic: 32, legendary: 8 } });
     expect(r.crate_legend).toMatchObject({ name: 'Legend Crate', price: 700, weights: { rare: 46, epic: 39, legendary: 15 } });
 
-    expect(r.crate_starter.pool).toHaveLength(24);
+    expect(r.crate_starter.pool).toHaveLength(33);
     expect(r.crate_starter.types).toEqual(['skin', 'sword', 'utility']);
     expect(r.crate_starter.rarities).toEqual(['common', 'epic', 'rare', 'uncommon']);
     expect(r.crate_hero.pool).toHaveLength(10);
     expect(r.crate_hero.types).toEqual(['skin']);
     expect(r.crate_hero.rarities).toEqual(['epic', 'legendary', 'rare', 'uncommon']);
     // Arsenal is swords and charms (charms are weapon-locker gear, WPN-03); there are no guns any more.
-    expect(r.crate_arsenal.pool).toHaveLength(13);
+    expect(r.crate_arsenal.pool).toHaveLength(21);
     expect(r.crate_arsenal.types).toEqual(['sword', 'utility']);
     // The cosmic-tagged items: two skins and two swords (Dawnbreaker took over as the cosmic legendary).
     expect(r.crate_cosmic.pool).toEqual(['Astronaut', 'Dawnbreaker', 'Galaxy Walker', 'Voidbone Fang']);
-    expect(r.crate_legend.pool).toHaveLength(17);
+    expect(r.crate_legend.pool).toHaveLength(22);
     expect(r.crate_legend.types).toEqual(['skin', 'sword', 'utility']);
     expect(r.crate_legend.rarities).toEqual(['epic', 'legendary', 'rare']);
     // default items are never in a crate
@@ -170,9 +170,9 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       mqProfile.owned.skin_wizard = 2; mqProfile.owned.sword_frost = 1;
       showSection('shop'); mqOnShopOpen(); mqSetTab('inv');
     });
-    await expect(page.locator('.inv-card')).toHaveCount(32);
-    await expect(page.locator('#invCount')).toHaveText('4 / 32 collected');
-    await expect(page.locator('.inv-card.locked')).toHaveCount(28);
+    await expect(page.locator('.inv-card')).toHaveCount(42);
+    await expect(page.locator('#invCount')).toHaveText('4 / 42 collected');
+    await expect(page.locator('.inv-card.locked')).toHaveCount(38);
     await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(4);
     await expect(page.locator('.inv-card.locked .inv-equip')).toHaveCount(0);
     await expect(page.locator('.inv-card', { hasText: 'Star Wizard' })).toContainText('x2');
@@ -256,8 +256,8 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       const out = [];
       for (const sword of MQ_SWORDS.map((s) => s.id)) {
         raidLocal.gun = sword;
-        const box = raidSwordHitbox(Object.assign({}, raidLocal, { swingDir: 'side', utility: '' }));
-        out.push([RAID_SWORD_DAMAGE, RAID_SWORD_COOLDOWN_FRAMES, RAID_SWORD_SWING_FRAMES, box.hw, box.hh].join(','));
+        const bb = raidPolyBounds(raidSlashWorldPoly(Object.assign({}, raidLocal, { swingDir: 'side', utility: '' }), 0.45));
+        out.push([RAID_SWORD_DAMAGE, RAID_SWORD_COOLDOWN_FRAMES, RAID_SWORD_SWING_FRAMES, bb.x0, bb.x1, bb.y0, bb.y1].join(','));
       }
       const dims = MQ_SKINS.map((s) => { raidLocal.skin = s.id; return [raidLocal.w, raidLocal.h, raidLocal.maxHealth].join(','); });
       return { swords: [...new Set(out)], dims: [...new Set(dims)] };
@@ -267,6 +267,144 @@ test.describe('My Items and equipping (spec 10.2)', () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
     // sword/skin ids never feed damage or health logic
     expect(src).not.toMatch(/damage[^;\n]*(sword_|skin_)/);
+  });
+});
+
+const CHARM_COSTS = {
+  util_boots: 1, util_coin: 1, util_boots2: 1, util_iron: 1, util_shield: 1, util_regen: 1, util_feather: 1,
+  util_range: 2, util_dashi: 2, util_heart: 2, util_ward: 3, util_double: 3, util_minion: 3,
+  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3
+};
+
+test.describe('Charm loadout (WPN-13)', () => {
+  test('WPN-13 there are 23 charms; each costs 1-3 charm points', async ({ page }) => {
+    const r = await page.evaluate(() => ({
+      slots: MQ_CHARM_SLOTS, budget: MQ_CHARM_BUDGET,
+      costs: Object.fromEntries(MQ_UTILITY.map((u) => [u.id, u.cost])),
+      rarities: MQ_UTILITY.reduce((a, u) => { a[u.rarity] = (a[u.rarity] || 0) + 1; return a; }, {}),
+      effects: new Set(MQ_UTILITY.map((u) => u.effect)).size
+    }));
+    expect(r.slots).toBe(3);
+    expect(r.budget).toBe(5);
+    expect(r.costs).toEqual(CHARM_COSTS);
+    expect(Object.keys(r.costs).length).toBe(23);
+    expect(r.effects, 'every charm has its own effect, so none are redundant').toBe(23);
+    // the new ones fill every rarity
+    ['common', 'uncommon', 'rare', 'epic', 'legendary'].forEach((k) => expect(r.rarities[k], k).toBeGreaterThan(0));
+  });
+
+  test('WPN-13 up to three charms can be worn, but their points may not add up to more than 5', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      ownAll(); mqProfile.equipped.utility = '';
+      const eq = (id) => { mqEquipItem(id); return mqProfile.equipped.utility; };
+      const out = {};
+      out.one = eq('util_boots');
+      out.two = eq('util_coin');
+      out.three = eq('util_double'); // 1 + 1 + 3 = 5 points, three slots
+      out.fourthRefused = eq('util_boots2'); // no free slot
+      out.checkSlots = mqCharmEquipCheck(mqProfile.equipped.utility, 'util_boots2');
+      out.unequip = eq('util_coin'); // clicking a worn charm takes it off
+      out.overBudget = eq('util_ward'); // 1 + 3 + 3 = 7
+      out.checkPoints = mqCharmEquipCheck(mqProfile.equipped.utility, 'util_ward');
+      out.nearlyOver = eq('util_range'); // 1 + 3 + 2 = 6
+      out.fits = eq('util_boots2'); // 1 + 3 + 1 = 5
+      out.points = mqCharmPoints(mqProfile.equipped.utility);
+      // two big charms never fit together; one big charm plus two small ones does
+      mqProfile.equipped.utility = '';
+      eq('util_ward'); out.bigPair = eq('util_double');
+      out.bigPlusSmall = eq('util_boots') && eq('util_coin');
+      out.saved = JSON.parse(localStorage.getItem(MQ_PROFILE_KEY)).equipped.utility;
+      // not owned: refused
+      mqProfile.equipped.utility = ''; delete mqProfile.owned.util_idol;
+      out.unowned = eq('util_idol');
+      out.empty = mqCharmEquipCheck('', 'util_boots');
+      return out;
+    });
+    expect(r.one).toBe('util_boots');
+    expect(r.two).toBe('util_boots,util_coin');
+    expect(r.three).toBe('util_boots,util_coin,util_double');
+    expect(r.fourthRefused, 'a fourth charm is refused even when its points would fit').toBe('util_boots,util_coin,util_double');
+    expect(r.checkSlots).toEqual({ ok: false, reason: 'slots' });
+    expect(r.unequip).toBe('util_boots,util_double');
+    expect(r.overBudget, 'a charm whose points do not fit is refused').toBe('util_boots,util_double');
+    expect(r.checkPoints).toEqual({ ok: false, reason: 'points', need: 3, left: 1 });
+    expect(r.nearlyOver).toBe('util_boots,util_double');
+    expect(r.fits).toBe('util_boots,util_double,util_boots2');
+    expect(r.points).toBe(5);
+    expect(r.bigPair, 'two 3-point charms are 6 points').toBe('util_ward');
+    expect(r.bigPlusSmall).toBe('util_ward,util_boots,util_coin');
+    expect(r.saved, 'the loadout is saved').toBe('util_ward,util_boots,util_coin');
+    expect(r.unowned).toBe('');
+    expect(r.empty).toEqual({ ok: true });
+  });
+
+  test('WPN-13 a saved loadout is checked on load: only owned charms, three at most, within 5 points; an old single charm still works', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const load = (utility, owned) => {
+        const o = { skin_classic: 1, sword_training: 1 }; (owned || []).forEach((id) => { o[id] = 1; });
+        localStorage.setItem(MQ_PROFILE_KEY, JSON.stringify({ coins: 0, owned: o, equipped: { skin: 'skin_classic', gun: 'sword_training', utility }, stats: {} }));
+        return mqLoadProfile().equipped.utility;
+      };
+      const own = ['util_boots', 'util_coin', 'util_boots2', 'util_iron', 'util_ward', 'util_double'];
+      return {
+        legacy: load('util_boots', own),
+        tooMany: load('util_boots,util_coin,util_boots2,util_iron', own),
+        tooCostly: load('util_ward,util_double,util_boots', own), // 3 + 3 refused, then 1 fits
+        unowned: load('util_boots,util_heart,util_coin', own),
+        junk: load('nope,util_boots,util_boots,,util_coin', own),
+        notString: load(['util_boots'], own),
+        none: load('', own)
+      };
+    });
+    expect(r.legacy).toBe('util_boots');
+    expect(r.tooMany).toBe('util_boots,util_coin,util_boots2');
+    expect(r.tooCostly).toBe('util_ward,util_boots');
+    expect(r.unowned).toBe('util_boots,util_coin');
+    expect(r.junk, 'unknown ids and duplicates are dropped').toBe('util_boots,util_coin');
+    expect(r.notString).toBe('');
+    expect(r.none).toBe('');
+  });
+
+  test('WPN-13 My Items shows the worn charms with their point total, each card shows its cost, and a charm that does not fit says why', async ({ page }) => {
+    await page.evaluate(() => { ownAll(); mqProfile.equipped.utility = ''; showSection('shop'); mqOnShopOpen(); mqSetTab('inv'); mqSetFilter('utility'); });
+    await expect(page.locator('#loadoutUtility')).toContainText('0 / 5');
+    await expect(page.locator('.inv-card', { hasText: 'Warding Sigil' })).toContainText('3 pts');
+    await expect(page.locator('.inv-card', { hasText: 'Swift Boots' })).toContainText('1 pt');
+    await page.locator('.inv-card', { hasText: 'Warding Sigil' }).getByRole('button', { name: 'Equip' }).click();
+    await page.locator('.inv-card', { hasText: 'Swift Boots' }).getByRole('button', { name: 'Equip' }).click();
+    await expect(page.locator('#loadoutUtility')).toContainText('4 / 5');
+    await expect(page.locator('#loadoutUtility')).toContainText('Warding Sigil');
+    await expect(page.locator('#loadoutUtility')).toContainText('Swift Boots');
+    // 4 + 2 = 6: refused, with a toast that names the problem
+    await page.locator('.inv-card', { hasText: 'Long Reach' }).getByRole('button', { name: 'Equip' }).click();
+    await expect(page.locator('#mqToast')).toContainText('charm points');
+    expect(await page.evaluate(() => mqProfile.equipped.utility)).toBe('util_ward,util_boots');
+    // worn cards are marked and can be taken off again
+    await expect(page.locator('.inv-card.equipped')).toHaveCount(2);
+    await page.locator('.inv-card', { hasText: 'Swift Boots' }).getByRole('button', { name: 'Unequip' }).click();
+    await expect(page.locator('#loadoutUtility')).toContainText('3 / 5');
+    // a full set of slots is also explained
+    await page.evaluate(() => { mqProfile.equipped.utility = 'util_boots,util_coin,util_boots2'; mqRenderInventory(); });
+    await page.locator('.inv-card', { hasText: 'Iron Skin' }).getByRole('button', { name: 'Equip' }).click();
+    await expect(page.locator('#mqToast')).toContainText('slots');
+  });
+
+  test('WPN-13 the raid uses every worn charm, and the whole loadout is synced to teammates', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      ownAll(); mqProfile.equipped.utility = 'util_boots,util_heart,util_feather'; mqSaveProfile();
+      await T.setupRaid('grinmaw');
+      return {
+        local: raidLocal.utility, ids: mqEquippedIds().utility,
+        synced: T.me().utility,
+        dash: raidDashCooldownFrames(), hearts: raidMaxHealthForLoadout(), hold: raidJumpHoldFrames()
+      };
+    });
+    expect(r.local).toBe('util_boots,util_heart,util_feather');
+    expect(r.ids).toBe(r.local);
+    expect(r.synced).toBe(r.local);
+    expect(r.dash, 'Swift Boots').toBe(135);
+    expect(r.hearts, 'Vital Core').toBe(6);
+    expect(r.hold, 'Feather Cloak').toBe(Math.round(12 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 12
   });
 });
 
@@ -296,8 +434,8 @@ test.describe('Items (spec 10.3)', () => {
     });
     expect(r.skins).toEqual(SPEC_SKINS);
     expect(r.swords).toEqual(SPEC_SWORDS);
-    expect(r.items).toBe(32); // 14 skins + 5 swords + 13 charms
-    expect(r.uniqueIds).toBe(32);
+    expect(r.items).toBe(42); // 14 skins + 5 swords + 23 charms
+    expect(r.uniqueIds).toBe(42);
     expect(r.distinctSkins, 'every skin looks different').toBe(14);
     expect(r.errors).toEqual([]);
     expect(r.animatedRare, 'epic and legendary skins are animated').toEqual([true, true, true, true]);
