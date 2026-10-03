@@ -981,7 +981,17 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const off = alphaAt(1, 0.45, 0, Math.round(R * 0.85), 0);         // crescent off (shop preview, ghosts)
       const idle = alphaAt(1, 0, 1, Math.round(R * 0.85), 0);           // no swing, nothing drawn
       const behind = alphaAt(1, 0.45, 1, -Math.round(R * 0.85), 0);     // the crescent is in front, not behind
-      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind };
+      // The old small swing is gone from the live swing: where the swinging blade and its little
+      // trail arcs used to be (forward of the hand, ~42px out) is empty now, and the blade just
+      // rests at its held angle (up and back from the hand) instead of sweeping.
+      const oldTrailSpot = alphaAt(1, 0.45, 1, 40, -11, 'sword_training');
+      const restingBlade = alphaAt(1, 0.45, 1, -19, -23, 'sword_training');
+      const previewTrailSpot = alphaAt(1, 0.45, undefined, 40, -11, 'sword_training'); // the shop preview (no slashScale) keeps its small swing
+      // very curved: the crescent wraps right round toward the player - well past the ~170 degrees
+      // it used to cover - so a point 120deg round from straight ahead (cos 120 = -0.5) is still inside it
+      const wrapAng = (120 * Math.PI) / 180;
+      const wrapped = alphaAt(1, 0.45, 1, Math.round(R * 0.85 * Math.cos(wrapAng)), Math.round(R * 0.85 * Math.sin(wrapAng)));
+      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, wrapped };
     });
     expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
     expect(r.reachRight).toBeGreaterThanOrEqual(120);
@@ -990,9 +1000,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
     expect(Math.min(...r.far.rgb), 'and it is white, not the blade\'s own colour').toBeGreaterThan(200);
     expect(r.farMirror.a, 'mirrored for a left-facing player').toBeGreaterThan(60);
-    expect(r.off.a, 'switched off by default (shop previews, dash ghosts)').toBe(0);
+    expect(r.off.a, 'no crescent when slashScale is 0 (dash afterimages)').toBe(0);
     expect(r.idle.a, 'nothing when not swinging').toBe(0);
     expect(r.behind.a, 'the crescent sweeps in front of the player').toBe(0);
+    expect(r.oldTrailSpot.a, 'the old small trail arcs are gone from the live swing').toBe(0);
+    expect(r.restingBlade.a, 'the blade rests at its held angle instead of swinging').toBeGreaterThan(100);
+    expect(r.previewTrailSpot.a, 'the shop preview still draws its own small swing').toBeGreaterThan(0);
+    expect(r.wrapped.a, 'the crescent is very curved - it wraps well round toward the player').toBeGreaterThan(40);
   });
 
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {

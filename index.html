@@ -9335,8 +9335,14 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
   // (WPN-05) just picks a different sweep center: side sweeps from behind-and-up to mostly
   // forward (unchanged from the original single-direction swing); up stays centered overhead;
   // down is the same overhead sweep rotated a half turn to point below the player.
+  // The live in-game swing (slashScale passed, even as 0 for dash ghosts) has no sweeping blade
+  // and no small trail arcs any more - the blade just rests at its held angle and the big
+  // crescent below is the whole swing animation. Only the shop preview (slashScale undefined)
+  // keeps the old small swing, since it has no room for a 150px slash.
+  const live = slashScale !== undefined;
   let angle;
-  if (dir === 'up') angle = -0.9 + e * 1.8;
+  if (live) angle = -0.7; // the 'side' swing's resting angle, whatever the last swing direction was
+  else if (dir === 'up') angle = -0.9 + e * 1.8;
   else if (dir === 'down') angle = Math.PI - 0.9 + e * 1.8;
   else if (dir === 'left' || dir === 'right' || RAID_SWORD_DIR_VECTORS[dir]) {
     // left/right/diagonals (WPN-05): the ctx.scale(facing,1) below mirrors the whole draw
@@ -9352,7 +9358,7 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
   }
   else angle = -0.7 + e * 2.0; // 'side' (default), unchanged
 
-  if (swing > 0) {
+  if (swing > 0 && !live) {
     // The slash trail (WPN-04): a fading white crescent following the blade through its arc -
     // Hollow Knight's nail slash is white regardless of the nail's own color, so only the blade
     // itself (below) keeps this sword's tint.
@@ -9383,7 +9389,7 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
         : Math.PI / 2; // the default swing slashes straight ahead
       const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
       const R = RAID_SWORD_SLASH_R * slashScale;
-      const span = 0.6 + 1.4 * Math.min(1, swing / 0.4); // opens up as the swing starts, wrapping ~230 degrees at full
+      const span = 0.6 + 2.0 * Math.min(1, swing / 0.4); // opens up as the swing starts, wrapping ~300 degrees at full
       const a0 = phi - span, a1 = phi + span;
       ctx.save();
       ctx.translate(px, py);
