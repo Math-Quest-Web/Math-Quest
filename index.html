@@ -1107,6 +1107,8 @@ body {
 .inv-lock { position: absolute; top: 68px; left: 0; right: 0; font-size: 2em; pointer-events: none; }
 .inv-name { color: white; font-size: 1em; margin-top: 2px; }
 .inv-type { font-family: Arial, sans-serif; font-size: 0.72em; color: #8a8ab0; margin-bottom: 8px; }
+.inv-buy { margin: 4px 10px 10px; padding: 7px 14px; border: none; border-radius: 10px; background: #ffd84d; color: #3a2a00; font-family: Arial, sans-serif; font-weight: bold; cursor: pointer; }
+.inv-buy:hover { filter: brightness(1.08); }
 .inv-cost { font-family: Arial, sans-serif; font-size: 0.74em; font-weight: bold; color: #ffd84d; margin: 0 0 4px; }
 .charm-points { font-family: Arial, sans-serif; font-size: 0.8em; font-weight: bold; color: #ffd84d; margin-top: 4px; }
 .inv-blurb { font-family: Arial, sans-serif; font-size: 0.72em; color: #b6b6d6; margin: 2px 10px 6px; line-height: 1.3; }
@@ -6226,6 +6228,67 @@ function raidSlashWorldPoly(p, swing) {
   }, swing);
 }
 function raidSwingProgress(timer) { return 1 - timer / RAID_SWORD_SWING_FRAMES; }
+
+// The sword-specific effect riding on a slash (WPN-04), clipped to the slash polygon. poly is the
+// crescent: its first half is the outer edge, its second half the inner edge, in reverse.
+function mqDrawSlashFx(ctx, poly, st, t) {
+  const n = poly.length, half = n >> 1;
+  // a point across the crescent: along = 0..1 from one end to the other, across = 0 (outer) .. 1 (inner)
+  const at = (along, across) => {
+    const j = Math.max(0, Math.min(half - 1, Math.round(along * (half - 1))));
+    const o = poly[j], q = poly[n - 1 - j];
+    return [o[0] + (q[0] - o[0]) * across, o[1] + (q[1] - o[1]) * across];
+  };
+  ctx.save();
+  ctx.beginPath();
+  poly.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
+  ctx.closePath();
+  ctx.clip();
+  ctx.shadowBlur = 0;
+  if (st.fx === 'leaf') { // leaves drift along the arc
+    ctx.fillStyle = 'rgba(225,255,190,0.95)';
+    for (let k = 0; k < 6; k++) {
+      const pt = at(((k / 6) + t * 0.01) % 1, 0.3 + 0.3 * Math.sin(k * 2.1));
+      ctx.save(); ctx.translate(pt[0], pt[1]); ctx.rotate(k * 1.3 + t * 0.12);
+      ctx.beginPath(); ctx.ellipse(0, 0, 2.2, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  } else if (st.fx === 'crystal') { // ice shards and a bright rim
+    ctx.fillStyle = 'rgba(240,252,255,0.95)';
+    for (let k = 0; k < 5; k++) {
+      const pt = at((k + 0.5) / 5, 0.35);
+      ctx.save(); ctx.translate(pt[0], pt[1]); ctx.rotate(k * 0.9);
+      ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(3, 0); ctx.lineTo(0, 5); ctx.lineTo(-3, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(235,250,255,0.9)'; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let j = 0; j < half; j++) { const o = poly[j]; if (j) ctx.lineTo(o[0], o[1]); else ctx.moveTo(o[0], o[1]); }
+    ctx.stroke();
+  } else if (st.fx === 'void') { // dark wisps swirling in the slash
+    for (let k = 0; k < 7; k++) {
+      const pt = at(((k / 7) + t * 0.015) % 1, 0.5 + 0.4 * Math.sin(k * 1.7 + t * 0.2));
+      ctx.fillStyle = k % 2 ? 'rgba(10,0,25,0.95)' : 'rgba(190,130,255,0.9)';
+      ctx.beginPath(); ctx.arc(pt[0], pt[1], 2.4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(15,0,35,0.9)'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let j = 0; j < half; j++) { const o = at(j / (half - 1), 0.55); if (j) ctx.lineTo(o[0], o[1]); else ctx.moveTo(o[0], o[1]); }
+    ctx.stroke();
+  } else if (st.fx === 'sun') { // sun rays fanning out from the hand, and a glint
+    ctx.strokeStyle = 'rgba(255,248,200,0.95)'; ctx.lineWidth = 2;
+    const hx = poly.hand[0], hy = poly.hand[1];
+    for (let k = 0; k < 7; k++) {
+      const pt = at(k / 6, 0.5);
+      const dx = pt[0] - hx, dy = pt[1] - hy, d = Math.hypot(dx, dy) || 1;
+      ctx.beginPath(); ctx.moveTo(hx + dx / d * poly.R * 0.45, hy + dy / d * poly.R * 0.45); ctx.lineTo(hx + dx / d * poly.R * 1.2, hy + dy / d * poly.R * 1.2); ctx.stroke();
+    }
+    const gp = at(0.5, 0.25);
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    mqSparkle(ctx, gp[0], gp[1], 4 + 2 * Math.abs(Math.sin(t * 0.3)));
+  }
+  ctx.restore();
+}
 // Would this swing, at any point of its animation, touch the boss? (For where a player can reach.)
 function raidSwingHitsBoss(p, b) {
   for (let t = RAID_SWORD_SWING_FRAMES; t >= 1; t--) {
@@ -9877,6 +9940,19 @@ const MQ_SWORDS = [
     body: ['#fff3a6', '#e0a012'], trim: '#7a4a00', glow: '#ffd23f' }
 ];
 
+// Slash styles (WPN-04): every sword's slash has its own colours and its own little effect, so a
+// teammate's sword is easy to recognise in a fight. The effects are drawn clipped to the slash polygon,
+// so what you see is still exactly what hits (WPN-15). core = the slash's inner glow, edge = its bright
+// rim, fx = which effect rides along it.
+const MQ_SLASH_STYLES = {
+  sword_training: { fx: 'none', core: [255, 255, 255], edge: [255, 255, 255] },
+  sword_moss: { fx: 'leaf', core: [120, 215, 90], edge: [170, 245, 120] },
+  sword_frost: { fx: 'crystal', core: [110, 190, 255], edge: [170, 230, 255] },
+  sword_void: { fx: 'void', core: [30, 5, 70], edge: [120, 60, 220] },
+  sword_dawn: { fx: 'sun', core: [255, 170, 30], edge: [255, 225, 110] }
+};
+function mqSlashStyle(swordId) { return MQ_SLASH_STYLES[swordId] || MQ_SLASH_STYLES.sword_training; }
+
 // Utility items are the one non-cosmetic equip slot (WPN-03): each has a small, self-affecting
 // gameplay effect. Only one can be equipped at a time, and none is required.
 const MQ_UTILITY = [
@@ -10268,23 +10344,25 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
     const poly = raidSlashPolyAt({ x: x, y: y, facing: facing, dir: look.swingDir || 'side', scale: look.slashScale,
       vx: look.vx || 0, vy: look.vy || 0, onGround: look.onGround !== false, invincible: invincible || 0 }, look.swing);
     if (poly) {
+      const st = mqSlashStyle(look.gun), rgb = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
       const g = ctx.createRadialGradient(poly.hand[0], poly.hand[1], poly.R * 0.5, poly.hand[0], poly.hand[1], poly.R);
-      g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(0.6, 'rgba(255,255,255,0.5)');
-      g.addColorStop(1, 'rgba(255,255,255,0.95)');
+      g.addColorStop(0, rgb(st.core, 0));
+      g.addColorStop(0.6, rgb(st.core, 0.5));
+      g.addColorStop(1, rgb(st.edge, 0.95));
       ctx.save();
       ctx.fillStyle = g;
-      ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
+      ctx.shadowColor = rgb(st.edge, 1); ctx.shadowBlur = 16;
       ctx.beginPath();
       poly.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
       ctx.closePath();
       ctx.fill();
       ctx.restore();
+      if (st.fx !== 'none') mqDrawSlashFx(ctx, poly, st, t);
     }
   }
 
   // WPN-12: the equipped charm's own looping animation (not on dash afterimages or shop skin previews).
-  if (look.utility && !look.noCharm) mqCharmIds(look.utility).forEach(cid => mqDrawCharmFx(ctx, cid, cx, baseY, w, h, t, facing, look));
+  if (look.utility && !look.noCharm) mqCharmIds(look.utility).forEach((cid, i) => mqDrawCharmFx(ctx, cid, cx, baseY, w, h, t, facing, look, i));
 
   if (shield) {
     ctx.shadowBlur = 30;
@@ -10381,203 +10459,20 @@ function mqWing(ctx, x, y, dir, flap, len, col) {
   }
 }
 
-function mqDrawCharmFx(ctx, id, cx, baseY, w, h, t, facing, o) {
+function mqDrawCharmFx(ctx, id, cx, baseY, w, h, t, facing, o, slot) {
   const u = MQ_UTILITY_MAP[id];
   if (!u) return;
-  o = o || {};
-  const feet = baseY + h, mid = baseY + h * 0.35;
-  const running = Math.abs(o.vx || 0) > 0.5;
-  const acc = u.accent, col = u.color;
-  const sin = Math.sin, cos = Math.cos, PI = Math.PI;
+  // Minimal (WPN-12): each worn charm is one tiny animated badge on a small dark disc, stacked in a
+  // column behind the player (never in front, where the sword is), so three of them stay tidy.
+  const i = slot || 0;
+  const x = cx - facing * (w / 2 + 16), y = baseY + h / 2 + (i - 1) * 19 + Math.sin(t * 0.06 + i * 2) * 1.5;
   ctx.save();
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.shadowBlur = 0;
-  if (id === 'util_boots') { // Swift Boots: little wings flick at the ankles, speed lines behind
-    const flap = sin(t * 0.45);
-    [-1, 1].forEach(sd => mqWing(ctx, cx + sd * 11, feet - 4, sd, flap, 13, acc));
-    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = running ? 0.8 : 0.35;
-    for (let k = 0; k < 3; k++) {
-      const off = ((t * 3 + k * 9) % 27);
-      ctx.beginPath(); ctx.moveTo(cx - facing * (14 + off), feet - 10 - k * 8); ctx.lineTo(cx - facing * (24 + off), feet - 10 - k * 8); ctx.stroke();
-    }
-  } else if (id === 'util_coin') { // Lucky Charm: a spinning gold coin orbits and a twinkle pops
-    const a = t * 0.07;
-    const sx = Math.abs(cos(t * 0.2)) * 6 + 1;
-    ctx.fillStyle = acc; ctx.strokeStyle = '#8a6a10'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.ellipse(cx + cos(a) * 30, mid + sin(a) * 9, sx, 6, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    mqSparkle(ctx, cx + cos(t * 0.05 + 2) * 24, mid - 20 + sin(t * 0.05 + 2) * 8, 2 + 3 * Math.abs(sin(t * 0.13)));
-  } else if (id === 'util_feather') { // Feather Cloak: feathers drift down around the player
-    for (let i = 0; i < 4; i++) {
-      const ph = (t * 0.018 + i / 4) % 1;
-      const fx = cx + sin(ph * PI * 3 + i * 2) * 26, fy = baseY - 24 + ph * (h + 36);
-      ctx.save(); ctx.translate(fx, fy); ctx.rotate(sin(ph * PI * 4 + i) * 0.9);
-      ctx.globalAlpha = sin(ph * PI) * 0.85;
-      ctx.fillStyle = col; ctx.strokeStyle = acc; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.ellipse(0, 0, 3.2, 8, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 9); ctx.stroke();
-      ctx.restore();
-    }
-  } else if (id === 'util_heart') { // Vital Core: a heart beats beside the head, with a ring on each beat
-    const beat = Math.max(0, sin(t * 0.18)), sc = 1 + beat * 0.3;
-    ctx.save(); ctx.translate(cx + 26, baseY - 30 + sin(t * 0.06) * 2); ctx.scale(sc, sc);
-    ctx.fillStyle = col; ctx.strokeStyle = '#6a1530'; ctx.lineWidth = 1.5; mqHeartPath(ctx, 6); ctx.fill(); ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.globalAlpha = (1 - beat) * 0.5 * beat * 2;
-    ctx.beginPath(); ctx.arc(cx + 26, baseY - 30, 8 + beat * 12, 0, PI * 2); ctx.stroke();
-  } else if (id === 'util_ward') { // Warding Sigil: a slowly turning rune circle around the player
-    ctx.translate(cx, mid + 6); ctx.strokeStyle = acc; ctx.fillStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = 0.6;
-    ctx.save(); ctx.rotate(t * 0.025);
-    ctx.setLineDash([6, 5]); ctx.beginPath(); ctx.arc(0, 0, 40, 0, PI * 2); ctx.stroke(); ctx.setLineDash([]);
-    for (let k = 0; k < 6; k++) { ctx.save(); ctx.rotate(k * PI / 3); ctx.fillRect(-1.5, -46, 3, 8); ctx.restore(); }
-    ctx.restore();
-    ctx.save(); ctx.rotate(-t * 0.04); ctx.beginPath();
-    for (let k = 0; k < 3; k++) { const a = k * PI * 2 / 3 - PI / 2; ctx.lineTo(cos(a) * 30, sin(a) * 30); }
-    ctx.closePath(); ctx.stroke(); ctx.restore();
-  } else if (id === 'util_boots2') { // Nimble Treads: dust puffs kicked up at the feet, more when running
-    for (let k = 0; k < 4; k++) {
-      const ph = ((t * (running ? 0.07 : 0.03)) + k / 4) % 1;
-      ctx.globalAlpha = (1 - ph) * (running ? 0.6 : 0.35);
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(cx - facing * (6 + ph * (running ? 28 : 12)), feet - 3 - ph * 8, 2 + ph * 5, 0, PI * 2); ctx.fill();
-    }
-    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + 0.3 * sin(t * 0.2);
-    [-1, 1].forEach(sd => { ctx.beginPath(); ctx.arc(cx + sd * 11, feet - 2, 6, PI * 0.1, PI * 0.9); ctx.stroke(); });
-  } else if (id === 'util_iron') { // Iron Skin: steel studs and a glint that sweeps across the body
-    ctx.fillStyle = col; ctx.strokeStyle = '#4a4a58'; ctx.lineWidth = 1.2;
-    [-1, 1].forEach(sd => { ctx.beginPath(); ctx.arc(cx + sd * 17, baseY + 10, 4.2, 0, PI * 2); ctx.fill(); ctx.stroke(); });
-    ctx.beginPath(); ctx.rect(cx - w / 2, baseY + 4, w, h - 4); ctx.clip();
-    const sw = ((t % 80) / 80) * (w + 40) - 20;
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.beginPath(); ctx.moveTo(cx - w / 2 + sw - 8, baseY + h); ctx.lineTo(cx - w / 2 + sw + 2, baseY + h);
-    ctx.lineTo(cx - w / 2 + sw + 14, baseY + 4); ctx.lineTo(cx - w / 2 + sw + 4, baseY + 4); ctx.closePath(); ctx.fill();
-  } else if (id === 'util_shield') { // Reinforced Plating: a plating hexagon with a light chasing round it
-    ctx.translate(cx, mid + 6); ctx.rotate(t * 0.01);
-    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = 0.55;
-    ctx.beginPath();
-    for (let k = 0; k < 6; k++) { const a = k * PI / 3; ctx.lineTo(cos(a) * 36, sin(a) * 36); }
-    ctx.closePath(); ctx.stroke();
-    for (let k = 0; k < 6; k++) {
-      const lit = Math.floor(t / 8) % 6 === k;
-      ctx.globalAlpha = lit ? 1 : 0.3; ctx.fillStyle = lit ? '#ffffff' : acc;
-      ctx.beginPath(); ctx.arc(cos(k * PI / 3) * 36, sin(k * PI / 3) * 36, lit ? 4 : 2.5, 0, PI * 2); ctx.fill();
-    }
-  } else if (id === 'util_regen') { // Mending Charm: green plus signs rise from the body
-    for (let k = 0; k < 4; k++) {
-      const ph = (t * 0.014 + k / 4) % 1;
-      const px = cx + sin(k * 2.3) * 18, py = feet - 6 - ph * (h + 14);
-      ctx.globalAlpha = sin(ph * PI);
-      ctx.fillStyle = col; ctx.strokeStyle = acc; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.rect(px - 1.8, py - 5, 3.6, 10); ctx.rect(px - 5, py - 1.8, 10, 3.6); ctx.fill();
-    }
-  } else if (id === 'util_range') { // Long Reach: chevrons stream outward from the sword hand
-    ctx.strokeStyle = acc; ctx.lineWidth = 2.6;
-    for (let k = 0; k < 3; k++) {
-      const ph = (t * 0.03 + k / 3) % 1;
-      ctx.globalAlpha = sin(ph * PI) * 0.8;
-      const x0 = cx + facing * (36 + ph * 30), y0 = baseY + 22;
-      ctx.beginPath(); ctx.moveTo(x0 - facing * 6, y0 - 8); ctx.lineTo(x0, y0); ctx.lineTo(x0 - facing * 6, y0 + 8); ctx.stroke();
-    }
-  } else if (id === 'util_dashi') { // Phantom Step: two flickering ghost copies trail just behind
-    for (let k = 1; k <= 2; k++) {
-      ctx.globalAlpha = (0.32 - k * 0.09) * (0.6 + 0.4 * sin(t * 0.3 + k));
-      const gx = cx - facing * k * 11;
-      ctx.strokeStyle = acc; ctx.fillStyle = col; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.rect(gx - w * 0.4, baseY + 6, w * 0.8, h - 8); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.arc(gx, baseY - 8, 16, 0, PI * 2); ctx.fill(); ctx.stroke();
-    }
-  } else if (id === 'util_double') { // Second Wind: a small pair of wings flaps on the back, wind ring at the feet
-    const flap = sin(t * (o.onGround === false ? 0.5 : 0.18));
-    mqWing(ctx, cx - facing * 12, baseY + 14, -facing, flap, 18, acc);
-    mqWing(ctx, cx - facing * 12, baseY + 22, -facing, flap * 0.8, 14, col);
-    ctx.strokeStyle = acc; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.45 + 0.25 * sin(t * 0.15);
-    ctx.beginPath(); ctx.ellipse(cx, feet + 1, 18 + 3 * sin(t * 0.1), 4, 0, 0, PI * 2); ctx.stroke();
-  } else if (id === 'util_minion') { // Spectral Familiar: a spirit circle glows at the feet and wisps rise from it
-    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + 0.25 * sin(t * 0.1);
-    ctx.beginPath(); ctx.ellipse(cx, feet + 2, 22, 5, 0, 0, PI * 2); ctx.stroke();
-    ctx.fillStyle = col;
-    for (let k = 0; k < 3; k++) {
-      const ph = (t * 0.02 + k / 3) % 1;
-      ctx.globalAlpha = sin(ph * PI) * 0.8;
-      ctx.beginPath(); ctx.arc(cx + sin(ph * 7 + k * 2) * 14, feet - ph * 26, 2.4, 0, PI * 2); ctx.fill();
-    }
-  } else if (id === 'util_hands') { // Quick Hands: blurred arcs flicker round the sword hand
-    const hx = cx + facing * 34, hy = baseY + 22;
-    ctx.strokeStyle = acc; ctx.lineWidth = 2.4;
-    for (let k = 0; k < 3; k++) {
-      const a = t * 0.5 + k * 2.1;
-      ctx.globalAlpha = 0.35 + 0.5 * Math.abs(sin(a));
-      ctx.beginPath(); ctx.arc(hx, hy, 10 + k * 4, a, a + 1.0); ctx.stroke();
-    }
-  } else if (id === 'util_stride') { // Long Stride: long comet streaks trail behind at the waist
-    ctx.lineWidth = 2.4;
-    for (let k = 0; k < 3; k++) {
-      const len = 30 + 12 * sin(t * 0.2 + k * 1.7) + (running ? 14 : 0), y = mid + 4 + k * 9;
-      for (let seg = 0; seg < 4; seg++) {
-        ctx.strokeStyle = acc; ctx.globalAlpha = 0.7 * (1 - seg / 4);
-        ctx.beginPath(); ctx.moveTo(cx - facing * (14 + seg * len / 4), y); ctx.lineTo(cx - facing * (14 + (seg + 1) * len / 4), y); ctx.stroke();
-      }
-    }
-  } else if (id === 'util_spring') { // Pogo Spring: a coil under the feet that squashes and stretches
-    const hgt = 11 + 5 * sin(t * 0.22);
-    ctx.strokeStyle = acc; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(cx, feet - 1);
-    for (let k = 0; k < 6; k++) ctx.lineTo(cx + (k % 2 ? 7 : -7), feet - 1 + (k + 1) * hgt / 6);
-    ctx.stroke();
-    ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(cx, feet + hgt, 11, 3, 0, 0, PI * 2); ctx.fill();
-  } else if (id === 'util_deflect') { // Deflector: parry brackets shimmer in front of the sword
-    ctx.save(); ctx.translate(cx + facing * 40, baseY + 22); ctx.scale(facing, 1);
-    ctx.strokeStyle = acc; ctx.lineWidth = 2.6;
-    for (let k = 0; k < 2; k++) {
-      const pu = (t * 0.04 + k / 2) % 1;
-      ctx.globalAlpha = (1 - pu) * 0.85;
-      ctx.beginPath(); ctx.arc(-8, 0, 14 + pu * 14, -0.9, 0.9); ctx.stroke();
-    }
-    ctx.restore();
-  } else if (id === 'util_whet') { // Whetstone: sparks fly off the blade
-    const hx = cx + facing * 34, hy = baseY + 22;
-    for (let k = 0; k < 5; k++) {
-      const ph = (t * 0.05 + k / 5) % 1;
-      ctx.globalAlpha = 1 - ph; ctx.fillStyle = k % 2 ? '#ffd24a' : acc;
-      ctx.fillRect(hx + facing * (4 + ph * 22) - 1, hy - 8 - ph * 14 + sin(k * 2) * 4 - 1, 3, 3);
-    }
-    ctx.globalAlpha = 0.6 + 0.4 * sin(t * 0.3); ctx.fillStyle = '#ffffff';
-    mqSparkle(ctx, hx + facing * 10, hy - 14, 3 + 2 * Math.abs(sin(t * 0.17)));
-  } else if (id === 'util_cloud') { // Light Step: a soft cloud puff under the feet, with bubbles drifting up
-    ctx.fillStyle = col; ctx.globalAlpha = 0.55;
-    [[-10, 0, 7], [0, -2, 9], [10, 0, 7]].forEach((c, i) => { ctx.beginPath(); ctx.arc(cx + c[0], feet + 2 + c[1] + sin(t * 0.1 + i) * 1.2, c[2], 0, PI * 2); ctx.fill(); });
-    ctx.strokeStyle = acc; ctx.lineWidth = 1.4;
-    for (let k = 0; k < 3; k++) {
-      const ph = (t * 0.02 + k / 3) % 1;
-      ctx.globalAlpha = sin(ph * PI) * 0.7;
-      ctx.beginPath(); ctx.arc(cx + sin(k * 3 + ph * 4) * 16, feet - ph * 30, 2.5, 0, PI * 2); ctx.stroke();
-    }
-  } else if (id === 'util_hunter') { // Opportunist: a red crosshair spins beside the head
-    ctx.translate(cx + 28, baseY - 24); ctx.rotate(t * 0.04);
-    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.3 * sin(t * 0.2);
-    ctx.beginPath(); ctx.arc(0, 0, 7, 0, PI * 2); ctx.stroke();
-    for (let k = 0; k < 4; k++) { ctx.save(); ctx.rotate(k * PI / 2); ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, -4); ctx.stroke(); ctx.restore(); }
-    ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(0, 0, 1.6, 0, PI * 2); ctx.fill();
-  } else if (id === 'util_hide') { // Thick Skin: a toughened shell outline pulses round the body
-    const pu = 0.5 + 0.5 * sin(t * 0.12);
-    ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.globalAlpha = 0.35 + 0.35 * pu;
-    ctx.beginPath(); ctx.rect(cx - w / 2 - 3 - pu * 2, baseY + 2 - pu * 2, w + 6 + pu * 4, h + 2 + pu * 2); ctx.stroke();
-    ctx.fillStyle = col; ctx.globalAlpha = 0.8;
-    [[-1, 0], [1, 0], [-1, 1], [1, 1]].forEach(c => { ctx.beginPath(); ctx.arc(cx + c[0] * (w / 2 + 3), baseY + 6 + c[1] * (h - 8), 2.6, 0, PI * 2); ctx.fill(); });
-  } else if (id === 'util_idol') { // Golden Idol: a small gold idol bobs by the head, with twinkles
-    ctx.translate(cx - 28, baseY - 30 + sin(t * 0.07) * 3);
-    ctx.fillStyle = col; ctx.strokeStyle = '#8a6a10'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(7, 0); ctx.lineTo(0, 9); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8a6a10'; ctx.fillRect(-3, -2, 2, 2); ctx.fillRect(1, -2, 2, 2);
-    ctx.fillStyle = acc; ctx.globalAlpha = 0.5 + 0.5 * Math.abs(sin(t * 0.15));
-    mqSparkle(ctx, 9, -9, 3);
-  } else if (id === 'util_titan') { // Titan Heart: a great heart beats on the chest, with a ring each beat
-    const beat = Math.max(0, sin(t * 0.14)), sc = 1 + beat * 0.25;
-    ctx.shadowBlur = 14; ctx.shadowColor = col;
-    ctx.save(); ctx.translate(cx, mid + 10); ctx.scale(sc, sc);
-    ctx.fillStyle = col; ctx.strokeStyle = '#6a1530'; ctx.lineWidth = 1.5; mqHeartPath(ctx, 8); ctx.fill(); ctx.stroke();
-    ctx.restore(); ctx.shadowBlur = 0;
-    ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.globalAlpha = (1 - beat) * beat * 2 * 0.6;
-    ctx.beginPath(); ctx.arc(cx, mid + 10, 10 + beat * 22, 0, PI * 2); ctx.stroke();
-  }
+  ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(10,10,30,0.4)';
+  ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.92;
+  ctx.scale(0.55, 0.55);
+  mqDrawCharmGlyph(ctx, u, t);
   ctx.restore();
 }
 
@@ -10672,7 +10567,7 @@ function mqDrawCharmGlyph(ctx, item, t) {
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.4 + 0.6 * Math.abs(sin(t * 0.12)); mqSparkle(ctx, 9, -9, 4);
   } else if (id === 'util_titan') { // a big heart, beating hard
     const sc = 1 + Math.max(0, sin(t * 0.14)) * 0.3; ctx.scale(sc, sc);
-    ctx.shadowBlur = 8; ctx.shadowColor = '#ff4a5e'; ctx.fillStyle = '#ff3b4f';
+    ctx.fillStyle = '#ff3b4f';
     mqHeartPath(ctx, 11); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
   } else {
     ctx.beginPath(); ctx.arc(0, 0, 8 + sin(t * 0.08) * 1.5, 0, PI * 2); ctx.fill(); // unknown charm: the old generic dot
@@ -10753,6 +10648,31 @@ let mqProfile = mqLoadProfile();
 
 function mqSaveProfile() {
   try { localStorage.setItem(MQ_PROFILE_KEY, JSON.stringify(mqProfile)); } catch (e) { /* ignore */ }
+}
+
+// Buying a specific item (SHP-10): any skin, sword or charm can be bought outright for coins, at a fixed
+// price by rarity - far more than a crate costs, since a crate is a gamble and this is a sure thing.
+const MQ_BUY_PRICES = { common: 400, uncommon: 900, rare: 2200, epic: 5000, legendary: 12000 };
+function mqItemPrice(itemId) {
+  const item = MQ_ITEM_MAP[itemId];
+  if (!item || item.isDefault) return null;
+  return MQ_BUY_PRICES[item.rarity] || null;
+}
+function mqBuyItem(itemId) {
+  const item = MQ_ITEM_MAP[itemId], price = mqItemPrice(itemId);
+  if (!item || price === null) return { ok: false, reason: 'unavailable' };
+  if (mqProfile.owned[itemId]) return { ok: false, reason: 'owned' };
+  if (mqProfile.coins < price) {
+    mqToast('Not enough coins - ' + item.name + ' costs ' + price.toLocaleString() + ' and you have ' + mqProfile.coins.toLocaleString() + '.');
+    return { ok: false, reason: 'coins', need: price, have: mqProfile.coins };
+  }
+  mqProfile.coins -= price;
+  mqProfile.owned[itemId] = 1;
+  mqSaveProfile();
+  mqRefreshCoinUI();
+  mqToast('Bought ' + item.name + ' for ' + price.toLocaleString() + ' coins!');
+  if (mqShopTab === 'inv') mqRenderInventory();
+  return { ok: true, price: price };
 }
 
 function mqEquippedIds() {
@@ -11149,7 +11069,7 @@ function mqRenderInventory() {
       <div class="inv-type">${MQ_TYPE_LABEL[item.type]}</div>
       ${item.cost ? `<div class="inv-cost">◆ ${item.cost} pt${item.cost > 1 ? 's' : ''}</div>` : ''}
       ${item.blurb ? `<div class="inv-blurb">${item.blurb}</div>` : ''}
-      ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq && !canUnequip ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? (canUnequip ? 'Unequip' : 'Equipped ✓') : 'Equip'}</button>` : '<div class="inv-hint">Find in crates</div>'}
+      ${owned ? `<button class="inv-equip ${eq ? 'on' : ''}" ${eq && !canUnequip ? 'disabled' : ''} onclick="mqEquipItem('${item.id}')">${eq ? (canUnequip ? 'Unequip' : 'Equipped ✓') : 'Equip'}</button>` : `<button class="inv-buy" onclick="mqBuyItem('${item.id}')">🪙 ${(mqItemPrice(item.id) || 0).toLocaleString()}</button>`}
     </div>`;
   }).join('') || '<p class="inv-empty">Nothing here yet - open some crates!</p>';
   grid.querySelectorAll('canvas').forEach(cv => mqRegisterPreview(cv, cv.dataset.item, { locked: !mqProfile.owned[cv.dataset.item] }));
@@ -11159,7 +11079,7 @@ function mqRenderInventory() {
 function mqSetFilter(f) { mqInvFilter = f; mqRenderInventory(); }
 function mqToggleHideLocked(v) { mqHideLocked = v; mqRenderInventory(); }
 
-// The big animated loadout preview: the equipped sword swings every couple of seconds, looping.
+// The big loadout preview: the player standing still with the equipped charms (it does not swing).
 function mqRegisterLoadout() {
   mqPreviews = mqPreviews.filter(p => !p.loadout);
   mqPreviews.push({ canvas: mqEl('loadoutCanvas'), loadout: true });
@@ -11177,22 +11097,13 @@ function mqDrawLoadout(canvas, t) {
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.beginPath(); ctx.ellipse(W / 2, H - 34, 70, 10, 0, 0, Math.PI * 2); ctx.fill();
 
-  const cycle = 130, cf = t % cycle;
-  const swing = cf < RAID_SWORD_SWING_FRAMES ? cf / RAID_SWORD_SWING_FRAMES : 0;
-  const look = { skin: skin, gun: gun, swing: swing, t: t, noBar: true, noShadow: true, utility: mqProfile.equipped.utility || '' };
-  const label = swing > 0 ? 'SWINGING' : 'READY';
+  const look = { skin: skin, gun: gun, swing: 0, t: t, noBar: true, noShadow: true, utility: mqProfile.equipped.utility || '' };
 
   ctx.save();
   ctx.translate(W / 2 - 6, H - 40);
   ctx.scale(2.3, 2.3);
   drawPlayerCuphead(ctx, -18, -48, 36, 48, 1, 5, 5, false, 0, true, look);
   ctx.restore();
-
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = 'bold 13px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(label, W / 2, 22);
-  ctx.textAlign = 'left';
 }
 
 function mqStartTick() {
