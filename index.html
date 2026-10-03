@@ -2139,7 +2139,7 @@ textarea.community-input {
     <details class="raid-tutorial">
       <summary>❓ How to Play</summary>
       <div class="raid-tutorial-body">
-        <p><strong>Move:</strong> ← → &nbsp; <strong>Jump:</strong> ↑ &nbsp; <strong>Shoot:</strong> Space &nbsp; <strong>Shield:</strong> Shift / E &nbsp; <strong>Dash:</strong> X</p>
+        <p><strong>Move:</strong> ← → &nbsp; <strong>Jump:</strong> Z &nbsp; <strong>Attack / Shoot:</strong> X or Space &nbsp; <strong>Aim sword:</strong> hold ↑ ↓ ← → &nbsp; <strong>Shield:</strong> Shift / E &nbsp; <strong>Dash:</strong> C</p>
         <p>Every attack has a wind-up. Watch where the boss is heading, glowing or aiming and look for markers on the floor - then walk, dash or jump out of the way. Low shockwaves and crawling enemies can be jumped over.</p>
         <p>Your shield blocks a hit and slowly recharges over time. Dash gives a burst of speed and brief invincibility on a cooldown.</p>
         <p>Bosses wear themselves out after their biggest moves - pay attention to how they act.</p>
@@ -3511,7 +3511,7 @@ function resetRaidState() {
   raidLocal.jumpBoosting = false;
   raidLocal.jumpHoldTimer = 0;
   raidLocal.airJumpsUsed = 0;
-  raidLocal.wasUpPressed = false;
+  raidLocal.wasJumpPressed = false;
   raidLocal.moveTimer = 0;
   raidLocal.swordCooldown = 0;
   raidLocal.swingTimer = 0;
@@ -3733,7 +3733,7 @@ const raidLocal = {
   shield: false,
   shieldTimer: 0,
   onGround: false,
-  input: { left: false, right: false, up: false, down: false, space: false },
+  input: { left: false, right: false, up: false, down: false, jump: false, space: false }, // up/down/left/right aim the swing; jump (Z) is the only jump key
   facing: 1,
   dashCooldown: 0,
   dashTimer: 0,
@@ -3748,7 +3748,7 @@ const raidLocal = {
   jumpBoosting: false,
   jumpHoldTimer: 0,
   airJumpsUsed: 0,
-  wasUpPressed: false,
+  wasJumpPressed: false,
   moveTimer: 0,
   skin: 'skin_classic',
   gun: 'gun_standard', // the equipped weapon's id - a gun or a sword, see MQ_WEAPON_MAP
@@ -5558,8 +5558,8 @@ function raidAttack() {
 const RAID_SWORD_SWING_FRAMES = 14; // how long the visible swing animation plays
 const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
-const RAID_SWORD_RANGE_X = 130;
-const RAID_SWORD_RANGE_Y = 85; // matches the compressed slash below: R * sin(span) * RAID_SWORD_SLASH_SQUASH
+const RAID_SWORD_RANGE_X = 100;
+const RAID_SWORD_RANGE_Y = 62; // matches the compressed slash below: R * sin(span) * RAID_SWORD_SLASH_SQUASH
 // The blade is only actually "out" for a window in the middle of the swing (matches where the
 // crescent trail is visibly drawn) - this is when a hit can land, not the whole 14 frames.
 const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
@@ -5574,10 +5574,10 @@ const RAID_SWORD_DIR_VECTORS = {
   upleft: [-0.7071, -0.7071], upright: [0.7071, -0.7071],
   downleft: [-0.7071, 0.7071], downright: [0.7071, 0.7071]
 };
-const RAID_SWORD_DIAG_REACH = 105; // player-centre to diagonal-hitbox-centre distance
-const RAID_SWORD_DIAG_HALF = 68;  // diagonal hitbox half-extent (both axes)
+const RAID_SWORD_DIAG_REACH = 80; // player-centre to diagonal-hitbox-centre distance
+const RAID_SWORD_DIAG_HALF = 52;  // diagonal hitbox half-extent (both axes)
 const RAID_SWORD_SLASH_SQUASH = 0.55; // the slash arc is squashed across its direction, bringing its two ends closer together
-const RAID_SWORD_SLASH_R = 150; // radius of the big white crescent drawn with a swing (WPN-10), sized to the reach above
+const RAID_SWORD_SLASH_R = 115; // radius of the big white crescent drawn with a swing (WPN-10), sized to the reach above
 const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
 
 // Absolute swing direction from whichever movement keys are held at the instant the attack starts
@@ -5794,7 +5794,7 @@ function raidUpdateLocal() {
   // ~200px hop as before; holding it the whole time reaches noticeably higher.
   let gravity = RAID_GRAVITY;
   if (p.jumpBoosting) {
-    if (p.input.up && p.jumpHoldTimer < raidJumpHoldFrames() && p.vy < 0) {
+    if (p.input.jump && p.jumpHoldTimer < raidJumpHoldFrames() && p.vy < 0) {
       gravity = RAID_JUMP_HOLD_GRAVITY;
       p.jumpHoldTimer++;
     } else {
@@ -5814,13 +5814,13 @@ function raidUpdateLocal() {
   } else {
     p.onGround = false;
   }
-  if (p.input.up && p.onGround) {
+  if (p.input.jump && p.onGround) {
     p.vy = RAID_JUMP_VY;
     p.onGround = false;
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
-  } else if (p.input.up && !p.wasUpPressed && !p.onGround && (p.airJumpsUsed || 0) < raidMaxAirJumps()) {
+  } else if (p.input.jump && !p.wasJumpPressed && !p.onGround && (p.airJumpsUsed || 0) < raidMaxAirJumps()) {
     // Second Wind (WPN-06): one extra jump while airborne, edge-detected on the key press so
     // holding jump doesn't spend it repeatedly the instant it becomes eligible (e.g. at the
     // apex of the ground jump).
@@ -5830,7 +5830,7 @@ function raidUpdateLocal() {
     p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
   }
-  p.wasUpPressed = p.input.up;
+  p.wasJumpPressed = p.input.jump;
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
 
   if (p.invincible > 0) p.invincible--;
@@ -7937,8 +7937,9 @@ document.addEventListener('keydown', (e) => {
   
   if (key === 'ArrowLeft') { raidLocal.input.left = true; }
   if (key === 'ArrowRight') { raidLocal.input.right = true; }
-  // Z is the Hollow Knight-style jump key; ArrowUp still works too.
-  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = true; }
+  // Z is the only jump key; ArrowUp never jumps - it only aims the swing upward (WPN-05).
+  if (key === 'ArrowUp') { raidLocal.input.up = true; }
+  if (key === 'z' || key === 'Z') { raidLocal.input.jump = true; }
   // Up/down decide sword swing direction (WPN-05) - held at the moment X/Space is pressed.
   if (key === 'ArrowDown' || key === 's' || key === 'S') { raidLocal.input.down = true; }
 
@@ -8013,7 +8014,8 @@ document.addEventListener('keyup', (e) => {
   const key = e.key;
   if (key === 'ArrowLeft') { raidLocal.input.left = false; }
   if (key === 'ArrowRight') { raidLocal.input.right = false; }
-  if (key === 'ArrowUp' || key === 'z' || key === 'Z') { raidLocal.input.up = false; }
+  if (key === 'ArrowUp') { raidLocal.input.up = false; }
+  if (key === 'z' || key === 'Z') { raidLocal.input.jump = false; }
   if (key === 'ArrowDown' || key === 's' || key === 'S') { raidLocal.input.down = false; }
 });
 

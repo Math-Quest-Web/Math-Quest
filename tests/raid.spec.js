@@ -139,16 +139,18 @@ test.describe('Multiplayer model (spec 8.1)', () => {
 });
 
 test.describe('Player controls and stats (spec 8.2)', () => {
-  test('RAI-10 keyboard: arrows move, Z/Up jump, Space/X attack, Shift/E shields, C dashes, R reloads', async ({ page }) => {
+  test('RAI-10 keyboard: arrows move, Z jumps, Up only aims, Space/X attack, Shift/E shields, C dashes, R reloads', async ({ page }) => {
     await page.evaluate(() => T.setupRaid('grinmaw'));
     await keyDown(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(true);
     await keyUp(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(false);
     await keyDown(page, 'ArrowRight'); expect(await page.evaluate(() => raidLocal.input.right)).toBe(true);
     await keyUp(page, 'ArrowRight');
     await keyDown(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
+    expect(await page.evaluate(() => raidLocal.input.jump), 'Up only aims - it is not a jump key').toBe(false);
     await keyUp(page, 'ArrowUp'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
-    await keyDown(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(true);
-    await keyUp(page, 'z'); expect(await page.evaluate(() => raidLocal.input.up)).toBe(false);
+    await keyDown(page, 'z'); expect(await page.evaluate(() => raidLocal.input.jump)).toBe(true);
+    expect(await page.evaluate(() => raidLocal.input.up), 'Z only jumps - it does not aim up').toBe(false);
+    await keyUp(page, 'z'); expect(await page.evaluate(() => raidLocal.input.jump)).toBe(false);
 
     await keyDown(page, ' ');
     expect(await page.evaluate(() => raidAmmo)).toBe(19);
@@ -166,6 +168,46 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180); // unchanged - X never dashes
     await keyDown(page, 'r');
     expect(await page.evaluate(() => raidReloadTimer)).toBe(100);
+  });
+
+  test('RAI-10 holding Up never makes the player jump - it only aims the swing upward', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      T.place(500);
+      raidLocal.onGround = true; raidLocal.vy = 0;
+      const groundY = raidLocal.y;
+      // Up held on the ground: nothing happens
+      raidLocal.input.up = true;
+      let lifted = false;
+      for (let i = 0; i < 20; i++) { raidUpdateLocal(); if (raidLocal.y < groundY - 1 || raidLocal.vy < 0) lifted = true; }
+      // ...and Up still aims the swing upward without leaving the ground
+      raidLocal.swordCooldown = 0;
+      raidSwordSwing();
+      const aimsUp = raidLocal.swingDir === 'up';
+      raidUpdateLocal();
+      const stayedGrounded = raidLocal.onGround === true && raidLocal.y === groundY;
+      raidLocal.input.up = false;
+      // Up in the air does not spend Second Wind's extra jump either
+      raidLocal.utility = 'util_double';
+      T.place(500, raidGROUND_Y - 48 - 120);
+      raidLocal.onGround = false; raidLocal.vy = 2; raidLocal.airJumpsUsed = 0;
+      raidLocal.input.up = true; raidLocal.wasUpPressed = false; raidLocal.wasJumpPressed = false;
+      raidUpdateLocal();
+      const noAirJump = raidLocal.vy > 0 && raidLocal.airJumpsUsed === 0;
+      raidLocal.input.up = false;
+      // the jump key still jumps, and Up held at the same time still aims up
+      T.place(500); raidLocal.onGround = true; raidLocal.vy = 0; raidLocal.utility = null;
+      raidLocal.input.jump = true; raidUpdateLocal();
+      const jumpKeyJumps = raidLocal.vy < 0;
+      raidLocal.input.jump = false;
+      return { lifted, aimsUp, stayedGrounded, noAirJump, jumpKeyJumps };
+    });
+    expect(r.lifted, 'Up alone never lifts the player off the ground').toBe(false);
+    expect(r.aimsUp, 'Up still aims the sword upward').toBe(true);
+    expect(r.stayedGrounded, 'and swinging upward does not jump either').toBe(true);
+    expect(r.noAirJump, 'Up does not trigger the double jump').toBe(true);
+    expect(r.jumpKeyJumps, 'the jump key (Z) is what jumps').toBe(true);
   });
 
   test('RAI-11 five hearts, 30 frames of invincibility after a hit, defeat when a player reaches zero', async ({ page }) => {
@@ -378,7 +420,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       raidLocal.input.right = false;
       T.place(500); raidLocal.onGround = true;
       const groundY = raidLocal.y;
-      raidLocal.input.up = true; raidUpdateLocal(); raidLocal.input.up = false;
+      raidLocal.input.jump = true; raidUpdateLocal(); raidLocal.input.jump = false;
       let minY = raidLocal.y;
       for (let i = 0; i < 120; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
       return { maxV, rise: groundY - minY, backOnGround: raidLocal.y === groundY };
@@ -399,10 +441,10 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         raidLocal.jumpBoosting = false;
         raidLocal.jumpHoldTimer = 0;
         const groundY = raidLocal.y;
-        raidLocal.input.up = true;
+        raidLocal.input.jump = true;
         let minY = groundY;
         for (let i = 0; i < holdFrames; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
-        raidLocal.input.up = false;
+        raidLocal.input.jump = false;
         for (let i = 0; i < 150; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
         return groundY - minY;
       };
@@ -536,9 +578,9 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       raidLocal.onGround = true;
       raidLocal.jumpBoosting = false;
       raidLocal.squashKind = null; raidLocal.squashTimer = 0;
-      raidLocal.input.up = true;
+      raidLocal.input.jump = true;
       raidUpdateLocal();
-      raidLocal.input.up = false;
+      raidLocal.input.jump = false;
       out.launchKind = raidLocal.squashKind;
       out.launchTimerFull = raidLocal.squashTimer === RAID_SQUASH_FRAMES;
 
@@ -800,7 +842,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
       // far enough that the wider-but-shallower side box does not): an up-swing should connect,
       // a plain side swing should not.
-      raidG.boss.x = 500; raidG.boss.y = 310;
+      raidG.boss.x = 500; raidG.boss.y = 340;
       T.place(500);
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidLocal.swordCooldown = 0;
@@ -918,6 +960,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
 
       raidLocal.swordCooldown = 0;
       raidLocal.input.up = true;
+      raidG.boss.y += 60; // clearly below the player, well outside an upward box
       hpBefore = raidG.boss.hp;
       raidSwordSwing();
       raidLocal.input.up = false;
@@ -1027,8 +1070,9 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const slashHeight = 2 * R * Math.sin(1.4) * RAID_SWORD_SLASH_SQUASH;
       return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex, slashHeight, sideHh: side.hh, upHw: up.hw, upHh: up.hh, downHw: down.hw, downHh: down.hh, upApex, upWide, upWideEarly, downApex, squash: RAID_SWORD_SLASH_SQUASH };
     });
-    expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
-    expect(r.reachRight).toBeGreaterThanOrEqual(120);
+    expect(r.reachSide, 'side swing reach was lessened from the previous 130px').toBeLessThan(130);
+    expect(r.reachSide).toBeGreaterThanOrEqual(80);
+    expect(r.reachRight).toBe(r.reachSide);
     expect(r.upHh * 2, 'up reaches exactly as far as the side swing - the player always has the same reach').toBe(r.reachSide);
     expect(r.downHh * 2, 'and so does down').toBe(r.reachSide);
     expect(r.upHw, 'up/down are the side swing turned a quarter - same height becomes their width').toBe(r.sideHh);
@@ -1037,7 +1081,8 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.downApex.a, 'the down slash points straight down').toBeGreaterThan(40);
     expect(r.upWide.a, 'it has the same arc shape, swept round the head').toBeGreaterThan(40);
     expect(r.upWideEarly.a, 'and it sweeps across rather than appearing all at once').toBe(0);
-    expect(r.R, 'the crescent is sized to the reach').toBeGreaterThanOrEqual(120);
+    expect(r.R, 'the crescent is sized to the reach: a little past it, and smaller than before').toBeGreaterThanOrEqual(r.reachSide);
+    expect(r.R).toBeLessThan(150);
     expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
     expect(Math.min(...r.far.rgb), 'and it is white, not the blade\'s own colour').toBeGreaterThan(200);
     expect(r.farMirror.a, 'mirrored for a left-facing player').toBeGreaterThan(60);
@@ -1171,8 +1216,8 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // Edge-detected: press (up true on a frame where it was false before), then release,
       // so a held key can't be mistaken for a fresh press on the next attempt.
       const pressJump = () => {
-        raidLocal.input.up = true; raidUpdateLocal();
-        raidLocal.input.up = false; raidUpdateLocal();
+        raidLocal.input.jump = true; raidUpdateLocal();
+        raidLocal.input.jump = false; raidUpdateLocal();
       };
 
       // without the charm: airborne and "falling" (vy > 0) - a jump press should not boost it
