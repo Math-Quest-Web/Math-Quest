@@ -1334,6 +1334,83 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.nonHostBounces, 'the bounce works the same whether this client is host or not').toBe(true);
   });
 
+  test('WPN-11 a sword swing parries every kind of boss projectile it touches, and a lobbed shot never erupts after a parry', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      T.prepBoss('grinmaw', 1);
+      raidG.boss.x = 800; raidG.boss.y = 300; // well away from the swing
+      raidLocal.facing = 1;
+      raidLocal.input = { left: false, right: true, up: false, down: false, space: false };
+      const hpBoss = raidG.boss.hp;
+      const kinds = ['candy', 'fang', 'ember', 'bubble', 'pod', 'bolt', 'plume', 'feather', 'void'];
+      const mk = (kind, x, y) => ({ x, y, vx: 0, vy: 0, r: 10, life: 100, isWarning: false, isBossProjectile: true, owner: kind, kind,
+        onLand: kind === 'ember' ? 'pillar' : kind === 'pod' ? 'thornSpike' : '' });
+      const stepSwing = () => {
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidSendLocalState();
+          raidParryProjectiles();
+        }
+      };
+      const out = {};
+      // every kind, one at a time, inside the right-swing hitbox
+      T.place(300, 300);
+      const px = raidPx(raidLocal);
+      out.parried = {};
+      for (const kind of kinds) {
+        raidG.projectiles = [mk(kind, px + 50, raidLocal.y + 24)];
+        raidG.slamAnimations = [];
+        raidLocal.swordCooldown = 0;
+        raidSwordSwing();
+        stepSwing();
+        out.parried[kind] = raidG.projectiles.length === 0 || raidG.projectiles[0].life <= 0;
+      }
+      out.sparks = raidG.slamAnimations.filter((a) => a.phase === 'parry').length;
+      // a shot outside the hitbox and one behind the player survive; the two touched in one swing go
+      raidG.projectiles = [mk('candy', px + 50, raidLocal.y + 24), mk('fang', px + 70, raidLocal.y + 20), mk('candy', px + 400, raidLocal.y + 24), mk('candy', px - 60, raidLocal.y + 24)];
+      raidLocal.swordCooldown = 0;
+      raidSwordSwing();
+      stepSwing();
+      out.survivors = raidG.projectiles.filter((p) => p.life > 0).map((p) => Math.round(p.x - px)).sort((a, b) => a - b);
+      // before/after the blade is out nothing is parried
+      raidG.projectiles = [mk('candy', px + 50, raidLocal.y + 24)];
+      raidLocal.swingTimer = RAID_SWORD_SWING_FRAMES; raidLocal.swingDir = 'side';
+      raidSendLocalState(); raidParryProjectiles(); // first frame of the swing: blade not out yet
+      out.earlySafe = raidG.projectiles[0].life > 0;
+      raidLocal.swingTimer = 0; raidSendLocalState(); raidParryProjectiles();
+      out.idleSafe = raidG.projectiles[0].life > 0;
+      // a parried lob does not leave its pillar behind, even when it was about to land
+      T.place(300); // on the ground, so the shot lands inside the blade's reach
+      raidG.hazards = [];
+      raidG.projectiles = [Object.assign(mk('ember', px + 50, raidGROUND_Y - 30), { gravity: 0.3, vy: 3 })];
+      raidLocal.swingTimer = 0; raidLocal.swordCooldown = 0;
+      raidSwordSwing();
+      for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+        if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+        raidSendLocalState();
+        raidBossUpdate();
+      }
+      out.pillars = raidG.hazards.filter((h) => h.kind === 'pillar').length;
+      // parrying is not a boss hit
+      out.hpSame = raidG.boss.hp === hpBoss;
+      // the parry spark draws without error
+      raidG.slamAnimations = [{ x: 500, y: 300, life: 8, phase: 'parry', timer: 2 }];
+      try { raidDraw(); out.drew = true; } catch (e) { out.drew = false; }
+      return out;
+    });
+    for (const k of ['candy', 'fang', 'ember', 'bubble', 'pod', 'bolt', 'plume', 'feather', 'void']) {
+      expect(r.parried[k], k + ' is parried').toBe(true);
+    }
+    expect(r.sparks, 'a parry leaves a spark').toBeGreaterThan(0);
+    expect(r.survivors, 'only the shots the blade actually touched are destroyed').toEqual([-60, 400]);
+    expect(r.earlySafe, 'the blade is not out on the first frame').toBe(true);
+    expect(r.idleSafe, 'no swing, no parry').toBe(true);
+    expect(r.pillars, 'a parried ember never erupts').toBe(0);
+    expect(r.hpSame, 'a parry is not a boss hit').toBe(true);
+    expect(r.drew, 'the parry spark draws without error').toBe(true);
+  });
+
   test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a Familiar bolt hit does not', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');

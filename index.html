@@ -5398,6 +5398,7 @@ function raidBossUpdate() {
   });
   raidG.slamAnimations = raidG.slamAnimations.filter(a => a.life > 0);
 
+  raidParryProjectiles(); // WPN-11: before they move or hit, so the blade wins a tie
   raidG.projectiles.forEach(proj => {
     if (!proj.isWarning) {
       if (proj.gravity) proj.vy += proj.gravity;
@@ -5667,6 +5668,29 @@ function raidCheckSwordSwings(b) {
   });
 }
 
+
+// Parry (WPN-11): while a player's blade is out, any boss projectile its hitbox touches is
+// destroyed - every kind, lobbed ones included (a parried ember or pod never erupts, because
+// onLand only runs when the shot reaches the floor). Host-only like the rest of the sim, resolved
+// from the same synced swing state as raidCheckSwordSwings, and runs even while the boss itself is
+// untargetable. Warning markers are not shots and are left alone.
+function raidParryProjectiles() {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p || !(p.swingTimer > 0)) return;
+    if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
+    const box = raidSwordHitbox(p);
+    raidG.projectiles.forEach(proj => {
+      if (proj.life <= 0 || proj.isWarning || !proj.isBossProjectile) return;
+      if (Math.abs(box.cx - proj.x) < box.hw + proj.r && Math.abs(box.cy - proj.y) < box.hh + proj.r) {
+        proj.life = 0;
+        raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
+        raidTriggerHitStop(2);
+      }
+    });
+  });
+  raidG.projectiles = raidG.projectiles.filter(proj => proj.life > 0);
+}
 
 function raidUpdateLocal() {
   if (raidG.gameOver || raidG.victory) return;
@@ -7172,6 +7196,26 @@ function raidDraw() {
       raidCtx.beginPath();
       raidCtx.arc(anim.x, anim.y, 14 * (1 - prog) + 3, 0, Math.PI * 2);
       raidCtx.fill();
+      raidCtx.restore();
+    } else if (anim.phase === 'parry') {
+      // WPN-11: a bright ring and a cross-shaped glint where the shot was cut down - original placeholder.
+      const prog = 1 - anim.life / 10;
+      raidCtx.save();
+      raidCtx.lineCap = 'round';
+      raidCtx.strokeStyle = `rgba(190,235,255,${0.95 * (1 - prog)})`;
+      raidCtx.lineWidth = 4 - prog * 3;
+      raidCtx.beginPath();
+      raidCtx.arc(anim.x, anim.y, 8 + prog * 26, 0, Math.PI * 2);
+      raidCtx.stroke();
+      raidCtx.strokeStyle = `rgba(255,255,255,${0.95 * (1 - prog)})`;
+      for (let i = 0; i < 4; i++) {
+        const ang = Math.PI / 4 + i * Math.PI / 2;
+        const r1 = 10 + prog * 22;
+        raidCtx.beginPath();
+        raidCtx.moveTo(anim.x + Math.cos(ang) * 4, anim.y + Math.sin(ang) * 4);
+        raidCtx.lineTo(anim.x + Math.cos(ang) * r1, anim.y + Math.sin(ang) * r1);
+        raidCtx.stroke();
+      }
       raidCtx.restore();
     } else if (anim.phase === 'blocked') {
       raidCtx.strokeStyle = `rgba(220,220,220,${anim.life / 10})`;
