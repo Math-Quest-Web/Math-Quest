@@ -4182,6 +4182,60 @@ function raidPickAttack(b, options) {
 // How long a boss stays stunned (dizzy, taking double damage) after its big moves: 2 seconds.
 const BOSS_STUN_FRAMES = 120;
 
+// Warning timings (BOS-45). Every floor strike shows its marker for WARN frames, then strikes for
+// ACTIVE frames. Bramblehide's thorns used to give only 32 frames of low-contrast marker.
+const RAID_THORN_WARN = 60, RAID_THORN_ACTIVE = 28;
+const RAID_TREMOR_WARN = 44, RAID_TREMOR_ACTIVE = 20;
+const RAID_FEATHERFALL_WARN = 50, RAID_FEATHERFALL_ACTIVE = 14;
+// Hazard lifetimes for the kinds a landing shot erupts into (pillar: 32 marker + 28 strike).
+const RAID_HAZARD_LIFE = { pillar: 66, thornSpike: RAID_THORN_WARN + RAID_THORN_ACTIVE + 2 };
+// Griffon's dive: it hovers over its target and tracks them, then locks on for the last frames.
+const RAID_GRIFFON_TRACK_FRAMES = 150, RAID_GRIFFON_LOCK_FRAMES = 30;
+const RAID_GRIFFON_TRACK_SPEED = 3.5;
+const RAID_GRIFFON_HIGH_Y = 95; // where it hovers while tracking and starts its dive (clear of the boss HP bar)
+
+// Shared floor warning (BOS-45): a hatched strip exactly as wide as the strike's hit zone, with
+// chevrons rising out of it, that brightens as the strike nears and flashes faster in its last
+// stretch. Used by every ground strike so they all read the same way.
+function raidDrawGroundWarning(ctx, cx, halfW, prog, rgb) {
+  prog = Math.max(0, Math.min(1, prog));
+  const flash = prog > 0.4 && (Math.floor(raidG.frame / (prog > 0.8 ? 2 : 4)) % 2 === 0);
+  const a = Math.min(1, 0.3 + 0.45 * prog + (flash ? 0.25 : 0));
+  const y0 = raidGROUND_Y - 4, h = 12;
+  ctx.save();
+  ctx.shadowBlur = 0;
+  // a faint danger column over the exact hit zone (kept low for a wide lane), brighter as it nears
+  const colH = halfW > 150 ? 36 : 120;
+  const cg = ctx.createLinearGradient(0, y0, 0, y0 - colH);
+  cg.addColorStop(0, `rgba(${rgb},${0.1 + 0.22 * prog + (flash ? 0.1 : 0)})`);
+  cg.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = cg;
+  ctx.fillRect(cx - halfW, y0 - colH, halfW * 2, colH);
+  ctx.fillStyle = `rgba(${rgb},${a * 0.45})`;
+  ctx.fillRect(cx - halfW, y0, halfW * 2, h);
+  ctx.beginPath(); ctx.rect(cx - halfW, y0, halfW * 2, h); ctx.clip();
+  ctx.strokeStyle = `rgba(${rgb},${a})`; ctx.lineWidth = 3;
+  const off = (raidG.frame * 1.5) % 14;
+  for (let x = cx - halfW - 14 + off; x < cx + halfW + 14; x += 14) {
+    ctx.beginPath(); ctx.moveTo(x, y0 + h); ctx.lineTo(x + 10, y0); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = `rgba(${rgb},${Math.min(1, a + 0.2)})`; ctx.lineWidth = 3;
+  ctx.strokeRect(cx - halfW, y0, halfW * 2, h);
+  const n = Math.max(3, Math.min(12, Math.round(halfW / 30)));
+  for (let i = 0; i < n; i++) {
+    const px = cx - halfW + (i + 0.5) * (halfW * 2 / n);
+    const rise = (raidG.frame * 0.8 + i * 5) % 16;
+    ctx.fillStyle = `rgba(${rgb},${a * (1 - rise / 16)})`;
+    ctx.beginPath();
+    ctx.moveTo(px - 5, y0 - 2 - rise); ctx.lineTo(px, y0 - 9 - rise); ctx.lineTo(px + 5, y0 - 2 - rise);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function clampX(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
@@ -4714,7 +4768,11 @@ function bramblehideAttack(b) {
   if (b.phase >= 2) options.push('toss');
   const pick = raidPickAttack(b, options);
   if (pick === 'spikes') b.anim = { state: 'rootWindup', timer: 0 };
-  else if (pick === 'charge') b.anim = { state: 'chargeWindup', timer: 0, dir: raidNearestPlayerDir(b) };
+  else if (pick === 'charge') {
+    const dir = raidNearestPlayerDir(b);
+    // the lane is fixed from the very start of the windup so it can be marked on the floor
+    b.anim = { state: 'chargeWindup', timer: 0, dir: dir, targetX: clampX(b.x + dir * 420, 70, 930) };
+  }
   else b.anim = { state: 'tossWindup', timer: 0 };
 }
 
@@ -4725,7 +4783,7 @@ function bramblehideRootSpikes(b) {
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
     if (!p) return;
-    raidHazard({ kind: 'thornSpike', x: clampX(raidPx(p), 40, 960), life: 66 });
+    raidHazard({ kind: 'thornSpike', x: clampX(raidPx(p), 40, 960), life: RAID_HAZARD_LIFE.thornSpike });
   });
 }
 
@@ -4734,9 +4792,10 @@ function bramblehideRootSpikes(b) {
 // stop dazed before trotting back home (BOS-40). Replaces the old "charge" that never actually
 // moved the boar - it only spawned a stationary shockwave hazard while the body stood still,
 // which looked and played identically to Grinmaw's slam and Colossus's Overload Pulse.
-function bramblehideCharge(b, dir) {
+function bramblehideCharge(b, dir, laneTarget) {
   raidChargeHitState = {};
-  b.anim = { state: 'charging', timer: 0, dir: dir, startX: b.x, targetX: clampX(b.x + dir * 420, 70, 930) };
+  const tx = typeof laneTarget === 'number' ? laneTarget : clampX(b.x + dir * 420, 70, 930);
+  b.anim = { state: 'charging', timer: 0, dir: dir, startX: b.x, targetX: tx };
 }
 
 // Phase 2+: seed-pods lobbed toward players, each erupting into a thorn spike (not a flame
@@ -4769,13 +4828,16 @@ function updateBramblehideAnimation(b) {
     if (a.timer === 26) bramblehideRootSpikes(b);
     if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'chargeWindup') {
-    const t = Math.min(a.timer / 30, 1);
-    b.animOffsetX = -14 * a.dir * easeInOut(t);
-    if (t >= 1) { b.animOffsetX = 0; bramblehideCharge(b, a.dir); }
+    // 45 frames of pawing the ground (BOS-40/BOS-45): the lane it will run is already marked.
+    if (typeof a.targetX !== 'number') a.targetX = clampX(b.x + a.dir * 420, 70, 930);
+    const t = Math.min(a.timer / 45, 1);
+    b.animOffsetX = -14 * a.dir * easeInOut(t) + Math.sin(a.timer * 1.1) * 2.5 * t;
+    if (t >= 1) { b.animOffsetX = 0; bramblehideCharge(b, a.dir, a.targetX); }
   } else if (a.state === 'charging') {
     // The boar's actual x crosses the arena over 18 frames - a real dash, not a hazard spawned
     // in place - with a one-hit-per-player guard so a slow overlap can't multi-hit (BOS-40).
-    const t = Math.min(a.timer / 18, 1);
+    // 36 frames (about 12 px/frame) - slower than the old 18-frame dash, so it can be read.
+    const t = Math.min(a.timer / 36, 1);
     b.x = lerp(a.startX, a.targetX, t);
     Object.keys(raidG.players).forEach(id => {
       const p = raidG.players[id];
@@ -4820,12 +4882,40 @@ function updateBramblehideAnimation(b) {
 // ------------------------------------------------------------
 
 function colossusAttack(b) {
-  const options = ['slam', 'discharge'];
-  if (b.phase >= 2) options.push('pulse');
+  const options = ['slam', 'discharge', 'hurl'];
+  if (b.phase >= 2) options.push('pulse', 'march');
   const pick = raidPickAttack(b, options);
   if (pick === 'slam') b.anim = { state: 'slamWindup', timer: 0 };
   else if (pick === 'discharge') b.anim = { state: 'chargeGlow', timer: 0 };
+  else if (pick === 'hurl') b.anim = { state: 'hurlWindup', timer: 0 };
+  else if (pick === 'march') b.anim = { state: 'marchWindup', timer: 0 };
   else b.anim = { state: 'pulseWindup', timer: 0 };
+}
+
+// Boulder hurl (BOS-41): the golem tears a boulder from its shoulder and lobs one at each player's
+// spot. Big (radius 14), so a swing can parry it or pogo off it (WPN-11); it bursts on the floor.
+function colossusBoulderHurl(b) {
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id]);
+  const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
+  targets.forEach(px => {
+    const tx = clampX(px, 40, 960);
+    const hx = b.x, hy = b.y - 60, T = 70, landY = raidGROUND_Y - 14;
+    const g = raidLobGravity(landY - hy, T, RAID_LOB_RISE);
+    raidG.projectiles.push({
+      x: hx, y: hy, vx: (tx - hx) / T, vy: (landY - hy - g * T * (T + 1) / 2) / T, gravity: g,
+      r: 14, life: T + 6, isWarning: false, owner: 'boulder', isBossProjectile: true, kind: 'boulder'
+    });
+  });
+}
+
+// Seismic march (phase 2+, BOS-41): three tremors step away from the golem toward the nearest
+// player. All three are marked at once; they erupt one after another, 20 frames apart.
+function colossusSeismicMarch(b) {
+  const dir = raidNearestPlayerDir(b);
+  for (let i = 0; i < 3; i++) {
+    const delay = i * 20;
+    raidHazard({ kind: 'tremor', x: clampX(b.x + dir * 130 * (i + 1), 40, 960), delay: delay, life: delay + RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE + 2 });
+  }
 }
 
 // The stomp lands right under the golem's own feet - a burst of dust there, with cracks
@@ -4886,6 +4976,17 @@ function updateColossusAnimation(b) {
     b.animScale = 1 + 0.08 * easeInOut(t);
     if (a.timer === 28) colossusArcDischarge(b);
     if (a.timer >= 34) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'hurlWindup') {
+    const t = Math.min(a.timer / 36, 1);
+    b.animScale = 1 + 0.08 * easeInOut(t);
+    b.animOffsetY = -6 * easeInOut(t);
+    if (a.timer === 36) colossusBoulderHurl(b);
+    if (a.timer >= 42) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'marchWindup') {
+    // two heavy stomps in place before the tremors spread out
+    b.animOffsetY = -Math.abs(Math.sin(a.timer * 0.16)) * 14;
+    if (a.timer === 40) colossusSeismicMarch(b);
+    if (a.timer >= 46) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'pulseWindup') {
     const t = Math.min(a.timer / 34, 1);
     b.animScale = 1 + 0.1 * easeInOut(t);
@@ -4910,12 +5011,45 @@ function updateColossusAnimation(b) {
 // ------------------------------------------------------------
 
 function griffonAttack(b) {
-  const options = ['volley', 'dive'];
-  if (b.phase >= 2) options.push('storm');
+  const options = ['volley', 'dive', 'strafe'];
+  if (b.phase >= 2) options.push('storm', 'rain');
   const pick = raidPickAttack(b, options);
   if (pick === 'volley') b.anim = { state: 'volleyWindup', timer: 0 };
   else if (pick === 'dive') griffonWindDive(b);
+  else if (pick === 'strafe') griffonStrafeStart(b);
+  else if (pick === 'rain') b.anim = { state: 'rainWindup', timer: 0 };
   else b.anim = { state: 'stormWindup', timer: 0 };
+}
+
+// Strafing run (BOS-42): flies to one edge (the lane across the floor is marked for the whole
+// 60-frame approach), then sweeps the width of the arena low and fast. A jump clears it.
+function griffonStrafeStart(b) {
+  const pick = raidRandomPlayer();
+  const px = pick ? raidPx(pick.p) : 500;
+  const dir = px < 500 ? -1 : 1; // sweep direction: it starts at the edge on the far side
+  b.anim = { state: 'strafeAim', timer: 0, dir: dir, fromX: b.x, fromY: b.y };
+}
+const RAID_STRAFE_Y = raidGROUND_Y - 85;
+const RAID_STRAFE_EDGES = [60, 940];
+
+// Feather rain (phase 2+, BOS-42): five columns are marked across the arena and a streak of
+// feathers falls into each in turn.
+function griffonFeatherRain(b) {
+  const order = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < 5; i++) {
+    const delay = order[i] * 12;
+    const x = clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 60, 940);
+    raidHazard({ kind: 'featherFall', x: x, delay: delay, life: delay + RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2 });
+  }
+}
+
+// 0..1: how far the griffon's head is tipped down to watch its target - fully while tracking and
+// diving (BOS-42), ramping in over the first 20 frames of the track. Pure: draw code and tests.
+function griffonLookDown(b) {
+  const a = b.anim || { state: 'idle', timer: 0 };
+  if (a.state === 'track') return Math.min(1, a.timer / 20);
+  if (a.state === 'plunge') return 1;
+  return 0;
 }
 
 // One aimed feather-shard per player, fired after a readable wind-up (BOS-02) - a wing-pull-back
@@ -4942,7 +5076,7 @@ function griffonFeatherVolley(b) {
 function griffonWindDive(b) {
   const pick = raidRandomPlayer();
   const tx = clampX(pick ? raidPx(pick.p) : 500, 100, 900);
-  b.anim = { state: 'swoop', timer: 0, targetX: tx, startX: b.x, startY: b.y };
+  b.anim = { state: 'swoop', timer: 0, targetX: tx, startX: b.x, startY: b.y, targetId: pick ? pick.id : '' };
 }
 
 // Phase 2+: a gapped spread of feather shots lobbed across the arena - reuses the Glutton's
@@ -4965,7 +5099,7 @@ function griffonUltimate(b) {
   });
 }
 
-const GRIFFON_POSITIONAL = ['swoop', 'plunge', 'thud', 'soar'];
+const GRIFFON_POSITIONAL = ['swoop', 'track', 'plunge', 'thud', 'soar', 'strafeAim', 'strafe', 'strafeReturn'];
 
 function griffonPathPos() {
   return { x: 500 + Math.sin(raidG.frame * 0.011) * 240, y: BOSS_HOVER_Y.griffon + Math.sin(raidG.frame * 0.025) * 16 };
@@ -4987,12 +5121,56 @@ function updateGriffonAnimation(b) {
   } else if (a.state === 'swoop') {
     const e = easeInOut(Math.min(a.timer / 40, 1));
     b.x = lerp(a.startX, a.targetX, e);
-    b.y = lerp(a.startY, 60, e);
-    if (a.timer >= 40) { a.state = 'plunge'; a.timer = 0; }
+    b.y = lerp(a.startY, RAID_GRIFFON_HIGH_Y, e);
+    if (a.timer >= 40) { a.state = 'track'; a.timer = 0; }
+  } else if (a.state === 'track') {
+    // Hovers high, head down, following its target for 2.5 s; the last RAID_GRIFFON_LOCK_FRAMES it
+    // stops following (the lock-on) so there is time to walk out of the marked spot.
+    b.y = RAID_GRIFFON_HIGH_Y + Math.sin(a.timer * 0.2) * 3;
+    if (a.timer <= RAID_GRIFFON_TRACK_FRAMES - RAID_GRIFFON_LOCK_FRAMES) {
+      let tp = raidG.players[a.targetId];
+      if (!tp) { const pick = raidRandomPlayer(); if (pick) { a.targetId = pick.id; tp = pick.p; } }
+      if (tp) {
+        const want = clampX(raidPx(tp), 100, 900);
+        a.targetX += Math.max(-RAID_GRIFFON_TRACK_SPEED, Math.min(RAID_GRIFFON_TRACK_SPEED, want - a.targetX));
+      }
+    }
+    b.x = a.targetX;
+    if (a.timer >= RAID_GRIFFON_TRACK_FRAMES) { a.state = 'plunge'; a.timer = 0; }
+  } else if (a.state === 'strafeAim') {
+    if (typeof a.fromX !== 'number') { a.fromX = b.x; a.fromY = b.y; }
+    const e = easeInOut(Math.min(a.timer / 60, 1));
+    const edge = RAID_STRAFE_EDGES[a.dir > 0 ? 0 : 1];
+    b.x = lerp(a.fromX, edge, e);
+    b.y = lerp(a.fromY, RAID_STRAFE_Y, e);
+    if (a.timer >= 60) { raidChargeHitState = {}; a.state = 'strafe'; a.timer = 0; }
+  } else if (a.state === 'strafe') {
+    const t = Math.min(a.timer / 70, 1);
+    const from = RAID_STRAFE_EDGES[a.dir > 0 ? 0 : 1], to = RAID_STRAFE_EDGES[a.dir > 0 ? 1 : 0];
+    b.x = lerp(from, to, t);
+    b.y = RAID_STRAFE_Y;
+    Object.keys(raidG.players).forEach(id => {
+      const p = raidG.players[id];
+      if (!p || raidChargeHitState[id]) return;
+      if (Math.abs(raidPx(p) - b.x) < 62 && !raidAirborne(p, 40)) { raidDamagePlayer(id, p, 1); raidChargeHitState[id] = true; }
+    });
+    if (t >= 1) { a.state = 'strafeReturn'; a.timer = 0; a.endX = b.x; }
+  } else if (a.state === 'strafeReturn') {
+    const e = easeInOut(Math.min(a.timer / 50, 1));
+    const pp = griffonPathPos();
+    b.x = lerp(a.endX, pp.x, e);
+    b.y = lerp(RAID_STRAFE_Y, pp.y, e);
+    if (a.timer >= 50) b.anim = { state: 'idle', timer: 0 };
+  } else if (a.state === 'rainWindup') {
+    const t = Math.min(a.timer / 40, 1);
+    b.animOffsetY = -34 * easeInOut(t);
+    b.animScale = 1 + 0.06 * Math.sin(a.timer * 0.5);
+    if (a.timer === 40) griffonFeatherRain(b);
+    if (a.timer >= 46) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'plunge') {
     const t = Math.min(a.timer / 24, 1);
     b.x = a.targetX;
-    b.y = lerp(60, raidGROUND_Y - 80, t * t);
+    b.y = lerp(RAID_GRIFFON_HIGH_Y, raidGROUND_Y - 80, t * t);
     if (t >= 1) {
       Object.keys(raidG.players).forEach(id => {
         const p = raidG.players[id];
@@ -5177,10 +5355,10 @@ function raidUpdateHazards() {
       }
       hz.life--;
     } else if (hz.kind === 'thornSpike') {
-      // Same marker-then-erupt timing as a landed fireball's pillar (0-32 marker, 32-60 active) -
-      // its own kind/visual (root-brown spikes) so Bramblehide's ground attacks don't look like
-      // borrowed dragon fire (BOS-40).
-      if (hz.timer >= 32 && hz.timer < 60) {
+      // Marker for RAID_THORN_WARN frames, then active for RAID_THORN_ACTIVE (BOS-40/BOS-45) - its
+      // own kind/visual (root-brown spikes) so Bramblehide's ground attacks don't look like
+      // borrowed dragon fire. A long, clear warning: the old 32 frames was easy to miss.
+      if (hz.timer >= RAID_THORN_WARN && hz.timer < RAID_THORN_WARN + RAID_THORN_ACTIVE) {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
@@ -5197,6 +5375,30 @@ function raidUpdateHazards() {
           const p = raidG.players[id];
           if (!p) return;
           if (Math.abs(raidPx(p) - hz.x) < 90 && !raidAirborne(p, 30)) raidDamagePlayer(id, p, 1);
+        });
+      }
+      hz.life--;
+    } else if (hz.kind === 'tremor') {
+      // Colossus's seismic march (BOS-41): each tremor shows its marker from the moment the march
+      // starts, then erupts `delay` frames after the first - the rubble only hurts grounded players.
+      const t = hz.timer - hz.delay;
+      if (t >= RAID_TREMOR_WARN && t < RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE) {
+        Object.keys(raidG.players).forEach(id => {
+          const p = raidG.players[id];
+          if (!p) return;
+          if (Math.abs(raidPx(p) - hz.x) < 46 && !raidAirborne(p, 30)) raidDamagePlayer(id, p, 1);
+        });
+      }
+      hz.life--;
+    } else if (hz.kind === 'featherFall') {
+      // Griffon's feather rain (BOS-42): a marked column, then a full-height streak of feathers
+      // falls into it - jumping does not help, stepping aside does.
+      const t = hz.timer - hz.delay;
+      if (t >= RAID_FEATHERFALL_WARN && t < RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE) {
+        Object.keys(raidG.players).forEach(id => {
+          const p = raidG.players[id];
+          if (!p) return;
+          if (Math.abs(raidPx(p) - hz.x) < 34) raidDamagePlayer(id, p, 1);
         });
       }
       hz.life--;
@@ -5413,8 +5615,9 @@ function raidBossUpdate() {
     // just pop since they carry no onLand at all.
     if (proj.gravity && proj.vy > 0 && proj.y >= raidGROUND_Y - 14) {
       if (proj.onLand) {
-        raidHazard({ kind: proj.onLand, x: proj.x, life: 66 });
+        raidHazard({ kind: proj.onLand, x: proj.x, life: RAID_HAZARD_LIFE[proj.onLand] || 66 });
       }
+      if (proj.kind === 'boulder') raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
       proj.life = 0;
     }
     if (!proj.isWarning && proj.isBossProjectile && proj.life > 0) {
@@ -6874,6 +7077,18 @@ function drawGriffon(ctx, boss) {
   ctx.ellipse(b.x, raidGROUND_Y - 6, 60 * (1 - Math.min((raidGROUND_Y - b.y) / 400, 0.7)), 10, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  // BOS-42: head tipped down to watch its target while tracking and diving, with a nervous shake
+  // during the lock-on (the body is rotated about its centre; the beak points down at full tilt).
+  const look = griffonLookDown(b);
+  const ga = b.anim || { state: 'idle', timer: 0 };
+  ctx.save();
+  if (look > 0) {
+    const locking = ga.state === 'track' && ga.timer > RAID_GRIFFON_TRACK_FRAMES - RAID_GRIFFON_LOCK_FRAMES;
+    ctx.translate(b.x + (locking ? Math.sin(raidG.frame * 2.1) * 2.5 : 0), b.y);
+    ctx.rotate(-0.8 * look);
+    ctx.translate(-b.x, -b.y);
+  }
+
   // Tail feathers, trailing behind and below the body.
   ctx.fillStyle = hpPercent > 0.4 ? '#e8c25a' : '#b8974a';
   ctx.strokeStyle = '#7a5a10'; ctx.lineWidth = 2;
@@ -6958,7 +7173,7 @@ function drawGriffon(ctx, boss) {
   ctx.fill();
   ctx.fillStyle = '#1a1206';
   ctx.beginPath();
-  ctx.arc(b.x - 12, eyeY, 3.6, 0, Math.PI * 2);
+  ctx.arc(b.x - 12, eyeY + 2.5 * look, 3.6, 0, Math.PI * 2);
   ctx.fill();
 
   // Brow line above the eye for a sharper, predatory expression.
@@ -6967,6 +7182,7 @@ function drawGriffon(ctx, boss) {
   ctx.moveTo(b.x - 22, eyeY - 8);
   ctx.lineTo(b.x - 4, eyeY - 6);
   ctx.stroke();
+  ctx.restore();
 }
 
 // One shared visual for every math prompt (shield recharge, weak point, ultimate interrupt)
@@ -7351,14 +7567,7 @@ function raidDraw() {
       }
     } else if (hz.kind === 'pillar') {
       if (hz.timer < 32) {
-        const prog = hz.timer / 32;
-        raidCtx.fillStyle = `rgba(255,120,40,${0.2 + 0.3 * prog})`;
-        raidCtx.beginPath();
-        raidCtx.ellipse(hz.x, raidGROUND_Y + 3, 14 + 26 * prog, 4 + 8 * prog, 0, 0, Math.PI * 2);
-        raidCtx.fill();
-        raidCtx.strokeStyle = `rgba(255,200,90,${0.5 + 0.4 * prog})`;
-        raidCtx.lineWidth = 3;
-        raidCtx.stroke();
+        raidDrawGroundWarning(raidCtx, hz.x, 38, hz.timer / 32, '255,150,50');
       } else if (hz.timer < 60) {
         const w = 54 + Math.sin(hz.timer * 1.3) * 6;
         const pg = raidCtx.createLinearGradient(0, raidGROUND_Y, 0, raidGROUND_Y - 200);
@@ -7374,16 +7583,20 @@ function raidDraw() {
         raidCtx.fill();
       }
     } else if (hz.kind === 'thornSpike') {
-      if (hz.timer < 32) {
-        const prog = hz.timer / 32;
-        raidCtx.fillStyle = `rgba(120,160,40,${0.2 + 0.3 * prog})`;
-        raidCtx.beginPath();
-        raidCtx.ellipse(hz.x, raidGROUND_Y + 3, 14 + 26 * prog, 4 + 8 * prog, 0, 0, Math.PI * 2);
-        raidCtx.fill();
-        raidCtx.strokeStyle = `rgba(180,140,60,${0.5 + 0.4 * prog})`;
-        raidCtx.lineWidth = 3;
-        raidCtx.stroke();
-      } else if (hz.timer < 60) {
+      if (hz.timer < RAID_THORN_WARN) {
+        raidDrawGroundWarning(raidCtx, hz.x, 38, hz.timer / RAID_THORN_WARN, '190,220,70');
+        // the last stretch rumbles: root tips poke up through the marker just before the strike
+        const peek = (hz.timer - (RAID_THORN_WARN - 16)) / 16;
+        if (peek > 0) {
+          raidCtx.fillStyle = '#3a4a14'; raidCtx.strokeStyle = '#182008'; raidCtx.lineWidth = 2;
+          for (let i = -2; i <= 2; i++) {
+            const sx = hz.x + i * 12, th = 4 + peek * 12 + Math.sin(hz.timer * 2.3 + i) * 2;
+            raidCtx.beginPath();
+            raidCtx.moveTo(sx - 4, raidGROUND_Y + 2); raidCtx.lineTo(sx, raidGROUND_Y + 2 - th); raidCtx.lineTo(sx + 4, raidGROUND_Y + 2);
+            raidCtx.closePath(); raidCtx.fill(); raidCtx.stroke();
+          }
+        }
+      } else if (hz.timer < RAID_THORN_WARN + RAID_THORN_ACTIVE) {
         const h = 68 + Math.sin(hz.timer * 1.1) * 4;
         raidCtx.fillStyle = '#3a4a14';
         raidCtx.strokeStyle = '#182008';
@@ -7397,6 +7610,41 @@ function raidDraw() {
           raidCtx.closePath();
           raidCtx.fill(); raidCtx.stroke();
         }
+      }
+    } else if (hz.kind === 'tremor') {
+      const t = hz.timer - hz.delay;
+      if (t < RAID_TREMOR_WARN) {
+        raidDrawGroundWarning(raidCtx, hz.x, 46, hz.timer / (RAID_TREMOR_WARN + hz.delay), '215,180,120');
+      } else if (t < RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE) {
+        const k = Math.min((t - RAID_TREMOR_WARN) / 6, 1);
+        raidCtx.fillStyle = '#6b6354'; raidCtx.strokeStyle = '#2a251c'; raidCtx.lineWidth = 2;
+        for (let i = -2; i <= 2; i++) {
+          const sx = hz.x + i * 17, rh = (46 - Math.abs(i) * 9) * k;
+          raidCtx.beginPath();
+          raidCtx.moveTo(sx - 9, raidGROUND_Y); raidCtx.lineTo(sx - 2, raidGROUND_Y - rh); raidCtx.lineTo(sx + 8, raidGROUND_Y - rh * 0.7); raidCtx.lineTo(sx + 9, raidGROUND_Y);
+          raidCtx.closePath(); raidCtx.fill(); raidCtx.stroke();
+        }
+      }
+    } else if (hz.kind === 'featherFall') {
+      const t = hz.timer - hz.delay;
+      if (t < RAID_FEATHERFALL_WARN) {
+        raidDrawGroundWarning(raidCtx, hz.x, 34, t / RAID_FEATHERFALL_WARN, '255,226,120');
+        // a feather drifts down the column in the last stretch, so the source is the sky above the marker
+        const fall = (t - (RAID_FEATHERFALL_WARN - 24)) / 24;
+        if (fall > 0) {
+          raidCtx.fillStyle = '#ffe27a'; raidCtx.strokeStyle = '#7a5a10'; raidCtx.lineWidth = 1.5;
+          raidCtx.save(); raidCtx.translate(hz.x + Math.sin(t * 0.5) * 6, 20 + fall * (raidGROUND_Y - 60)); raidCtx.rotate(Math.sin(t * 0.4) * 0.6);
+          raidCtx.beginPath(); raidCtx.ellipse(0, 0, 4, 11, 0, 0, Math.PI * 2); raidCtx.fill(); raidCtx.stroke();
+          raidCtx.restore();
+        }
+      } else if (t < RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE) {
+        const k = (t - RAID_FEATHERFALL_WARN) / RAID_FEATHERFALL_ACTIVE;
+        const g = raidCtx.createLinearGradient(0, 0, 0, raidGROUND_Y);
+        g.addColorStop(0, 'rgba(255,240,170,0)'); g.addColorStop(0.5, 'rgba(255,226,122,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0.9)');
+        raidCtx.fillStyle = g;
+        raidCtx.fillRect(hz.x - 30 * (1 - k * 0.4), 0, 60 * (1 - k * 0.4), raidGROUND_Y);
+        raidCtx.fillStyle = '#fff6d0';
+        for (let i = 0; i < 7; i++) { const fy = ((i * 83 + hz.timer * 40) % raidGROUND_Y); raidCtx.beginPath(); raidCtx.ellipse(hz.x + ((i % 3) - 1) * 14, fy, 3, 9, 0.3, 0, Math.PI * 2); raidCtx.fill(); }
       }
     } else if (hz.kind === 'quake') {
       if (hz.timer < 14) {
@@ -7499,11 +7747,68 @@ function raidDraw() {
     }
   }
 
+  if (tb0.type === 'griffon' && (ta.state === 'swoop' || ta.state === 'track' || ta.state === 'plunge')) {
+    // BOS-42/BOS-45: the spot it will dive on, as wide as the crash, brightening while it tracks and
+    // flashing red through the lock-on; a faint sight line runs down from the griffon's eyes to it.
+    const lockStart = RAID_GRIFFON_TRACK_FRAMES - RAID_GRIFFON_LOCK_FRAMES;
+    const locking = ta.state === 'plunge' || (ta.state === 'track' && ta.timer > lockStart);
+    const prog = ta.state === 'swoop' ? 0.25 * (ta.timer / 40)
+      : ta.state === 'track' ? 0.25 + 0.55 * Math.min(ta.timer / lockStart, 1) + (locking ? 0.2 * ((ta.timer - lockStart) / RAID_GRIFFON_LOCK_FRAMES) : 0)
+      : 1;
+    raidDrawGroundWarning(raidCtx, ta.targetX, 80, Math.min(prog, 1), locking ? '255,70,60' : '255,200,80');
+    if (ta.state !== 'swoop') {
+      raidCtx.save();
+      raidCtx.setLineDash([6, 8]);
+      raidCtx.strokeStyle = locking ? 'rgba(255,90,70,0.55)' : 'rgba(255,220,120,0.3)';
+      raidCtx.lineWidth = 2;
+      raidCtx.beginPath(); raidCtx.moveTo(tb0.x, tb0.y + 34); raidCtx.lineTo(ta.targetX, raidGROUND_Y - 4); raidCtx.stroke();
+      raidCtx.restore();
+    }
+  }
+  if (tb0.type === 'griffon' && (ta.state === 'strafeAim' || ta.state === 'strafe')) {
+    // The whole lane it will sweep, marked from the start of the 60-frame approach.
+    raidDrawGroundWarning(raidCtx, 500, 460, ta.state === 'strafeAim' ? ta.timer / 60 : 1, '255,140,60');
+  }
+  if (tb0.type === 'bramblehide') {
+    if ((ta.state === 'chargeWindup' || ta.state === 'charging') && typeof ta.targetX === 'number') {
+      // The lane the boar will run, from where it stands to where it will skid to a stop.
+      const x0 = ta.state === 'charging' ? ta.startX : tb0.x;
+      raidDrawGroundWarning(raidCtx, (x0 + ta.targetX) / 2, Math.abs(ta.targetX - x0) / 2, ta.state === 'charging' ? 1 : ta.timer / 45, '255,120,60');
+    }
+    if (ta.state === 'rootWindup') {
+      // Lock-on: a ring closes in under every player, then the thorn markers appear on those spots.
+      const k = Math.min(ta.timer / 26, 1);
+      Object.keys(raidG.players).forEach(id => {
+        const pl = raidG.players[id];
+        if (!pl) return;
+        const px = clampX(raidPx(pl), 40, 960);
+        raidCtx.strokeStyle = `rgba(190,220,70,${0.3 + 0.5 * k})`;
+        raidCtx.lineWidth = 2.5;
+        raidCtx.beginPath(); raidCtx.ellipse(px, raidGROUND_Y + 3, 52 - 14 * k, 12 - 3 * k, 0, 0, Math.PI * 2); raidCtx.stroke();
+        raidCtx.beginPath(); raidCtx.moveTo(px - 12, raidGROUND_Y + 3); raidCtx.lineTo(px + 12, raidGROUND_Y + 3);
+        raidCtx.moveTo(px, raidGROUND_Y - 3); raidCtx.lineTo(px, raidGROUND_Y + 9); raidCtx.stroke();
+      });
+    }
+  }
+  if (tb0.type === 'colossus' && ta.state === 'marchWindup') {
+    ripple(tb0.x, raidGROUND_Y + 2, Math.min(ta.timer / 40, 1) * 0.6, '215,180,120');
+  }
+
   if (raidIsHost) drawBossDispatch(raidCtx, raidG.boss);
   else { // RAI-24: a non-host's boss snapshots arrive every few frames, so draw it eased toward them
     const rb = raidG.boss, rx = rb.x, ry = rb.y, bd = raidSmoothPos('boss', rx, ry);
     rb.x = bd.x; rb.y = bd.y;
     try { drawBossDispatch(raidCtx, rb); } finally { rb.x = rx; rb.y = ry; }
+  }
+
+  if (tb0.type === 'colossus' && ta.state === 'hurlWindup') {
+    // BOS-41: a boulder is torn from the shoulder and held overhead, growing, before the throw.
+    const k = Math.min(ta.timer / 36, 1);
+    const bx = tb0.x + 46, by = tb0.y - 96 - 36 * k, br = 8 + 15 * k;
+    const bg = raidCtx.createRadialGradient(bx - 4, by - 4, 2, bx, by, br);
+    bg.addColorStop(0, '#e4ded0'); bg.addColorStop(1, '#5a5448');
+    raidCtx.fillStyle = bg; raidCtx.strokeStyle = '#2a251c'; raidCtx.lineWidth = 3;
+    raidCtx.beginPath(); raidCtx.arc(bx, by, br, 0, Math.PI * 2); raidCtx.fill(); raidCtx.stroke();
   }
 
   // Ring while the boss can't be hurt during a phase change. (When a boss is genuinely
@@ -7542,7 +7847,8 @@ function raidDraw() {
         bolt: ['#e0faff', '#5ce1ff', '#123a52'],
         feather: ['#fff6d0', '#ffe27a', '#7a5a10'],
         plume: ['#fff6d0', '#ffe27a', '#7a5a10'],
-        pod: ['#d9ffb0', '#9ee66c', '#2f5a12']
+        pod: ['#d9ffb0', '#9ee66c', '#2f5a12'],
+        boulder: ['#e4ded0', '#8f8878', '#3d382e']
       }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
       if (raidIsParryable(p)) { // WPN-11: a pulsing white ring marks the shots you can parry
         raidCtx.save();

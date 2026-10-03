@@ -32,7 +32,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
       }
       return out;
     });
-    const allowed = ['chainLash', 'imp', 'pillar', 'quake', 'shockwave', 'thornSpike', 'voidOrb'];
+    const allowed = ['chainLash', 'featherFall', 'imp', 'pillar', 'quake', 'shockwave', 'thornSpike', 'tremor', 'voidOrb'];
     for (const b of BOSSES) {
       expect(r[b].attacks, b + ' attacked').toBeGreaterThan(5);
       expect(r[b].far, b + ' projectiles spawning far from the boss').toEqual([]);
@@ -45,7 +45,9 @@ test.describe('Boss design rules (spec 9.1)', () => {
       }
       if (b !== 'colossus') {
         expect(r[b].quakes, b + ' quakes only come from Colossus stomping').toBe(0);
+        expect(r[b].hazardKinds, b + ' has no tremors').not.toContain('tremor');
       }
+      if (b !== 'griffon') expect(r[b].hazardKinds, b + ' has no feather drops').not.toContain('featherFall');
     }
     // every void burst belongs to an orb that was conjured at the Warden's hands
     expect(r.warden.orbs).toBeGreaterThan(0);
@@ -139,6 +141,45 @@ test.describe('Boss design rules (spec 9.1)', () => {
       shockwaveGround: 4, shockwaveAir: 5, impGround: 4, impAir: 5,
       pillarNear: 4, pillarFar: 5, chainLashNear: 4, chainLashFar: 5, legacyKinds: []
     });
+  });
+
+  test('BOS-45 every floor strike is warned by a marker as wide as its hit zone that flashes faster as it nears, and long attacks are marked from the start', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('bramblehide');
+      raidFx.shake = 0;
+      T.place(900); // keep the local player out of the way
+      const W = 1000, H = 600;
+      const grab = () => raidCtx.getImageData(0, 0, W, H).data;
+      const changed = (a, b, x0, x1, y0, y1) => {
+        let n = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * W + x) * 4; if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++; }
+        return n;
+      };
+      const out = {};
+      const kinds = { thornSpike: 38, pillar: 38, tremor: 46, featherFall: 34 };
+      for (const kind of Object.keys(kinds)) {
+        const half = kinds[kind];
+        raidG.hazards = []; raidG.frame = 100; raidDraw(); const empty = grab();
+        const mk = (timer) => ({ kind, x: 300, timer, delay: 0, life: 200, tx: 300 });
+        raidG.hazards = [mk(10)]; raidG.frame = 100; raidDraw(); const early = grab();
+        out[kind] = {
+          leftEdge: changed(empty, early, 300 - half + 2, 300 - half + 8, raidGROUND_Y - 14, raidGROUND_Y + 12),
+          rightEdge: changed(empty, early, 300 + half - 8, 300 + half - 2, raidGROUND_Y - 14, raidGROUND_Y + 12),
+          outside: changed(empty, early, 300 + half + 14, 300 + half + 40, raidGROUND_Y - 14, raidGROUND_Y + 12)
+        };
+        // near the strike the marker flashes: two frames four apart look different
+        raidG.hazards = [mk(30)]; raidG.frame = 100; raidDraw(); const f1 = grab();
+        raidG.hazards = [mk(30)]; raidG.frame = 104; raidDraw(); const f2 = grab();
+        out[kind].flash = changed(f1, f2, 300 - half, 300 + half, raidGROUND_Y - 14, raidGROUND_Y + 12);
+      }
+      return out;
+    });
+    for (const kind of ['thornSpike', 'pillar', 'tremor', 'featherFall']) {
+      expect(r[kind].leftEdge, kind + ' marker reaches the left edge of its hit zone').toBeGreaterThan(5);
+      expect(r[kind].rightEdge, kind + ' marker reaches the right edge of its hit zone').toBeGreaterThan(5);
+      expect(r[kind].outside, kind + ' marker does not overstate the danger').toBe(0);
+      expect(r[kind].flash, kind + ' marker flashes').toBeGreaterThan(20);
+    }
   });
 
   test('BOS-04 an attack only ever starts from the idle animation, so moves never overlap', async ({ page }) => {
@@ -260,9 +301,9 @@ test.describe('Boss design rules (spec 9.1)', () => {
     });
     expect(r.aimedSeen).toEqual(['bolt', 'candy', 'fang', 'plume', 'void']);
     expect(r.aimedMax).toBeLessThanOrEqual(3.2);
-    expect(r.lobbedKinds).toEqual(['bubble', 'ember', 'feather', 'pod']);
+    expect(r.lobbedKinds).toEqual(['boulder', 'bubble', 'ember', 'feather', 'pod']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['bubble:pops', 'ember:pillar', 'feather:pops', 'pod:thornSpike']);
+    expect(r.lobbedLands).toEqual(['boulder:pops', 'bubble:pops', 'ember:pillar', 'feather:pops', 'pod:thornSpike']);
   });
 
   test('BOS-08 phases at 60% and 30% HP: a 100-frame invulnerable beat that clears the arena and unlocks attacks', async ({ page }) => {
