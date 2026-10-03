@@ -362,3 +362,5 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 
 
 | 2026-10 | A little more jump height (RAI-17): launch speed -7.7 (was -7), so a tap rises about 120 px (was 100) and a held jump about 170 px (was 145). Gravity unchanged. |
+| 2026-10 | Parry and pogo now only work on the **large** boss shots (WPN-11, WPN-08): candy, embers and bubbles, which are drawn with a white ring; small shots and shockwaves must be dodged. A downward air-swing can also bounce off a large shot. |
+

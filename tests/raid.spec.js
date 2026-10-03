@@ -1334,7 +1334,49 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.nonHostBounces, 'the bounce works the same whether this client is host or not').toBe(true);
   });
 
-  test('WPN-11 a sword swing parries every kind of boss projectile it touches, and a lobbed shot never erupts after a parry', async ({ page }) => {
+  test('WPN-08 a downward air-swing also bounces off a large boss projectile (not a small one, not a hazard)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      T.prepBoss('grinmaw', 1);
+      raidG.boss.x = 800; raidG.boss.y = 300; // out of the way, so only the shot can bounce us
+      const mk = (kind, r, x, y) => ({ x, y, vx: 0, vy: 0, r, life: 100, isWarning: false, isBossProjectile: true, owner: kind, kind });
+      const tryPogo = (proj, hazards) => {
+        T.place(500, 200);
+        raidLocal.onGround = false; raidLocal.vy = 4;
+        raidLocal.swordCooldown = 0;
+        raidLocal.input = { left: false, right: false, up: false, down: true, space: false };
+        raidSwordSwing();
+        raidLocal.input.down = false;
+        const box = raidSwordHitbox(raidLocal);
+        proj.x = box.cx; proj.y = box.cy;
+        raidG.projectiles = proj.kind ? [proj] : [];
+        raidG.hazards = hazards || [];
+        raidPogoState = { lastSwingTimer: 0, bounced: false };
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+          if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+          raidCheckLocalPogo();
+        }
+        return raidLocal.vy === RAID_POGO_VY;
+      };
+      return {
+        candy: tryPogo(mk('candy', 12, 0, 0)),
+        bubble: tryPogo(mk('bubble', 14, 0, 0)),
+        fang: tryPogo(mk('fang', 10, 0, 0)),
+        bolt: tryPogo(mk('bolt', 9, 0, 0)),
+        shockwave: tryPogo({ x: 0, y: 0 }, [{ kind: 'shockwave', x: 500, dir: 1, speed: 2, life: 100 }]),
+        nothing: tryPogo({ x: 0, y: 0 })
+      };
+    });
+    expect(r.candy, 'a large shot is a pogo target').toBe(true);
+    expect(r.bubble).toBe(true);
+    expect(r.fang, 'a small shot is not').toBe(false);
+    expect(r.bolt).toBe(false);
+    expect(r.shockwave, 'a shockwave is not').toBe(false);
+    expect(r.nothing).toBe(false);
+  });
+
+  test('WPN-11 a swing parries only the large boss projectiles (candy, embers, bubbles); small shots and shockwaves cannot be parried; a parried lob never erupts', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       raidLocal.gun = 'sword_training';
@@ -1344,7 +1386,8 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.input = { left: false, right: true, up: false, down: false, space: false };
       const hpBoss = raidG.boss.hp;
       const kinds = ['candy', 'fang', 'ember', 'bubble', 'pod', 'bolt', 'plume', 'feather', 'void'];
-      const mk = (kind, x, y) => ({ x, y, vx: 0, vy: 0, r: 10, life: 100, isWarning: false, isBossProjectile: true, owner: kind, kind,
+      const RADIUS = { candy: 12, fang: 10, ember: 11, bubble: 14, pod: 10, bolt: 9, plume: 9, feather: 9, void: 10 }; // the real sizes
+      const mk = (kind, x, y) => ({ x, y, vx: 0, vy: 0, r: RADIUS[kind], life: 100, isWarning: false, isBossProjectile: true, owner: kind, kind,
         onLand: kind === 'ember' ? 'pillar' : kind === 'pod' ? 'thornSpike' : '' });
       const stepSwing = () => {
         for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
@@ -1358,6 +1401,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       T.place(300, 300);
       const px = raidPx(raidLocal);
       out.parried = {};
+      let sparks = 0;
       for (const kind of kinds) {
         raidG.projectiles = [mk(kind, px + 50, raidLocal.y + 24)];
         raidG.slamAnimations = [];
@@ -1365,8 +1409,19 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         raidSwordSwing();
         stepSwing();
         out.parried[kind] = raidG.projectiles.length === 0 || raidG.projectiles[0].life <= 0;
+        sparks += raidG.slamAnimations.filter((a) => a.phase === 'parry').length;
       }
-      out.sparks = raidG.slamAnimations.filter((a) => a.phase === 'parry').length;
+      out.sparks = sparks;
+      out.parryable = kinds.filter((k) => raidIsParryable(mk(k, 0, 0)));
+      // a shockwave rolling along the floor through the blade is a hazard, not a shot: untouched
+      T.place(300);
+      raidG.projectiles = [];
+      raidG.hazards = [{ kind: 'shockwave', x: px + 40, dir: 1, speed: 2, life: 100 }];
+      raidLocal.swordCooldown = 0;
+      raidSwordSwing();
+      stepSwing();
+      out.shockwaveStays = raidG.hazards.length === 1 && raidG.hazards[0].life === 100;
+      T.place(300, 300);
       // a shot outside the hitbox and one behind the player survive; the two touched in one swing go
       raidG.projectiles = [mk('candy', px + 50, raidLocal.y + 24), mk('fang', px + 70, raidLocal.y + 20), mk('candy', px + 400, raidLocal.y + 24), mk('candy', px - 60, raidLocal.y + 24)];
       raidLocal.swordCooldown = 0;
@@ -1399,11 +1454,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       try { raidDraw(); out.drew = true; } catch (e) { out.drew = false; }
       return out;
     });
+    expect(r.parryable.sort(), 'the large shots are the parryable ones').toEqual(['bubble', 'candy', 'ember']);
     for (const k of ['candy', 'fang', 'ember', 'bubble', 'pod', 'bolt', 'plume', 'feather', 'void']) {
-      expect(r.parried[k], k + ' is parried').toBe(true);
+      expect(r.parried[k], k + (['candy', 'ember', 'bubble'].includes(k) ? ' is parried' : ' is too small to parry')).toBe(['candy', 'ember', 'bubble'].includes(k));
     }
+    expect(r.shockwaveStays, 'a shockwave cannot be parried').toBe(true);
     expect(r.sparks, 'a parry leaves a spark').toBeGreaterThan(0);
-    expect(r.survivors, 'only the shots the blade actually touched are destroyed').toEqual([-60, 400]);
+    expect(r.survivors, 'only the large shots the blade actually touched are destroyed').toEqual([-60, 70, 400]);
     expect(r.earlySafe, 'the blade is not out on the first frame').toBe(true);
     expect(r.idleSafe, 'no swing, no parry').toBe(true);
     expect(r.pillars, 'a parried ember never erupts').toBe(0);

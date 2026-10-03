@@ -5634,10 +5634,18 @@ function raidCheckLocalPogo() {
   if (p.swingDir !== 'down' || p.onGround || !(p.swingTimer > 0)) return;
   if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
   const b = raidG.boss;
-  if (!b || raidBossUntargetable(b)) return;
   const box = raidSwordHitbox(p);
-  const bhb = raidBossHalfExtent(b.type);
-  if (Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh) {
+  let touching = false;
+  if (b && !raidBossUntargetable(b)) {
+    const bhb = raidBossHalfExtent(b.type);
+    touching = Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh;
+  }
+  // WPN-08/WPN-11: a large boss shot is a pogo target too (the host removes it via the parry).
+  if (!touching) {
+    touching = raidG.projectiles.some(proj => raidIsParryable(proj) && proj.life > 0 &&
+      Math.abs(box.cx - proj.x) < box.hw + proj.r && Math.abs(box.cy - proj.y) < box.hh + proj.r);
+  }
+  if (touching) {
     raidPogoState.bounced = true;
     p.vy = RAID_POGO_VY;
     p.jumpBoosting = false; // a clean fixed-height bounce, not modulated by stale jump-hold
@@ -5671,11 +5679,18 @@ function raidCheckSwordSwings(b) {
 }
 
 
-// Parry (WPN-11): while a player's blade is out, any boss projectile its hitbox touches is
-// destroyed - every kind, lobbed ones included (a parried ember or pod never erupts, because
-// onLand only runs when the shot reaches the floor). Host-only like the rest of the sim, resolved
-// from the same synced swing state as raidCheckSwordSwings, and runs even while the boss itself is
-// untargetable. Warning markers are not shots and are left alone.
+// Only the larger boss shots can be parried or pogoed off (WPN-11): candy (r 12), embers (11) and
+// bubbles (14). The small ones (fangs, pods, bolts, plumes, feathers, void shots - r 9-10) have to
+// be dodged, and so do the hazards (shockwaves, pillars, thorns), which are not projectiles at all.
+const RAID_PARRY_MIN_R = 11;
+function raidIsParryable(proj) {
+  return !!proj && !proj.isWarning && !!proj.isBossProjectile && proj.r >= RAID_PARRY_MIN_R;
+}
+
+// Parry (WPN-11): while a player's blade is out, any large boss projectile its hitbox touches is
+// destroyed - lobbed ones included (a parried ember never erupts, because onLand only runs when
+// the shot reaches the floor). Host-only like the rest of the sim, resolved from the same synced
+// swing state as raidCheckSwordSwings, and runs even while the boss itself is untargetable.
 function raidParryProjectiles() {
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
@@ -5683,7 +5698,7 @@ function raidParryProjectiles() {
     if (p.swingTimer > RAID_SWORD_HIT_WINDOW_START || p.swingTimer <= RAID_SWORD_HIT_WINDOW_END) return;
     const box = raidSwordHitbox(p);
     raidG.projectiles.forEach(proj => {
-      if (proj.life <= 0 || proj.isWarning || !proj.isBossProjectile) return;
+      if (proj.life <= 0 || !raidIsParryable(proj)) return;
       if (Math.abs(box.cx - proj.x) < box.hw + proj.r && Math.abs(box.cy - proj.y) < box.hh + proj.r) {
         proj.life = 0;
         raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
@@ -7529,6 +7544,16 @@ function raidDraw() {
         plume: ['#fff6d0', '#ffe27a', '#7a5a10'],
         pod: ['#d9ffb0', '#9ee66c', '#2f5a12']
       }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
+      if (raidIsParryable(p)) { // WPN-11: a pulsing white ring marks the shots you can parry
+        raidCtx.save();
+        raidCtx.shadowBlur = 0;
+        raidCtx.strokeStyle = `rgba(255,255,255,${0.55 + 0.35 * Math.sin(raidG.frame * 0.25)})`;
+        raidCtx.lineWidth = 2.5;
+        raidCtx.beginPath();
+        raidCtx.arc(p.x, p.y, p.r + 6 + Math.sin(raidG.frame * 0.25) * 1.5, 0, Math.PI * 2);
+        raidCtx.stroke();
+        raidCtx.restore();
+      }
       raidCtx.shadowBlur = 30;
       raidCtx.shadowColor = palette[1];
       const grad = raidCtx.createRadialGradient(p.x-4, p.y-4, 2, p.x, p.y, p.r);
