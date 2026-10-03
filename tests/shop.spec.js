@@ -175,6 +175,8 @@ test.describe('My Items and equipping (spec 10.2)', () => {
     await expect(page.locator('.inv-card.locked')).toHaveCount(38);
     await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(4);
     await expect(page.locator('.inv-card.locked .inv-equip')).toHaveCount(0);
+    await expect(page.locator('.inv-card.locked .inv-buy'), 'every locked item can be bought').toHaveCount(38);
+    await expect(page.locator('.inv-card:not(.locked) .inv-buy')).toHaveCount(0);
     await expect(page.locator('.inv-card', { hasText: 'Star Wizard' })).toContainText('x2');
 
     await page.locator('#invF_skin').click();
@@ -185,18 +187,22 @@ test.describe('My Items and equipping (spec 10.2)', () => {
     await page.locator('#invHideLocked').check();
     await expect(page.locator('.inv-card')).toHaveCount(4);
 
-    // the loadout preview is a live canvas that swings the equipped sword
+    // the loadout preview is a live canvas of the player standing still: no swinging, no label
     const r = await page.evaluate(() => {
       const c = document.getElementById('loadoutCanvas');
-      const labels = [];
+      const labels = [], swings = new Set();
       const real = c.getContext('2d').fillText.bind(c.getContext('2d'));
       c.getContext('2d').fillText = (t, ...a) => { labels.push(t); return real(t, ...a); };
-      mqDrawLoadout(c, 5); mqDrawLoadout(c, 60);
+      const realDraw = window.drawPlayerCuphead;
+      window.drawPlayerCuphead = function (...args) { swings.add(args[11] && args[11].swing); return realDraw.apply(this, args); };
+      for (let t = 0; t < 400; t += 7) mqDrawLoadout(c, t);
+      window.drawPlayerCuphead = realDraw;
       c.getContext('2d').fillText = real;
       mqDrawLoadout(c, 60);
-      return { labels, drawn: opaque(c, 0, 0, c.width, c.height) };
+      return { labels, swings: [...swings], drawn: opaque(c, 0, 0, c.width, c.height) };
     });
-    expect(r.labels).toEqual(['SWINGING', 'READY']);
+    expect(r.labels, 'no SWINGING / READY caption').toEqual([]);
+    expect(r.swings, 'the player never swings in the preview').toEqual([0]);
     expect(r.drawn).toBeGreaterThan(5000);
     await expect(page.locator('#loadoutSkin')).toContainText('Classic Cup');
     await expect(page.locator('#loadoutGun')).toContainText('Training Nail');
@@ -405,6 +411,89 @@ test.describe('Charm loadout (WPN-13)', () => {
     expect(r.dash, 'Swift Boots').toBe(135);
     expect(r.hearts, 'Vital Core').toBe(6);
     expect(r.hold, 'Feather Cloak').toBe(Math.round(12 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 12
+  });
+});
+
+test.describe('Buying items (SHP-10)', () => {
+  const PRICES = { common: 400, uncommon: 900, rare: 2200, epic: 5000, legendary: 12000 };
+
+  test('SHP-10 any skin, sword or charm can be bought for coins at a fixed price by rarity - well above what a crate costs', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const out = { prices: MQ_BUY_PRICES, byItem: {}, cheapestCrate: {} };
+      for (const item of MQ_ITEMS) {
+        out.byItem[item.id] = mqItemPrice(item.id);
+        const crates = MQ_CRATES.filter((c) => mqCratePool(c).some((e) => e.item.id === item.id)).map((c) => c.price);
+        out.cheapestCrate[item.id] = crates.length ? Math.min(...crates) : null;
+      }
+      out.unknown = mqItemPrice('nope');
+      out.rarityOf = Object.fromEntries(MQ_ITEMS.map((i) => [i.id, i.rarity]));
+      return out;
+    });
+    expect(r.prices).toEqual(PRICES);
+    expect(r.unknown).toBeNull();
+    expect(r.byItem.skin_classic, 'the default skin is never for sale').toBeNull();
+    expect(r.byItem.sword_training, 'nor the default sword').toBeNull();
+    for (const id of Object.keys(r.byItem)) {
+      if (r.byItem[id] === null) continue;
+      expect(r.byItem[id], id + ' costs its rarity price').toBe(PRICES[r.rarityOf[id]]);
+      if (r.cheapestCrate[id] !== null) expect(r.byItem[id], id + ' costs much more than a crate that can drop it').toBeGreaterThan(r.cheapestCrate[id] * 3);
+    }
+  });
+
+  test('SHP-10 buying deducts the coins, adds exactly one copy, saves, and refuses when you cannot or need not', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const out = {};
+      mqProfile.coins = 1000; mqSaveProfile();
+      out.broke = mqBuyItem('skin_golden'); // legendary: 12000
+      out.brokeCoins = mqProfile.coins; out.brokeOwned = !!mqProfile.owned.skin_golden;
+      out.buy = mqBuyItem('util_boots'); // common: 400
+      out.coinsAfter = mqProfile.coins; out.owned = mqProfile.owned.util_boots;
+      out.again = mqBuyItem('util_boots');
+      out.againCoins = mqProfile.coins; out.againOwned = mqProfile.owned.util_boots;
+      out.buyDefault = mqBuyItem('skin_classic');
+      out.buyUnknown = mqBuyItem('nope');
+      out.saved = JSON.parse(localStorage.getItem(MQ_PROFILE_KEY));
+      out.cratesStat = mqProfile.stats.crates;
+      out.sidebar = document.querySelector('.sidebar-coins .mq-coin-value').textContent;
+      // a bought item can be equipped like any other
+      mqEquipItem('util_boots');
+      out.equipped = mqProfile.equipped.utility;
+      return out;
+    });
+    expect(r.broke).toEqual({ ok: false, reason: 'coins', need: 12000, have: 1000 });
+    expect(r.brokeCoins).toBe(1000);
+    expect(r.brokeOwned).toBe(false);
+    expect(r.buy).toEqual({ ok: true, price: 400 });
+    expect(r.coinsAfter).toBe(600);
+    expect(r.owned).toBe(1);
+    expect(r.again, 'buying what you already have is refused').toEqual({ ok: false, reason: 'owned' });
+    expect(r.againCoins).toBe(600);
+    expect(r.againOwned).toBe(1);
+    expect(r.buyDefault).toEqual({ ok: false, reason: 'unavailable' });
+    expect(r.buyUnknown).toEqual({ ok: false, reason: 'unavailable' });
+    expect(r.saved.coins).toBe(600);
+    expect(r.saved.owned.util_boots).toBe(1);
+    expect(r.cratesStat, 'a purchase is not a crate').toBe(0);
+    expect(r.sidebar).toBe('600');
+    expect(r.equipped).toBe('util_boots');
+  });
+
+  test('SHP-10 My Items: every locked card shows its price on a Buy button; clicking it buys, too little coin explains', async ({ page }) => {
+    await page.evaluate(() => { mqProfile.coins = 500; mqSaveProfile(); showSection('shop'); mqOnShopOpen(); mqSetTab('inv'); mqSetFilter('utility'); });
+    const card = (name) => page.locator('.inv-card', { hasText: name });
+    await expect(card('Swift Boots').locator('.inv-buy')).toContainText('400');
+    await expect(card('Warding Sigil').locator('.inv-buy')).toContainText('12,000');
+    await expect(card('Swift Boots')).not.toContainText('Find in crates');
+    // too little: a message, nothing changes
+    await card('Warding Sigil').locator('.inv-buy').click();
+    await expect(page.locator('#mqToast')).toContainText('coins');
+    expect(await page.evaluate(() => [mqProfile.coins, !!mqProfile.owned.util_ward])).toEqual([500, false]);
+    // enough: bought, the card unlocks and offers Equip, the balance drops
+    await card('Swift Boots').locator('.inv-buy').click();
+    expect(await page.evaluate(() => [mqProfile.coins, mqProfile.owned.util_boots])).toEqual([100, 1]);
+    await expect(card('Swift Boots')).not.toHaveClass(/locked/);
+    await expect(card('Swift Boots').getByRole('button', { name: 'Equip' })).toBeVisible();
+    await expect(page.locator('.shop-coins .mq-coin-value')).toHaveText('100');
   });
 });
 

@@ -924,22 +924,63 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.upMissesDiagonalTarget, 'a plain up swing does not reach a target below').toBe(true);
   });
 
-  test('WPN-04 the sword swing\'s slash trail is white regardless of the blade\'s own color', async ({ page }) => {
+  test('WPN-04 every sword has its own slash: its own colours and a different effect, so a teammate\'s sword is easy to tell apart', async ({ page }) => {
     const r = await page.evaluate(() => {
+      const ids = MQ_SWORDS.map((s) => s.id);
+      const out = { ids, styles: {}, colour: {}, inside: {}, solid: {} };
+      const W = 400, H = 300;
+      for (const id of ids) {
+        out.styles[id] = mqSlashStyle(id);
+        // the slash alone: the same pose drawn with and without it
+        let r = 0, g = 0, b = 0, n = 0, outside = 0, solid = 0;
+        for (const s of [0.4, 0.5, 0.6]) {
+          const p = { x: 182, y: 126, facing: 1, swingDir: 'right', utility: '' };
+          const poly = raidSlashWorldPoly(p, s);
+          const look = { skin: 'skin_classic', gun: id, swing: s, swingDir: 'right', slashScale: 1, noBar: true, noShadow: true, t: 20 };
+          const a = document.createElement('canvas'); a.width = W; a.height = H;
+          drawPlayerCuphead(a.getContext('2d'), p.x, p.y, 36, 48, 1, 5, 5, false, 0, true, look);
+          const b0 = document.createElement('canvas'); b0.width = W; b0.height = H;
+          drawPlayerCuphead(b0.getContext('2d'), p.x, p.y, 36, 48, 1, 5, 5, false, 0, true, Object.assign({}, look, { slashScale: 0 }));
+          const da = a.getContext('2d').getImageData(0, 0, W, H).data, db = b0.getContext('2d').getImageData(0, 0, W, H).data;
+          const inPoly = (x, y) => { let ins = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins; } return ins; };
+          const distEdge = (x, y) => { let m = 1e9; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [ax, ay] = poly[j], [bx, by] = poly[i]; const dx = bx - ax, dy = by - ay; const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1))); m = Math.min(m, Math.hypot(x - ax - t * dx, y - ay - t * dy)); } return m; };
+          for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            const changed = da[i] !== db[i] || da[i + 1] !== db[i + 1] || da[i + 2] !== db[i + 2] || da[i + 3] !== db[i + 3];
+            if (!changed) continue;
+            if (da[i + 3] >= 220) { solid++; if (!inPoly(x, y) && distEdge(x, y) > 3) outside++; r += da[i]; g += da[i + 1]; b += da[i + 2]; n++; }
+          }
+        }
+        out.colour[id] = n ? [r / n, g / n, b / n] : [0, 0, 0];
+        out.inside[id] = outside; out.solid[id] = solid;
+      }
+      // the small trail the shop preview draws for a swing stays white
       const c = document.createElement('canvas'); c.width = 100; c.height = 100;
-      const ctx = c.getContext('2d');
-      ctx.translate(50, 70);
-      // sword_frost has a blue blade/glow - if the trail picked up the sword's own color instead
-      // of white, this pixel would read blue-ish, not white.
+      const ctx = c.getContext('2d'); ctx.translate(50, 70);
       mqDrawSword(ctx, 'sword_frost', 0, 0, 1, 0.5, 5, 'side');
       const d = ctx.getImageData(0, 0, 100, 100).data;
-      let whitePixel = false;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230 && d[i + 3] > 80) { whitePixel = true; break; }
-      }
-      return { whitePixel };
+      out.previewWhite = false;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230 && d[i + 3] > 80) { out.previewWhite = true; break; }
+      return out;
     });
-    expect(r.whitePixel, 'the slash trail renders a bright white stroke').toBe(true);
+    expect(r.ids.length).toBe(5);
+    expect(r.ids.map((id) => r.styles[id].fx), 'five different slash effects').toEqual(['none', 'leaf', 'crystal', 'void', 'sun']);
+    const col = (id) => r.colour[id];
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    for (const id of r.ids) {
+      expect(r.solid[id], id + ' draws a solid slash').toBeGreaterThan(300);
+      expect(r.inside[id], id + ': its effects stay inside the hit area (WPN-15)').toBe(0);
+    }
+    for (let i = 0; i < r.ids.length; i++) for (let j = i + 1; j < r.ids.length; j++) {
+      expect(dist(col(r.ids[i]), col(r.ids[j])), r.ids[i] + ' and ' + r.ids[j] + ' slashes are clearly different colours').toBeGreaterThan(40);
+    }
+    expect(Math.min(...col('sword_training')), 'the Training Nail slash is plain white').toBeGreaterThan(200);
+    expect(col('sword_moss')[1], 'Moss Blade is green').toBeGreaterThan(col('sword_moss')[0] + 15);
+    expect(col('sword_frost')[2], 'Frostbite Edge is icy blue').toBeGreaterThan(col('sword_frost')[0] + 20);
+    expect(col('sword_void')[0] + col('sword_void')[1] + col('sword_void')[2], 'Voidbone Fang is dark').toBeLessThan(col('sword_training')[0] * 2);
+    expect(col('sword_void')[2], 'and violet').toBeGreaterThan(col('sword_void')[1] + 20);
+    expect(col('sword_dawn')[0], 'Dawnbreaker is gold').toBeGreaterThan(col('sword_dawn')[2] + 60);
+    expect(r.previewWhite, 'the shop preview trail stays white').toBe(true);
   });
 
   test('WPN-10 the swing reaches far: a big white crescent in front of the hand, swept top to bottom, with the same reach in every direction', async ({ page }) => {
@@ -1583,6 +1624,8 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const body = (t, util, extra) => grab((x) => drawPlayerCuphead(x, 82, 90, 36, 48, 1, 5, 5, false, 0, true,
         Object.assign({ skin: 'skin_classic', gun: 'sword_training', t, vx: 4, vy: 0, onGround: true, noBar: true, noShadow: true, utility: util }, extra || {})));
       const icon = (item, t) => grab((x) => { x.translate(100, 100); x.scale(2, 2); mqDrawUtilityIcon(x, item, t); });
+      // a colour signature of everything a charm changes: two charms with the same badge shape but different art differ
+      const sig = (a, b) => { let h = 7; for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) h = (h * 31 + i + a[i] * 3 + a[i + 1] * 5 + a[i + 2] * 7 + a[i + 3]) % 1000000007; return h; };
       const out = { ids, onPlayer: {}, onPlayerAnimates: {}, icon: {}, iconAnimates: {}, unique: 0 };
       const seen = new Set();
       for (const id of ids) {
@@ -1590,7 +1633,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         const b = mask(body(53, id), body(53, ''));
         out.onPlayer[id] = a.n;
         out.onPlayerAnimates[id] = a.m !== b.m;
-        seen.add(a.m);
+        seen.add(sig(body(40, id), body(40, '')));
         const item = MQ_UTILITY_MAP[id];
         const generic = Object.assign({}, item, { id: 'util_unknown' });
         const i1 = mask(icon(item, 10), icon(generic, 10)), i2 = mask(icon(item, 37), icon(generic, 37));
@@ -1598,10 +1641,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         out.iconAnimates[id] = i1.m !== i2.m;
       }
       out.unique = seen.size;
-      // three charms at once: a comma-separated list draws every effect
-      const combo = body(40, 'util_boots,util_ward,util_heart');
-      const combos = ['util_boots', 'util_ward', 'util_heart'].map((id) => mask(combo, body(40, id)).n);
-      out.comboDiffers = combos.every((n) => n > 40);
+      // three charms at once: a comma-separated list draws every charm, each in its own spot, so they
+      // never pile on top of each other (the three together cover about as much as the three alone)
+      const trio = ['util_boots', 'util_ward', 'util_heart'];
+      const combo = body(40, trio.join(','));
+      const combos = trio.map((id) => mask(combo, body(40, id)).n);
+      out.comboDiffers = combos.every((n) => n > 25);
+      out.comboCovers = mask(combo, body(40, '')).n;
+      out.singlesCover = trio.reduce((sum, id) => sum + mask(body(40, id), body(40, '')).n, 0);
       // no charm: nothing changes (an unknown id too)
       out.noneSame = mask(body(40, ''), body(40, undefined)).n === 0 && mask(body(40, ''), body(40, 'util_unknown')).n === 0;
       // a charm never paints over a ghost afterimage or a shop skin preview (noCharm)
@@ -1627,13 +1674,16 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     });
     expect(r.ids.length, 'all 23 charms').toBe(23);
     for (const id of r.ids) {
-      expect(r.onPlayer[id], id + ' draws something on the player').toBeGreaterThan(40);
+      expect(r.onPlayer[id], id + ' draws a small mark on the player').toBeGreaterThan(25);
+      expect(r.onPlayer[id], id + ' stays minimal - a tiny badge, not an aura').toBeLessThan(450);
       expect(r.onPlayerAnimates[id], id + ' animates on the player').toBe(true);
       expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
       expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
     }
     expect(r.unique, 'every charm looks different on the player').toBe(23);
     expect(r.comboDiffers, 'three worn charms are drawn together, differently from any single one').toBe(true);
+    expect(r.comboCovers, 'three charms sit apart rather than overlapping').toBeGreaterThan(r.singlesCover * 0.85);
+    expect(r.comboCovers, 'and the three together are still a small cluster').toBeLessThan(900);
     expect(r.noneSame, 'no charm (or an unknown one) changes nothing').toBe(true);
     expect(r.noCharmSame, 'noCharm switches the effect off').toBe(true);
     expect(r.drewAll, 'the raid draws every charm on both players without error').toBe(true);
