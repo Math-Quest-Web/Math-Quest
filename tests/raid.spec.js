@@ -1411,6 +1411,78 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.drew, 'the parry spark draws without error').toBe(true);
   });
 
+  test('WPN-12 every charm has its own animation on the player and in its shop icon', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      const ids = MQ_UTILITY.map((u) => u.id);
+      const grab = (draw) => {
+        const c = document.createElement('canvas'); c.width = 200; c.height = 200;
+        const x = c.getContext('2d'); draw(x);
+        return x.getImageData(0, 0, 200, 200).data;
+      };
+      // which pixels differ between two renders, as a string so it can be compared and hashed
+      const mask = (a, b) => {
+        let m = '', n = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          const d = a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3];
+          m += d ? '1' : '0'; if (d) n++;
+        }
+        return { m, n };
+      };
+      const body = (t, util, extra) => grab((x) => drawPlayerCuphead(x, 82, 90, 36, 48, 1, 5, 5, false, 0, true,
+        Object.assign({ skin: 'skin_classic', gun: 'sword_training', t, vx: 4, vy: 0, onGround: true, noBar: true, noShadow: true, utility: util }, extra || {})));
+      const icon = (item, t) => grab((x) => { x.translate(100, 100); x.scale(2, 2); mqDrawUtilityIcon(x, item, t); });
+      const out = { ids, onPlayer: {}, onPlayerAnimates: {}, icon: {}, iconAnimates: {}, unique: 0 };
+      const seen = new Set();
+      for (const id of ids) {
+        const a = mask(body(40, id), body(40, ''));
+        const b = mask(body(53, id), body(53, ''));
+        out.onPlayer[id] = a.n;
+        out.onPlayerAnimates[id] = a.m !== b.m;
+        seen.add(a.m);
+        const item = MQ_UTILITY_MAP[id];
+        const generic = Object.assign({}, item, { id: 'util_unknown' });
+        const i1 = mask(icon(item, 10), icon(generic, 10)), i2 = mask(icon(item, 37), icon(generic, 37));
+        out.icon[id] = i1.n;
+        out.iconAnimates[id] = i1.m !== i2.m;
+      }
+      out.unique = seen.size;
+      // no charm: nothing changes (an unknown id too)
+      out.noneSame = mask(body(40, ''), body(40, undefined)).n === 0 && mask(body(40, ''), body(40, 'util_unknown')).n === 0;
+      // a charm never paints over a ghost afterimage or a shop skin preview (noCharm)
+      out.noCharmSame = mask(body(40, 'util_ward', { noCharm: true }), body(40, '')).n === 0;
+      // real raid draw: local player and a teammate each with a charm, every charm, no errors
+      await T.setupRaid('grinmaw');
+      let drewAll = true;
+      for (const id of ids) {
+        raidLocal.utility = id;
+        raidG.players.mate = { x: 300, y: raidGROUND_Y - 48, facing: -1, health: 5, maxHealth: 5, skin: 'skin_classic', gun: 'sword_training', utility: id, vx: 3, onGround: true };
+        try { raidDraw(); } catch (e) { drewAll = false; }
+      }
+      out.drewAll = drewAll;
+      // the loadout preview shows the equipped charm
+      mqProfile.owned.util_ward = 1; mqProfile.equipped.utility = 'util_ward';
+      const lc = document.createElement('canvas'); lc.width = 400; lc.height = 400;
+      mqDrawLoadout(lc, 30);
+      const withCharm = lc.getContext('2d').getImageData(0, 0, 400, 400).data;
+      mqProfile.equipped.utility = '';
+      mqDrawLoadout(lc, 30);
+      out.loadoutShowsCharm = mask(withCharm, lc.getContext('2d').getImageData(0, 0, 400, 400).data).n > 50;
+      return out;
+    });
+    expect(r.ids.length, 'all 13 charms').toBe(13);
+    for (const id of r.ids) {
+      expect(r.onPlayer[id], id + ' draws something on the player').toBeGreaterThan(40);
+      expect(r.onPlayerAnimates[id], id + ' animates on the player').toBe(true);
+      expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
+      expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
+    }
+    expect(r.unique, 'every charm looks different on the player').toBe(13);
+    expect(r.noneSame, 'no charm (or an unknown one) changes nothing').toBe(true);
+    expect(r.noCharmSame, 'noCharm switches the effect off').toBe(true);
+    expect(r.drewAll, 'the raid draws every charm on both players without error').toBe(true);
+    expect(r.loadoutShowsCharm, 'the loadout preview shows the equipped charm').toBe(true);
+  });
+
   test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a Familiar bolt hit does not', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
