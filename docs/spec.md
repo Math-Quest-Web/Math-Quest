@@ -124,6 +124,19 @@ lives in section `raid`.
 | DIF-02 | Multipliers: **Easy** boss HP x0.7, attack gap x1.4; **Normal** x1, x1; **Hard** HP x1.35, gap x0.7. | Done |
 | DIF-03 | Difficulty also sets the coin reward (RWD-01). | Done |
 
+### 8.3b The Gauntlet
+
+All seven bosses in a row, with a rest in between, optional handicaps and trophies. Multiplayer like any raid (the host picks it, everyone fights).
+
+| ID | Requirement | Status |
+|----|-------------|--------|
+| GAU-01 | **Choosing it.** On the boss-choice page the host sees **challenge** toggles (GAU-04) and a **The Gauntlet** button beside the seven boss cards. Picking it writes `mode: 'gauntlet'`, `bossType` = the first boss, the difficulty and `challenges` to the lobby; picking a single boss writes `mode: 'boss'` and clears challenges. The lobby list and the waiting room show "The Gauntlet" (with difficulty and challenges). Every client reads mode, difficulty and challenges from the lobby record. | Done |
+| GAU-02 | **Bosses in a row.** Order: Grinmaw, Warden, Wyrm, Glutton, Bramblehide, Colossus, Griffon (`BOSS_ORDER`). Beating a boss starts a **rest** of `GAUNTLET_REST_FRAMES` (300 = 5 s) during which the host simulates nothing (arena cleared, boss idle, no attacks); then the next boss appears at full HP (difficulty and challenges applied). Beating the seventh is the victory. After the victory screen the run restarts at boss 1. A HUD line shows the stage (n/7) and active challenges, and the rest shows a "BOSS DOWN" banner with a countdown. The stage and rest are synced in `gameState.gauntlet`. | Done |
+| GAU-03 | **Healing between fights depends on difficulty:** **Easy** restores full hearts, **Normal** 3 hearts, **Hard** 1 heart (capped at max hearts). Every player is healed, a downed player is **revived** by it (they come back with the healed hearts, so Hard revives with 1), shield charges are refilled to at least 2 and the Warding Sigil is reset. The host heals itself directly and sends teammates a `hits` event `{target, heal}` (RAI-25) which their own client applies. The difficulty also keeps its normal boss HP and attack-gap effects (DIF-02). | Done |
+| GAU-04 | **Challenges** (handicaps the host switches on, any combination, gauntlet only): **Fragile** (max 3 hearts, +25% coins), **No Shield** (+20%), **No Dash** (+20%), **Frenzy** (attack gap x0.6, +25%), **Titan Bosses** (boss HP x1.5, +25%), **No Healing** (the rest heals nothing, +30%). They have no effect outside the gauntlet. | Done |
+| GAU-05 | **Coins.** A clear pays `(5 x the single-fight reward of the difficulty + 10 per heart left) x charm coin bonus x (1 + sum of the challenge bonuses)` - e.g. Normal, 5 hearts, no challenges: 650; all six challenges: x2.45. Falling pays `0.5 x the single-fight reward x bosses beaten` (same multipliers), once. Each player is paid separately, exactly once. | Done |
+| GAU-06 | **Trophies.** A clear (never a loss) earns the difficulty trophy (Bronze / Silver / Gold Gauntlet for Easy / Normal / Hard), one "<challenge> Conqueror" trophy per active challenge, and **Masochist** when all six were on. They are counted in the saved profile (`trophies`, id to count; unknown ids are dropped on load) and shown in a trophy case on the Raid page. | Done |
+
 ### 8.4 Math (currently off)
 
 | ID | Requirement | Status |
@@ -249,7 +262,7 @@ Frame counts are the durations of each animation state (60 frames = 1 second).
 | ID | Requirement | Status |
 |----|-------------|--------|
 | RWD-01 | Beating a boss pays coins: **Easy 60, Normal 120, Hard 250, plus 10 per heart the player has left** (max 5). | Done |
-| RWD-02 | Every player in the raid is paid separately, exactly once per victory. Defeat pays nothing. | Done |
+| RWD-02 | Every player in the raid is paid separately, exactly once per victory. Defeat pays nothing (except in the gauntlet, GAU-05). | Done |
 | RWD-03 | The victory screen shows the coins earned, how they were calculated and the new balance. | Done |
 
 ### 10.2 Shop
@@ -301,11 +314,11 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | Path | Purpose |
 |------|---------|
 | Firestore `publicSets/<id>` | Community question sets (`ownerId`, `name`, `questions`, ...). |
-| RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `raidStart`, `players`. |
+| RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `mode` (`boss` or `gauntlet`), `challenges` (gauntlet handicap ids), `raidStart`, `players`. |
 | RTDB `bossRaid/<code>/gameState` | Host-published boss, projectiles, hazards, slam effects, `gameOver`, `victory`. |
 | RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a sword id), utility (comma-separated worn charm ids), `wardUsed`). |
 | RTDB `bossRaid/<code>/presence`, `mathHits` | Heartbeats and math answers (math off). Melee hits resolve straight from synced player state (WPN-02), so there is no shot relay. |
-| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility = comma-separated worn charm ids), `stats`. |
+| `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility = comma-separated worn charm ids), `stats`, `trophies` (GAU-06). |
 
 | ID | Requirement | Status |
 |----|-------------|--------|
@@ -382,6 +395,7 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-10 | **Better boss warnings and new moves** (BOS-40, BOS-41, BOS-42, BOS-45): every floor strike now uses one clear, flashing hit-width marker; Bramblehide's thorns warn for 60 frames (was 32) with a lock-on ring and rumbling tips, and its charge is marked, has a longer windup and runs about half as fast; the Griffon's wind dive now hovers high looking straight down and tracks its target for 2.5 s before locking on and diving. New moves: Colossus boulder hurl (large, parryable) and seismic march (phase 2+); Griffon strafing run and feather rain (phase 2+). |
 | 2026-10 | **Ten new charms and a charm loadout** (WPN-03, WPN-13, WPN-14): charms now cost 1-3 charm points; wear up to three at once as long as their points add up to 5 or less. New charms: Quick Hands, Long Stride, Pogo Spring, Deflector, Whetstone, Light Step, Opportunist, Thick Skin, Golden Idol and Titan Heart, each with its own animation (23 charms in all; crate pools grew to Starter 33, Arsenal 21, Legend 22). |
 | 2026-10 | **Co-op fixes and a fullscreen battle** (RAI-11, RAI-25, RAI-26, RAI-27, LOB-12): hits on a non-host player now stick (the host used to overwrite their health, so only the host got hurt and teammates healed straight back), a player going down no longer defeats the whole lobby (only everyone down does) and survivors keep fighting, leaving a lobby by any sidebar button or by closing the tab removes you and deletes an emptied lobby, and the battle fills the whole window. |
+| 2026-10 | **The Gauntlet, challenges and trophies** (GAU-01 to GAU-06): a mode where all seven bosses come in a row with a 5 s rest between them that heals by difficulty (Easy full, Normal 3 hearts, Hard 1) and revives downed players; six optional challenges (Fragile, No Shield, No Dash, Frenzy, Titan Bosses, No Healing) that raise the coin payout; difficulty trophies and challenge trophies for a clear, shown in a trophy case on the Raid page. |
 | 2026-10 | **Exact hitboxes, a higher Second Wind and a smaller Wyrm** (WPN-15, BOS-46, WPN-06): the slash now hits exactly where it is drawn (before, the hit box was about 25 px shorter than the drawn crescent and only checked for 5 frames, so a slash could visibly touch the boss and do nothing; late updates could skip the window entirely), bosses are hit anywhere their art is drawn (the old fixed boxes covered only part of it), floating bosses were re-hung by their silhouette bottoms so they still need a jump, the Second Wind hop is 85% of a first jump (was 70%), and the Wyrm is 0.75x its old size. |
 
 
