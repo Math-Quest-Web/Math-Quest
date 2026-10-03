@@ -1483,6 +1483,79 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.loadoutShowsCharm, 'the loadout preview shows the equipped charm').toBe(true);
   });
 
+  test('RAI-24 remote players, their swings and boss shots glide between network updates instead of stepping', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      // position smoothing: first sight snaps, then each draw closes part of the gap, never overshooting
+      raidDisplayPos = {};
+      const first = raidSmoothPos('mate', 100, 200);
+      out.firstSnap = first.x === 100 && first.y === 200;
+      const seq = [];
+      for (let i = 0; i < 6; i++) seq.push(raidSmoothPos('mate', 120, 200).x);
+      out.monotonic = seq.every((v, i) => v > (i ? seq[i - 1] : 100) && v < 120);
+      for (let i = 0; i < 40; i++) raidSmoothPos('mate', 120, 200);
+      out.converges = Math.abs(raidSmoothPos('mate', 120, 200).x - 120) < 0.05;
+      out.snapsFar = raidSmoothPos('mate', 900, 200).x === 900; // a teleport / respawn is not slid across the arena
+      // a teammate moving 14px every 2nd frame is drawn moving about 7px every frame
+      raidDisplayPos = {};
+      let target = 300, prev = null, maxStep = 0, maxLag = 0;
+      for (let f = 0; f < 60; f++) {
+        if (f % 2 === 0) target += 14;
+        const d = raidSmoothPos('mate2', target, 100);
+        if (prev !== null) maxStep = Math.max(maxStep, d.x - prev);
+        prev = d.x;
+        maxLag = Math.max(maxLag, target - d.x);
+      }
+      out.maxStep = maxStep; out.maxLag = maxLag;
+
+      // swing progress: a teammate's swing is synced every other frame but plays out one frame at a time
+      raidDisplaySwing = {};
+      const progress = [];
+      for (let f = 0; f < RAID_SWORD_SWING_FRAMES + 2; f++) {
+        const synced = f % 2 === 0 ? Math.max(0, RAID_SWORD_SWING_FRAMES - f) : Math.max(0, RAID_SWORD_SWING_FRAMES - f + 1);
+        progress.push(raidDisplaySwingProgress('mate', synced));
+      }
+      out.progress = progress;
+
+      // host-side: untouched. Non-host: shots keep flying between the 5-frame snapshots
+      raidG.projectiles = [{ x: 100, y: 100, vx: 3, vy: 1, gravity: 0.5, r: 8, life: 90, isWarning: false, isBossProjectile: true }, { x: 50, y: 50, vx: 5, vy: 0, r: 8, life: 90, isWarning: true, isBossProjectile: true }];
+      raidIsHost = true; raidExtrapolateProjectiles();
+      out.hostUntouched = raidG.projectiles[0].x === 100;
+      raidIsHost = false; raidExtrapolateProjectiles();
+      out.moved = [raidG.projectiles[0].x, raidG.projectiles[0].y, raidG.projectiles[0].vy];
+      out.warningStill = raidG.projectiles[1].x === 50;
+      // drawing with a teammate and a shot never throws
+      raidG.players.mate = { x: 300, y: raidGROUND_Y - 48, facing: -1, health: 5, maxHealth: 5, skin: 'skin_classic', gun: 'sword_training', swingTimer: 6, swing: 0.5, swingDir: 'side', vx: 3, onGround: true };
+      try { raidDraw(); raidDraw(); out.drew = true; } catch (e) { out.drew = false; }
+      // a non-host draws the boss at its smoothed position but never changes the real one
+      raidDisplayPos = {};
+      raidIsHost = false;
+      raidG.boss.x = 500; raidG.boss.y = 300; raidDraw();
+      raidG.boss.x = 520; raidDraw();
+      out.bossReal = raidG.boss.x;
+      out.bossShown = raidDisplayPos.boss.x;
+      raidIsHost = true;
+      return out;
+    });
+    expect(r.bossReal, 'the synced boss position is left alone').toBe(520);
+    expect(r.bossShown, 'a non-host draws the boss part-way to its new position').toBeGreaterThan(500);
+    expect(r.bossShown).toBeLessThan(520);
+    expect(r.firstSnap, 'a player seen for the first time is drawn where they are').toBe(true);
+    expect(r.monotonic, 'each draw closes part of the gap without overshooting').toBe(true);
+    expect(r.converges).toBe(true);
+    expect(r.snapsFar, 'a big jump (respawn) snaps instead of sliding').toBe(true);
+    expect(r.maxStep, 'drawn motion is smoother than the 14 px network steps').toBeLessThan(10);
+    expect(r.maxLag, "smoothing never lags more than two network steps behind").toBeLessThan(28);
+    expect(r.progress.every((v, i) => i === 0 || v >= r.progress[i - 1] || v === 0), 'swing progress only ever moves forward until it resets').toBe(true);
+    expect(new Set(r.progress.filter((v) => v > 0)).size, 'a teammate swing shows a new pose nearly every frame').toBeGreaterThanOrEqual(11);
+    expect(r.hostUntouched, 'the host already simulates shots exactly').toBe(true);
+    expect(r.moved[0], 'a non-host moves a shot by its velocity').toBe(103);
+    expect(r.moved[2], 'a lobbed shot also falls under its gravity').toBeCloseTo(1.5);
+    expect(r.warningStill, 'warning markers do not move').toBe(true);
+    expect(r.drew).toBe(true);
+  });
+
   test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a Familiar bolt hit does not', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');

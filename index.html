@@ -3519,6 +3519,8 @@ function resetRaidState() {
   raidLocal.squashKind = null;
   raidSwingHitState = {};
   raidChargeHitState = {};
+  raidDisplayPos = {};
+  raidDisplaySwing = {};
   raidPogoState = { lastSwingTimer: 0, bounced: false };
   raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
   raidShieldRegenTimer = 0;
@@ -7482,7 +7484,12 @@ function raidDraw() {
     }
   }
 
-  drawBossDispatch(raidCtx, raidG.boss);
+  if (raidIsHost) drawBossDispatch(raidCtx, raidG.boss);
+  else { // RAI-24: a non-host's boss snapshots arrive every few frames, so draw it eased toward them
+    const rb = raidG.boss, rx = rb.x, ry = rb.y, bd = raidSmoothPos('boss', rx, ry);
+    rb.x = bd.x; rb.y = bd.y;
+    try { drawBossDispatch(raidCtx, rb); } finally { rb.x = rx; rb.y = ry; }
+  }
 
   // Ring while the boss can't be hurt during a phase change. (When a boss is genuinely
   // vulnerable there is deliberately no label - it slumps and dizzy stars circle its head.)
@@ -7556,9 +7563,10 @@ function raidDraw() {
     if (id === raidMyId) return;
     const p = raidG.players[id];
     if (!p) return;
-    drawPlayerCuphead(raidCtx, p.x, p.y, 36, 48, p.facing || 1,
+    const dp = raidSmoothPos(id, p.x, p.y);
+    drawPlayerCuphead(raidCtx, dp.x, dp.y, 36, 48, p.facing || 1,
                p.health || 5, p.maxHealth || 5, p.shield || false, p.invincible || 0, false,
-               { skin: p.skin, gun: p.gun, swing: p.swing || 0, swingDir: p.swingDir || 'side', slashScale: raidAttackRangeMult(p.utility), vx: p.vx || 0, onGround: p.onGround !== false, utility: p.utility || '' });
+               { skin: p.skin, gun: p.gun, swing: raidDisplaySwingProgress(id, p.swingTimer || 0), swingDir: p.swingDir || 'side', slashScale: raidAttackRangeMult(p.utility), vx: p.vx || 0, onGround: p.onGround !== false, utility: p.utility || '' });
   });
 
   const lp = raidLocal;
@@ -7747,6 +7755,44 @@ function raidUpdateUI() {
   }
 }
 
+// Smoother motion (RAI-24). Teammates are synced every other frame and the boss's shots every
+// fifth, so drawing the raw snapshots makes them step. Instead each teammate's drawn position
+// eases toward the latest synced one, their swing keeps playing frame by frame between syncs, and
+// a non-host keeps flying boss shots by their own velocity until the next snapshot corrects them.
+// Display-only: nothing here feeds back into the simulation, hitboxes or what is synced.
+const RAID_SMOOTH_K = 0.4;     // fraction of the remaining gap closed per drawn frame
+const RAID_SMOOTH_SNAP = 160;  // a jump bigger than this (respawn, teleport) is not slid across the arena
+let raidDisplayPos = {};
+let raidDisplaySwing = {};
+function raidSmoothPos(key, tx, ty) {
+  const d = raidDisplayPos[key];
+  if (!d || Math.hypot(tx - d.x, ty - d.y) > RAID_SMOOTH_SNAP) {
+    raidDisplayPos[key] = { x: tx, y: ty };
+    return raidDisplayPos[key];
+  }
+  d.x += (tx - d.x) * RAID_SMOOTH_K;
+  d.y += (ty - d.y) * RAID_SMOOTH_K;
+  return d;
+}
+// 0..1 progress of a teammate's swing, counted down locally one frame at a time. A fresh swing
+// (the synced timer goes up, or starts from 0) restarts it; otherwise it just keeps counting.
+function raidDisplaySwingProgress(key, syncedTimer) {
+  const d = raidDisplaySwing[key] || (raidDisplaySwing[key] = { timer: 0, lastSynced: 0 });
+  if (syncedTimer > d.lastSynced || (d.lastSynced === 0 && syncedTimer > 0)) d.timer = syncedTimer;
+  else if (d.timer > 0) d.timer--;
+  d.lastSynced = syncedTimer;
+  return d.timer > 0 ? 1 - d.timer / RAID_SWORD_SWING_FRAMES : 0;
+}
+function raidExtrapolateProjectiles() {
+  if (raidIsHost) return;
+  raidG.projectiles.forEach(proj => {
+    if (proj.isWarning) return;
+    if (proj.gravity) proj.vy += proj.gravity;
+    proj.x += proj.vx || 0;
+    proj.y += proj.vy || 0;
+  });
+}
+
 function raidGameLoop() {
   if (!raidLoopRunning) return;
   if (raidHitStopTimer > 0) {
@@ -7757,6 +7803,8 @@ function raidGameLoop() {
     mqCheckRaidReward();
     if (raidIsHost) {
       raidBossUpdate();
+    } else {
+      raidExtrapolateProjectiles();
     }
   }
   raidUpdateUI();
