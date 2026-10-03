@@ -5559,7 +5559,7 @@ const RAID_SWORD_SWING_FRAMES = 14; // how long the visible swing animation play
 const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
 const RAID_SWORD_RANGE_X = 130;
-const RAID_SWORD_RANGE_Y = 120;
+const RAID_SWORD_RANGE_Y = 85; // matches the compressed slash below: R * sin(span) * RAID_SWORD_SLASH_SQUASH
 // Up/down swings (WPN-05) are narrower and reach only in their own direction, instead of the
 // side swing's box centered symmetrically on the player.
 const RAID_SWORD_UP_HALF_X = 70;
@@ -5580,6 +5580,7 @@ const RAID_SWORD_DIR_VECTORS = {
 };
 const RAID_SWORD_DIAG_REACH = 105; // player-centre to diagonal-hitbox-centre distance
 const RAID_SWORD_DIAG_HALF = 68;  // diagonal hitbox half-extent (both axes)
+const RAID_SWORD_SLASH_SQUASH = 0.55; // the slash arc is squashed across its direction, bringing its two ends closer together
 const RAID_SWORD_SLASH_R = 150; // radius of the big white crescent drawn with a swing (WPN-10), sized to the reach above
 const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
 
@@ -9393,9 +9394,10 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
       const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
       const R = RAID_SWORD_SLASH_R * slashScale;
       const span = 1.4; // a forward arc of about 160 degrees - it does not surround the player
-      let aStart = phi - span, aEnd = phi + span;
+      // angles are local to the swing direction (the frame is rotated by phi below)
+      let aStart = -span, aEnd = span;
       // start at whichever end is higher on screen, so the swing always goes top to bottom
-      if (Math.sin(aStart) - Math.sin(aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
+      if (Math.sin(phi + aStart) - Math.sin(phi + aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
       // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing
       // through the farthest point and tapering to nothing at the bottom
       const widthAt = (u) => 0.5 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6);
@@ -9410,6 +9412,10 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
       ctx.save();
       ctx.translate(px, py);
       ctx.scale(facing, 1);
+      // squash across the swing direction (not along it): the ends of the arc move closer
+      // together while the forward reach stays the same
+      ctx.rotate(phi);
+      ctx.scale(1, RAID_SWORD_SLASH_SQUASH);
       const g = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
       g.addColorStop(0, 'rgba(255,255,255,0)');
       g.addColorStop(0.6, 'rgba(255,255,255,0.5)');

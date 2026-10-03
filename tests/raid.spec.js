@@ -992,7 +992,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // the arc (0 = top end, 1 = bottom end) at a fraction of the radius.
       const ptAt = (swing, u, rad) => {
         const ang = -1.4 + u * 2.8;
-        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang)));
+        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH));
       };
       const topEarly = ptAt(0.2, 0.1, 0.9);
       const bottomEarly = ptAt(0.2, 0.65, 0.95);
@@ -1007,13 +1007,15 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         mqDrawWeapon(ctx, 'sword_frost', 250, 250, 1, 0, 0, 0.45, 5, 'side', 1);
         const ang = -1.4 + u * 2.8; let n = 0;
         for (let rr = R * 0.4; rr < R * 1.1; rr += 1) {
-          const px = ctx.getImageData(250 + Math.round(rr * Math.cos(ang)), 250 + Math.round(rr * Math.sin(ang)), 1, 1).data;
+          const px = ctx.getImageData(250 + Math.round(rr * Math.cos(ang)), 250 + Math.round(rr * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH), 1, 1).data;
           if (px[3] > 25) n++;
         }
         return n;
       };
       const widthNearTop = widthAt(0.35), widthAtApex = widthAt(0.5);
-      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex };
+      // compressed vertically: the top and bottom ends sit close together (well inside the radius)
+      const slashHeight = 2 * R * Math.sin(1.4) * RAID_SWORD_SLASH_SQUASH;
+      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex, slashHeight, sideHh: side.hh, squash: RAID_SWORD_SLASH_SQUASH };
     });
     expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
     expect(r.reachRight).toBeGreaterThanOrEqual(120);
@@ -1035,6 +1037,9 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.surrounds.a, 'the slash does not wrap round behind the player').toBe(0);
     expect(r.widthAtApex, 'the slash is narrower at its farthest point than near its top').toBeLessThan(r.widthNearTop);
     expect(r.widthAtApex).toBeGreaterThan(5);
+    expect(r.squash, 'the arc is compressed vertically so its top and bottom sit closer together').toBeLessThan(0.7);
+    expect(r.slashHeight, 'the whole slash is much shorter than it is far-reaching').toBeLessThan(r.R * 1.2);
+    expect(r.sideHh, 'the side hitbox is no taller than the slash it covers').toBeLessThanOrEqual(r.slashHeight / 2 + 10);
   });
 
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
