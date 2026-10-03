@@ -1304,7 +1304,7 @@ body {
   flex-wrap: wrap;
 }
 
-.difficulty-btn {
+.difficulty-btn, .challenge-btn {
   background: #0f0f1f;
   border: 2px solid #3a3a6a;
   border-radius: 30px;
@@ -1316,17 +1316,26 @@ body {
   transition: 0.15s;
 }
 
-.difficulty-btn:hover {
+.difficulty-btn:hover, .challenge-btn:hover {
   border-color: #6c63ff;
 }
 
-.difficulty-btn.selected {
+.difficulty-btn.selected, .challenge-btn.selected {
   border-color: #ffd84d;
   background: #171730;
   color: #ffd84d;
   box-shadow: 0 0 0 2px rgba(255, 216, 77, 0.3);
 }
 
+.gauntlet-pick-card {
+  display: block; width: 100%; margin: 0 0 14px; padding: 14px 18px; cursor: pointer;
+  background: linear-gradient(90deg, #3b1f6b, #6b1f4a); color: #ffd84d; border: 2px solid #ffd84d;
+  border-radius: 16px; font-family: 'Fredoka One', cursive; font-size: 1.05em; text-align: left;
+}
+.gauntlet-pick-card small { display: block; color: #e0e0ff; font-family: Arial, sans-serif; font-size: 0.8em; margin-top: 4px; }
+.trophy-case { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 20px; }
+.trophy { background: #0f0f1f; border: 1px solid #3a3a6a; border-radius: 14px; padding: 8px 14px; color: #ffd84d; font-weight: bold; font-family: Arial, sans-serif; }
+.trophy small { color: #ccccdd; font-weight: normal; }
 .waiting-difficulty {
   margin-top: 6px;
   font-family: Arial, sans-serif;
@@ -2130,6 +2139,9 @@ textarea.community-input {
       <button class="big-play-button" style="background: #2d2d5e; box-shadow: 0 6px 0 #1a1a3a;" onclick="refreshLobbies()">🔄 Refresh</button>
     </div>
 
+    <h3 class="waiting-choose-heading">🏆 Gauntlet trophies</h3>
+    <div id="trophyCase" class="trophy-case"></div>
+
     <div id="lobbyList" class="lobby-list">
       <div class="lobby-empty">Loading lobbies...</div>
     </div>
@@ -2170,6 +2182,11 @@ textarea.community-input {
           <span class="difficulty-picker-label">Difficulty:</span>
           <div class="difficulty-options" id="raidDifficultyOptions"></div>
         </div>
+        <div class="difficulty-picker" id="raidChallengePicker">
+          <span class="difficulty-picker-label">Gauntlet challenges (optional handicaps for bonus coins and trophies):</span>
+          <div class="difficulty-options" id="raidChallengeOptions"></div>
+        </div>
+        <button type="button" id="raidGauntletBtn" class="gauntlet-pick-card">⚔️ THE GAUNTLET - all 7 bosses in a row<small id="raidGauntletHint"></small></button>
         <div class="boss-picker" id="raidBossPicker"></div>
         <p id="raidBossChooseNotice" class="waiting-host-notice">Waiting for the host to choose a boss...</p>
         <div class="waiting-actions">
@@ -3164,6 +3181,84 @@ const DIFFICULTY_DEFS = {
 
 const DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
 
+// ============================================================
+// GAUNTLET (GAU-01 to GAU-06): every boss in a row, a rest in between, optional handicaps
+// ============================================================
+
+const GAUNTLET_REST_FRAMES = 300; // 5 s between fights
+// Hearts restored by each rest ('full' = back to max). Difficulty sets this as well as the boss numbers.
+const GAUNTLET_HEAL = { easy: 'full', normal: 3, hard: 1 };
+const GAUNTLET_FIGHTS_PAID = 5;  // a clear pays this many single-boss fights of coins
+const GAUNTLET_LOSS_SHARE = 0.5; // falling pays this share of one fight per boss beaten
+
+const CHALLENGE_ORDER = ['fragile', 'noshield', 'nodash', 'frenzy', 'titan', 'nohealing'];
+const CHALLENGE_DEFS = {
+  fragile:   { id: 'fragile',   icon: '💔', name: 'Fragile',      bonus: 0.25, desc: 'Only 3 hearts, whatever you wear' },
+  noshield:  { id: 'noshield',  icon: '🚫', name: 'No Shield',    bonus: 0.20, desc: 'The shield is disabled' },
+  nodash:    { id: 'nodash',    icon: '🐌', name: 'No Dash',      bonus: 0.20, desc: 'The dash is disabled' },
+  frenzy:    { id: 'frenzy',    icon: '⚡', name: 'Frenzy',       bonus: 0.25, desc: 'Bosses attack 40% more often' },
+  titan:     { id: 'titan',     icon: '🏔️', name: 'Titan Bosses', bonus: 0.25, desc: 'Bosses have 50% more HP' },
+  nohealing: { id: 'nohealing', icon: '🩸', name: 'No Healing',   bonus: 0.30, desc: 'Resting between fights heals nothing' }
+};
+
+let currentMode = 'boss';       // 'boss' (one fight) or 'gauntlet'
+let currentChallenges = [];     // challenge ids, only used in the gauntlet
+let pendingChallenges = [];     // the host's picks before the lobby is committed
+
+function raidChallenge(id) { return currentMode === 'gauntlet' && currentChallenges.indexOf(id) !== -1; }
+function raidCooldownMult() { return raidChallenge('frenzy') ? 0.6 : 1; }
+function raidBossMaxHp(type) {
+  const def = BOSS_DEFS[type] || BOSS_DEFS.grinmaw;
+  const diff = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
+  return Math.round(def.maxHp * diff.hpMult * (raidChallenge('titan') ? 1.5 : 1));
+}
+function challengeBonus(challenges) {
+  return (challenges || []).reduce((t, id) => t + (CHALLENGE_DEFS[id] ? CHALLENGE_DEFS[id].bonus : 0), 0);
+}
+function gauntletHealedTo(difficulty, health, maxHealth) {
+  const h = GAUNTLET_HEAL[difficulty] || GAUNTLET_HEAL.normal;
+  return h === 'full' ? maxHealth : Math.min(maxHealth, Math.max(0, health) + h);
+}
+function gauntletHealText(difficulty) {
+  const h = GAUNTLET_HEAL[difficulty] || GAUNTLET_HEAL.normal;
+  return h === 'full' ? 'full heal between fights' : 'heal ' + h + (h === 1 ? ' heart' : ' hearts') + ' between fights';
+}
+function gauntletReward(difficulty, challenges, hearts, coinMult) {
+  const base = (MQ_COIN_REWARD[difficulty] || MQ_COIN_REWARD.normal) * GAUNTLET_FIGHTS_PAID + hearts * MQ_HEART_BONUS;
+  return Math.round(base * coinMult * (1 + challengeBonus(challenges)));
+}
+function gauntletLossReward(difficulty, challenges, beaten, coinMult) {
+  const one = MQ_COIN_REWARD[difficulty] || MQ_COIN_REWARD.normal;
+  return Math.round(one * GAUNTLET_LOSS_SHARE * beaten * coinMult * (1 + challengeBonus(challenges)));
+}
+function gauntletTrophyIds(difficulty, challenges) {
+  const ids = ['gauntlet_' + difficulty];
+  CHALLENGE_ORDER.forEach(id => { if ((challenges || []).indexOf(id) !== -1) ids.push('challenge_' + id); });
+  if (CHALLENGE_ORDER.every(id => (challenges || []).indexOf(id) !== -1)) ids.push('challenge_all');
+  return ids;
+}
+const TROPHY_DEFS = {
+  gauntlet_easy:   { icon: '🥉', name: 'Bronze Gauntlet', desc: 'Cleared the Gauntlet on Easy' },
+  gauntlet_normal: { icon: '🥈', name: 'Silver Gauntlet', desc: 'Cleared the Gauntlet on Normal' },
+  gauntlet_hard:   { icon: '🥇', name: 'Gold Gauntlet',   desc: 'Cleared the Gauntlet on Hard' },
+  challenge_all:   { icon: '💎', name: 'Masochist',       desc: 'Cleared the Gauntlet with every challenge on' }
+};
+CHALLENGE_ORDER.forEach(id => { TROPHY_DEFS['challenge_' + id] = { icon: CHALLENGE_DEFS[id].icon, name: CHALLENGE_DEFS[id].name + ' Conqueror', desc: 'Cleared the Gauntlet with ' + CHALLENGE_DEFS[id].name }; });
+
+function renderChallengePicker(container) {
+  container.innerHTML = CHALLENGE_ORDER.map(id => {
+    const d = CHALLENGE_DEFS[id];
+    return `<button type="button" class="challenge-btn${pendingChallenges.indexOf(id) !== -1 ? ' selected' : ''}" data-challenge="${id}" title="${d.desc} (+${Math.round(d.bonus * 100)}% coins)">${d.icon} ${d.name} +${Math.round(d.bonus * 100)}%</button>`;
+  }).join('');
+  container.querySelectorAll('.challenge-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.challenge;
+      pendingChallenges = pendingChallenges.indexOf(id) === -1 ? pendingChallenges.concat(id) : pendingChallenges.filter(c => c !== id);
+      renderChallengePicker(container);
+    });
+  });
+}
+
 function renderDifficultyPicker(container) {
   container.innerHTML = DIFFICULTY_ORDER.map(id => {
     const d = DIFFICULTY_DEFS[id];
@@ -3251,6 +3346,9 @@ function enterRaidRoom(lobbyId, lobbyName, isHost, bossType) {
   isLobbyHost = isHost;
   currentBossType = BOSS_DEFS[bossType] ? bossType : null;
   pendingDifficulty = 'normal';
+  pendingChallenges = [];
+  currentMode = 'boss';
+  currentChallenges = [];
 
   document.getElementById('raidLobbyInfo').textContent =
     `🏛️ Lobby: ${currentLobbyName} (Code: ${lobbyId}) | ${isLobbyHost ? '👑 Host' : 'Player'}`;
@@ -3280,10 +3378,31 @@ function showRaidBossChooseStep() {
     diffPicker.style.display = 'flex';
     renderBossPicker(picker, chooseBossAndContinue);
     renderDifficultyPicker(document.getElementById('raidDifficultyOptions'));
+    renderChallengePicker(document.getElementById('raidChallengeOptions'));
+    document.getElementById('raidChallengePicker').style.display = 'flex';
+    document.getElementById('raidGauntletBtn').style.display = 'block';
+    document.getElementById('raidGauntletHint').textContent = 'Heal between fights depends on difficulty: Easy full, Normal 3 hearts, Hard 1 heart.';
   } else {
     notice.style.display = 'block';
     picker.style.display = 'none';
     diffPicker.style.display = 'none';
+    document.getElementById('raidChallengePicker').style.display = 'none';
+    document.getElementById('raidGauntletBtn').style.display = 'none';
+  }
+}
+
+async function chooseGauntletAndContinue() {
+  if (!isLobbyHost || !currentLobbyId) return;
+  try {
+    await lobbyRef.child(currentLobbyId).update({
+      bossType: BOSS_ORDER[0],
+      difficulty: pendingDifficulty,
+      mode: 'gauntlet',
+      challenges: pendingChallenges.length ? pendingChallenges.slice() : null
+    });
+  } catch (error) {
+    console.error('Error choosing the gauntlet:', error);
+    alert('Failed to choose the gauntlet: ' + error.message);
   }
 }
 
@@ -3292,7 +3411,9 @@ async function chooseBossAndContinue(type) {
   try {
     await lobbyRef.child(currentLobbyId).update({
       bossType: type,
-      difficulty: pendingDifficulty
+      difficulty: pendingDifficulty,
+      mode: 'boss',
+      challenges: null
     });
   } catch (error) {
     console.error('Error choosing boss:', error);
@@ -3305,14 +3426,27 @@ function showRaidWaitingReady() {
   document.getElementById('raidWaitingReady').style.display = 'block';
   const def = BOSS_DEFS[currentBossType] || BOSS_DEFS.grinmaw;
   const diffDef = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
-  document.getElementById('waitingBossIcon').textContent = def.icon;
-  document.getElementById('waitingBossName').textContent = def.name;
-  document.getElementById('waitingBossDesc').textContent = def.desc;
-  document.getElementById('waitingDifficultyLabel').textContent = diffDef.label;
+  const gaunt = currentMode === 'gauntlet';
+  document.getElementById('waitingBossIcon').textContent = gaunt ? '⚔️' : def.icon;
+  document.getElementById('waitingBossName').textContent = gaunt ? 'The Gauntlet' : def.name;
+  document.getElementById('waitingBossDesc').textContent = gaunt
+    ? 'All ' + BOSS_ORDER.length + ' bosses in a row - ' + gauntletHealText(currentDifficulty) + '.'
+    : def.desc;
+  document.getElementById('waitingDifficultyLabel').textContent = diffDef.label +
+    (gaunt && currentChallenges.length ? ' | Challenges: ' + currentChallenges.map(id => CHALLENGE_DEFS[id].icon + ' ' + CHALLENGE_DEFS[id].name).join(', ') : '');
   document.getElementById('startRaidBtn').style.display = isLobbyHost ? 'inline-block' : 'none';
   // Re-enable in case a previous lobby's raid start left this disabled - it's the same DOM node reused across lobbies.
   document.getElementById('startRaidBtn').disabled = false;
   document.getElementById('waitingHostNotice').style.display = isLobbyHost ? 'none' : 'block';
+}
+
+// Mode, difficulty and challenges come from the lobby record so every player plays by the same rules.
+function raidReadLobbyMode(data) {
+  currentMode = data.mode === 'gauntlet' ? 'gauntlet' : 'boss';
+  currentChallenges = currentMode === 'gauntlet' && data.challenges
+    ? Object.keys(data.challenges).map(k => data.challenges[k]).filter(id => CHALLENGE_DEFS[id])
+    : [];
+  if (DIFFICULTY_DEFS[data.difficulty]) currentDifficulty = data.difficulty;
 }
 
 let waitingRoomLobbyRef = null;
@@ -3327,6 +3461,7 @@ function listenToLobbyWaitingRoom(lobbyId) {
     const data = snap.val();
     if (!data) return;
     lobbyKnownPlayers = Object.keys(data.players || {});
+    raidReadLobbyMode(data);
 
     if (data.raidStart) {
       beginRaidFromSignal(lobbyId);
@@ -3481,6 +3616,8 @@ async function leaveLobby(opts) {
     currentLobbyId = null;
     currentLobbyName = '';
     isLobbyHost = false;
+    currentMode = 'boss';
+    currentChallenges = [];
 
     document.getElementById('raidLobbyInfo').textContent =
       'Join a lobby to start the raid!';
@@ -3531,10 +3668,11 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 function resetRaidState() {
   // Reset all raid state variables
   const def = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS[currentBossType] || BOSS_DEFS.grinmaw;
-  const diff = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
   raidG.boss.type = def.id;
-  raidG.boss.hp = Math.round(def.maxHp * diff.hpMult);
-  raidG.boss.maxHp = Math.round(def.maxHp * diff.hpMult);
+  raidG.boss.hp = raidBossMaxHp(def.id);
+  raidG.boss.maxHp = raidBossMaxHp(def.id);
+  raidG.gauntlet = { stage: 0, rest: 0 };
+  raidGauntletLossPaid = false;
   raidG.boss.phase = 1;
   raidG.boss.ultimateTriggered = false;
   raidG.boss.lastWeakPoint = 0;
@@ -3620,6 +3758,7 @@ async function refreshLobbies() {
   }
 
   sweepOrphanRaidData();
+  renderTrophyCase();
 
   try {
     const snapshot = await lobbyRef.orderByChild('createdAt').limitToLast(50).once('value');
@@ -3639,8 +3778,9 @@ async function refreshLobbies() {
       const playerCount = lobby.playerCount || 0;
       const isPlaying = status === 'playing';
       const bossDef = BOSS_DEFS[lobby.bossType];
-      const bossIcon = bossDef ? bossDef.icon : '❓';
-      const bossLabel = bossDef ? bossDef.name : 'Host is choosing a boss...';
+      const bossIcon = lobby.mode === 'gauntlet' && bossDef ? '⚔️' : bossDef ? bossDef.icon : '❓';
+      const gauntlet = lobby.mode === 'gauntlet' && bossDef;
+      const bossLabel = gauntlet ? 'The Gauntlet (all 7 bosses)' : bossDef ? bossDef.name : 'Host is choosing a boss...';
       const diffDef = DIFFICULTY_DEFS[lobby.difficulty];
       const diffLabel = bossDef ? (diffDef ? diffDef.label : DIFFICULTY_DEFS.normal.label) : '';
 
@@ -3762,6 +3902,7 @@ const RAID_DASH_TRAIL_LIFE = 14; // frames each afterimage stays visible
 
 // Game state
 const raidG = {
+  gauntlet: { stage: 0, rest: 0 },
   players: {},
   boss: { type: 'grinmaw', x: 500, y: 80, w: 120, h: 80, hp: 100, maxHp: 100, phase: 1,
           attackTimer: 0, attackCooldown: 120, phaseTimer: 0, ultimateTriggered: false,
@@ -3850,6 +3991,7 @@ const countdownOverlay = document.getElementById('countdownOverlay');
 const countdownNumber = document.getElementById('countdownNumber');
 const countdownText = document.getElementById('countdownText');
 document.getElementById('raidLeaveBtn').addEventListener('click', leaveLobby);
+document.getElementById('raidGauntletBtn').addEventListener('click', chooseGauntletAndContinue);
 
 function startRaidWithLobby(lobbyId, bossType) {
   // Clean up any existing raid listeners
@@ -3964,6 +4106,7 @@ function raidSendBossState() {
     mathEvent: raidG.mathEvent,
     gameOver: raidG.gameOver,
     victory: raidG.victory,
+    gauntlet: raidG.gauntlet,
     lastUpdate: Date.now()
   });
 }
@@ -3991,6 +4134,7 @@ function raidListenToGame() {
         raidG.minions = data.minions || [];
         raidG.gameOver = data.gameOver || false;
         raidG.victory = data.victory || false;
+        if (!raidIsHost) raidG.gauntlet = data.gauntlet || { stage: 0, rest: 0 };
         raidG.lastUpdate = data.lastUpdate;
 
         const newEvent = data.mathEvent || null;
@@ -4070,6 +4214,16 @@ function raidListenToPlayers() {
 // write the lowered health straight into the target's entry, which the target's next regular sync
 // overwrote - so the hit vanished and only the host ever stayed hurt.)
 function raidApplyHit(hit) {
+  if (hit.heal) { // GAU-03: the gauntlet rest heals (and revives) the player
+    raidLocal.maxHealth = raidMaxHealthForLoadout();
+    raidLocal.health = hit.heal === 'full' ? raidLocal.maxHealth : Math.min(raidLocal.maxHealth, raidLocal.health + hit.heal);
+    raidLocal.invincible = 0;
+    raidMathShieldCharges = Math.max(raidMathShieldCharges, 2);
+    raidLocal.wardUsed = false;
+    raidUpdateUI();
+    raidSendLocalState();
+    return;
+  }
   if (raidLocal.health <= 0) return;
   if (hit.ward) {
     raidLocal.wardUsed = true;
@@ -5968,12 +6122,62 @@ function drawMinion(ctx, m) {
   ctx.restore();
 }
 
+// Host: the boss is down, so clear the arena, heal everyone and rest (GAU-02, GAU-03).
+function gauntletStartRest() {
+  raidG.gauntlet.rest = GAUNTLET_REST_FRAMES;
+  raidG.projectiles = [];
+  raidG.playerProjectiles = [];
+  raidG.hazards = [];
+  raidG.slamAnimations = [];
+  raidG.minions = [];
+  raidG.mathEvent = null;
+  const heal = raidChallenge('nohealing') ? 0 : (GAUNTLET_HEAL[currentDifficulty] || GAUNTLET_HEAL.normal);
+  if (heal) {
+    Object.keys(raidG.players).forEach(id => {
+      const ev = { target: id, heal: heal, at: Date.now() };
+      if (id === raidMyId) raidApplyHit(ev); else raidHitsRef.push(ev);
+    });
+    if (!raidG.players[raidMyId]) raidApplyHit({ heal: heal });
+  }
+  raidSendBossState();
+}
+
+function gauntletRestTick() {
+  raidG.gauntlet.rest--;
+  if (raidG.gauntlet.rest > 0) { if (raidG.frame % 5 === 0) raidSendBossState(); return; }
+  gauntletSpawnBoss(BOSS_ORDER[raidG.gauntlet.stage + 1], raidG.gauntlet.stage + 1);
+}
+
+// Put a fresh boss in the arena (next gauntlet stage, or stage 0 again after a clear).
+function gauntletSpawnBoss(type, stage) {
+  const b = raidG.boss;
+  raidG.gauntlet.stage = stage;
+  raidG.gauntlet.rest = 0;
+  b.type = type;
+  b.hp = raidBossMaxHp(type);
+  b.maxHp = raidBossMaxHp(type);
+  b.phase = 1;
+  b.ultimateTriggered = false;
+  b.lastWeakPoint = raidG.frame;
+  b.invulnerable = false;
+  b.feastCooldown = 260;
+  b.feastTimer = 0;
+  b.feastWarning = false;
+  b.anim = { state: 'idle', timer: 0 };
+  b.animScale = 1; b.animAlpha = 1; b.animOffsetX = 0; b.animOffsetY = 0;
+  resetBossFlow(b);
+  raidG.projectiles = []; raidG.playerProjectiles = []; raidG.slamAnimations = []; raidG.hazards = []; raidG.minions = [];
+  raidSendBossState();
+}
+
 function raidBossUpdate() {
   if (!raidIsHost) return;
   const b = raidG.boss;
   if (raidG.gameOver || raidG.victory) return;
 
   if (countdownActive) return;
+
+  if (raidG.gauntlet && raidG.gauntlet.rest > 0) { gauntletRestTick(); return; }
 
   if (!b.anim) b.anim = { state: 'idle', timer: 0 };
 
@@ -6073,7 +6277,7 @@ function raidBossUpdate() {
   if (!inTransition && bossIdle) b.attackTimer--;
   if (!inTransition && bossIdle && b.attackTimer <= 0) {
     (BOSS_ATTACK_FNS[b.type] || grinmawAttack)(b);
-    const cooldownMult = (DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal).cooldownMult;
+    const cooldownMult = (DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal).cooldownMult * raidCooldownMult();
     b.attackTimer = Math.round((190 - b.phase * 20) * cooldownMult);
     // Phase 3 combo: occasionally a second, different attack follows the first after a clear pause.
     if (b.phase >= 3 && Math.random() < 0.3) { b.comboPending = true; b.comboTimer = 60; }
@@ -6148,6 +6352,12 @@ function raidBossUpdate() {
 
   raidCheckSwordSwings(b);
 
+  if (b.hp <= 0 && currentMode === 'gauntlet' && raidG.gauntlet.stage < BOSS_ORDER.length - 1) {
+    b.hp = 0;
+    gauntletStartRest();
+    return;
+  }
+
   if (b.hp <= 0) {
     b.hp = 0;
     raidG.victory = true;
@@ -6161,10 +6371,10 @@ function raidBossUpdate() {
     setTimeout(() => {
       if (raidIsHost) {
         startCountdown(() => {
+          if (currentMode === 'gauntlet') gauntletSpawnBoss(BOSS_ORDER[0], 0);
           const def = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
-          const diff = DIFFICULTY_DEFS[currentDifficulty] || DIFFICULTY_DEFS.normal;
-          raidG.boss.hp = Math.round(def.maxHp * diff.hpMult);
-          raidG.boss.maxHp = Math.round(def.maxHp * diff.hpMult);
+          raidG.boss.hp = raidBossMaxHp(def.id);
+          raidG.boss.maxHp = raidBossMaxHp(def.id);
           raidG.boss.phase = 1;
           raidG.boss.ultimateTriggered = false;
           raidG.boss.lastWeakPoint = raidG.frame;
@@ -6666,7 +6876,7 @@ function raidGenerateMath() {
 }
 
 function raidTryShield() {
-  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0) return;
+  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0 || raidChallenge('noshield')) return;
   if (countdownActive) return;
   
   if (raidMathShieldCharges > 0) {
@@ -6685,7 +6895,7 @@ function raidTryShield() {
 }
 
 function raidTryDash() {
-  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0) return;
+  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0 || raidChallenge('nodash')) return;
   if (countdownActive) return;
   const p = raidLocal;
   if (p.dashCooldown > 0) return;
@@ -6717,7 +6927,8 @@ function raidDashCooldownFrames() {
 // Vital Core's +1 and Titan Heart's +2 max hearts add together (WPN-03, WPN-14).
 function raidMaxHealthForLoadout() {
   const a = raidCharm('max_health'), b = raidCharm('max_health_big');
-  return 5 + (a ? a.value : 0) + (b ? b.value : 0);
+  const hearts = 5 + (a ? a.value : 0) + (b ? b.value : 0);
+  return raidChallenge('fragile') ? Math.min(3, hearts) : hearts; // GAU-04
 }
 
 // Feather Cloak's longer jump hold (WPN-03).
@@ -8700,6 +8911,35 @@ function raidDraw() {
 
   drawMathPrompt(raidCtx);
 
+  if (currentMode === 'gauntlet' && raidG.gauntlet) {
+    const gst = raidG.gauntlet;
+    const bdef = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
+    raidCtx.save();
+    raidCtx.textAlign = 'left';
+    raidCtx.font = 'bold 16px sans-serif';
+    raidCtx.fillStyle = '#ffd84d';
+    raidCtx.fillText('GAUNTLET ' + (gst.stage + 1) + '/' + BOSS_ORDER.length + '  ' + bdef.icon + ' ' + bdef.name, 16, 74);
+    if (currentChallenges.length) {
+      raidCtx.font = '14px sans-serif';
+      raidCtx.fillStyle = '#c9c9ff';
+      raidCtx.fillText(currentChallenges.map(id => CHALLENGE_DEFS[id].icon).join(' '), 16, 94);
+    }
+    if (gst.rest > 0 && !raidG.gameOver) {
+      raidCtx.fillStyle = 'rgba(0,0,0,0.55)';
+      raidCtx.fillRect(0, 190, 1000, 190);
+      raidCtx.textAlign = 'center';
+      raidCtx.fillStyle = '#9effa8';
+      raidCtx.font = 'bold 52px sans-serif';
+      raidCtx.fillText('BOSS DOWN!', 500, 245);
+      raidCtx.fillStyle = '#ffffff';
+      raidCtx.font = '24px sans-serif';
+      const next = BOSS_DEFS[BOSS_ORDER[gst.stage + 1]];
+      raidCtx.fillText('Catch your breath - ' + gauntletHealText(currentDifficulty) + '.', 500, 295);
+      raidCtx.fillText('Next: ' + (next ? next.icon + ' ' + next.name : '') + ' in ' + Math.ceil(gst.rest / 60) + 's', 500, 335);
+    }
+    raidCtx.restore();
+  }
+
   if (raidG.gameOver) {
     raidCtx.shadowBlur = 30;
     raidCtx.shadowColor = '#ff2244';
@@ -8712,7 +8952,12 @@ function raidDraw() {
     raidCtx.fillText('💀 DEFEATED', 500, 280);
     raidCtx.fillStyle = '#ff8888';
     raidCtx.font = '24px sans-serif';
-    raidCtx.fillText('The boss was too strong!', 500, 350);
+    raidCtx.fillText(currentMode === 'gauntlet' ? 'The gauntlet ended after ' + raidG.gauntlet.stage + ' of ' + BOSS_ORDER.length + ' bosses.' : 'The boss was too strong!', 500, 350);
+    if (raidLastReward && raidLastReward.loss) {
+      raidCtx.fillStyle = '#ffd84d';
+      raidCtx.font = 'bold 30px sans-serif';
+      raidCtx.fillText('+' + raidLastReward.coins + ' 🪙 for the bosses you beat', 500, 400);
+    }
   } else if (raidG.victory) {
     raidCtx.shadowBlur = 50;
     raidCtx.shadowColor = '#ffdd44';
@@ -8725,8 +8970,15 @@ function raidDraw() {
     raidCtx.fillText('🏆 VICTORY!', 500, 260);
     raidCtx.fillStyle = '#aaffaa';
     raidCtx.font = '28px sans-serif';
-    raidCtx.fillText('Boss defeated! Great teamwork!', 500, 340);
-    if (raidLastReward) {
+    raidCtx.fillText(currentMode === 'gauntlet' ? 'GAUNTLET CLEARED! All bosses defeated!' : 'Boss defeated! Great teamwork!', 500, 340);
+    if (raidLastReward && raidLastReward.gauntlet) {
+      raidCtx.fillStyle = '#ffd84d';
+      raidCtx.font = 'bold 34px sans-serif';
+      raidCtx.fillText('+' + raidLastReward.coins + ' 🪙 coins', 500, 392);
+      raidCtx.fillStyle = '#c9c9ff';
+      raidCtx.font = '18px sans-serif';
+      raidCtx.fillText(raidLastReward.trophies.map(id => TROPHY_DEFS[id].icon + ' ' + TROPHY_DEFS[id].name).join('   '), 500, 428);
+    } else if (raidLastReward) {
       raidCtx.fillStyle = '#ffd84d';
       raidCtx.font = 'bold 34px sans-serif';
       raidCtx.fillText('+' + raidLastReward.coins + ' 🪙 coins', 500, 392);
@@ -10739,7 +10991,8 @@ function mqDefaultProfile() {
     coins: 0,
     owned: { skin_classic: 1, sword_training: 1 },
     equipped: { skin: 'skin_classic', gun: 'sword_training', utility: '' },
-    stats: { crates: 0, raids: 0 }
+    stats: { crates: 0, raids: 0 },
+    trophies: {}
   };
 }
 
@@ -10757,6 +11010,9 @@ function mqLoadProfile() {
       if (MQ_SKIN_MAP[s.equipped.skin] && p.owned[s.equipped.skin]) p.equipped.skin = s.equipped.skin;
       if (MQ_WEAPON_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
       if (typeof s.equipped.utility === 'string') p.equipped.utility = mqSanitizeCharms(s.equipped.utility, p.owned); // WPN-13
+    }
+    if (s.trophies && typeof s.trophies === 'object') {
+      Object.keys(s.trophies).forEach(id => { if (TROPHY_DEFS[id] && s.trophies[id] > 0) p.trophies[id] = Math.floor(s.trophies[id]); });
     }
     if (s.stats) {
       p.stats.crates = Math.floor(s.stats.crates) || 0;
@@ -10805,7 +11061,40 @@ function mqRefreshCoinUI() {
   document.querySelectorAll('.mq-coin-value').forEach(el => { el.textContent = mqProfile.coins.toLocaleString(); });
 }
 
+function mqAwardGauntletClear() {
+  const hearts = Math.max(0, Math.min(raidLocal.maxHealth || 5, raidLocal.health));
+  const total = gauntletReward(currentDifficulty, currentChallenges, hearts, mqCoinMultiplier(mqProfile.equipped.utility));
+  const trophies = gauntletTrophyIds(currentDifficulty, currentChallenges);
+  trophies.forEach(id => { mqProfile.trophies[id] = (mqProfile.trophies[id] || 0) + 1; });
+  mqProfile.coins += total;
+  mqProfile.stats.raids++;
+  mqSaveProfile();
+  mqRefreshCoinUI();
+  return { coins: total, gauntlet: true, challenges: currentChallenges.length, trophies: trophies, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins };
+}
+
+let raidGauntletLossPaid = false;
+function mqAwardGauntletLoss() {
+  const beaten = raidG.gauntlet ? raidG.gauntlet.stage : 0;
+  const total = gauntletLossReward(currentDifficulty, currentChallenges, beaten, mqCoinMultiplier(mqProfile.equipped.utility));
+  if (total <= 0) return null;
+  mqProfile.coins += total;
+  mqSaveProfile();
+  mqRefreshCoinUI();
+  return { coins: total, gauntlet: true, loss: true, beaten: beaten, difficulty: currentDifficulty, balance: mqProfile.coins };
+}
+
+function renderTrophyCase() {
+  const box = document.getElementById('trophyCase');
+  if (!box) return;
+  const ids = Object.keys(mqProfile.trophies || {}).filter(id => TROPHY_DEFS[id]);
+  box.innerHTML = ids.length
+    ? ids.map(id => { const t = TROPHY_DEFS[id]; return '<div class="trophy" title="' + t.desc + '">' + t.icon + ' ' + t.name + (mqProfile.trophies[id] > 1 ? ' <small>x' + mqProfile.trophies[id] + '</small>' : '') + '</div>'; }).join('')
+    : '<div class="trophy"><small>No trophies yet - clear the Gauntlet to earn some.</small></div>';
+}
+
 function mqAwardRaidVictory() {
+  if (currentMode === 'gauntlet') return mqAwardGauntletClear();
   const base = MQ_COIN_REWARD[currentDifficulty] || MQ_COIN_REWARD.normal;
   const hearts = Math.max(0, Math.min(raidLocal.maxHealth || 5, raidLocal.health));
   const bonus = hearts * MQ_HEART_BONUS;
@@ -10827,7 +11116,8 @@ function mqCheckRaidReward() {
     if (!raidRewardGiven) { raidRewardGiven = true; raidLastReward = mqAwardRaidVictory(); }
   } else {
     raidRewardGiven = false;
-    if (!raidG.gameOver) raidLastReward = null;
+    if (!raidG.gameOver) { raidLastReward = null; raidGauntletLossPaid = false; }
+    else if (currentMode === 'gauntlet' && !raidGauntletLossPaid) { raidGauntletLossPaid = true; raidLastReward = mqAwardGauntletLoss(); } // GAU-05
   }
 }
 
