@@ -3679,11 +3679,11 @@ let countdownInterval = null;
 // Movement/jump tuning (RAI-17). A tap of the jump key rises ~100px (RAID_JUMP_VY under normal
 // gravity); holding it applies reduced gravity for up to RAID_JUMP_HOLD_FRAMES frames instead,
 // reaching roughly 150px. The jump is deliberately low - the bosses hover near the ground (BOS-44).
-const RAID_GRAVITY = 0.4;
-const RAID_JUMP_VY = -9;
+const RAID_GRAVITY = 0.25;
+const RAID_JUMP_VY = -7;
 const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.7; // Second Wind (WPN-06): a smaller hop than the first jump, never held
-const RAID_JUMP_HOLD_GRAVITY = 0.16;
-const RAID_JUMP_HOLD_FRAMES = 10;
+const RAID_JUMP_HOLD_GRAVITY = 0.1;
+const RAID_JUMP_HOLD_FRAMES = 12;
 
 // Dash tuning (RAI-16): a committed burst - see raidUpdateLocal, which is what RAI-16's fix
 // keeps from being immediately undone by the normal running speed cap.
@@ -5618,7 +5618,7 @@ let raidChargeHitState = {};
 // player". Module-level rather than a raidLocal field, for consistency with the two guards above,
 // even though raidLocal itself is never wholesale-replaced by a snapshot the way raidG.players is.
 let raidPogoState = { lastSwingTimer: 0, bounced: false };
-const RAID_POGO_VY = -13; // same magnitude as RAID_JUMP_VY - a full Hollow-Knight-style nail bounce
+const RAID_POGO_VY = -10; // a full nail bounce - a little higher than a jump, about 200 px under normal gravity
 
 // Hollow Knight's nail-bounce (WPN-08): a downward air-swing connecting with the boss bounces the
 // player upward. Purely local/client-side - reads raidLocal and raidG.boss (already synced to
