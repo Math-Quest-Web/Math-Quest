@@ -800,7 +800,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
       // far enough that the wider-but-shallower side box does not): an up-swing should connect,
       // a plain side swing should not.
-      raidG.boss.x = 500; raidG.boss.y = 310;
+      raidG.boss.x = 500; raidG.boss.y = 250;
       T.place(500);
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidLocal.swordCooldown = 0;
@@ -956,6 +956,45 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.whitePixel, 'the slash trail renders a bright white stroke').toBe(true);
   });
 
+  test('WPN-10 the swing reaches far: a wide hitbox and a big white crescent that covers it', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const base = { x: 300, y: 452, facing: 1, utility: '' };
+      const side = raidSwordHitbox(Object.assign({ swingDir: 'side' }, base));
+      const right = raidSwordHitbox(Object.assign({ swingDir: 'right' }, base));
+      const up = raidSwordHitbox(Object.assign({ swingDir: 'up' }, base));
+      const cx = raidPx(base);
+      const reachSide = (side.cx + side.hw) - cx;
+      const reachRight = (right.cx + right.hw) - cx;
+      const reachUp = (base.y - (up.cy - up.hh)); // how far above the player's top edge the up box extends
+
+      // Draws the swing at its peak and returns the pixel alpha at (dx, dy) from the hand.
+      const alphaAt = (facing, swing, slashScale, dx, dy, id) => {
+        const c = document.createElement('canvas'); c.width = 500; c.height = 500;
+        const ctx = c.getContext('2d');
+        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, 0, 0, swing, 5, 'side', slashScale);
+        const px = ctx.getImageData(250 + dx, 250 + dy, 1, 1).data;
+        return { a: px[3], rgb: [px[0], px[1], px[2]] };
+      };
+      const R = RAID_SWORD_SLASH_R;
+      const far = alphaAt(1, 0.45, 1, Math.round(R * 0.85), 0);       // inside the big crescent, forward
+      const farMirror = alphaAt(-1, 0.45, 1, -Math.round(R * 0.85), 0); // mirrored for a left-facing player
+      const off = alphaAt(1, 0.45, 0, Math.round(R * 0.85), 0);         // crescent off (shop preview, ghosts)
+      const idle = alphaAt(1, 0, 1, Math.round(R * 0.85), 0);           // no swing, nothing drawn
+      const behind = alphaAt(1, 0.45, 1, -Math.round(R * 0.85), 0);     // the crescent is in front, not behind
+      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind };
+    });
+    expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
+    expect(r.reachRight).toBeGreaterThanOrEqual(120);
+    expect(r.reachUp, 'up swing reaches well past the old 95px').toBeGreaterThanOrEqual(140);
+    expect(r.R, 'the crescent is sized to the reach').toBeGreaterThanOrEqual(120);
+    expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
+    expect(Math.min(...r.far.rgb), 'and it is white, not the blade\'s own colour').toBeGreaterThan(200);
+    expect(r.farMirror.a, 'mirrored for a left-facing player').toBeGreaterThan(60);
+    expect(r.off.a, 'switched off by default (shop previews, dash ghosts)').toBe(0);
+    expect(r.idle.a, 'nothing when not swinging').toBe(0);
+    expect(r.behind.a, 'the crescent sweeps in front of the player').toBe(0);
+  });
+
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
@@ -1022,6 +1061,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.utility = 'util_range';
       out.attackRangeMult = raidAttackRangeMult(); // 1.25
       out.swordHitbox = raidSwordHitbox({ x: 300, y: 452, facing: 1, swingDir: 'side', utility: 'util_range' });
+      out.expectedSwordHitbox = { cx: 318, cy: 476, hw: RAID_SWORD_RANGE_X * 1.25, hh: RAID_SWORD_RANGE_Y * 1.25 }; // Long Reach: +25% on the base box
 
       raidLocal.utility = 'util_dashi';
       out.dashIframes = raidDashInvincibleFrames(); // round(14 * 1.5)
@@ -1047,7 +1087,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.shieldDuration).toBe(117);
     expect(r.shieldRegen).toBe(280);
     expect(r.attackRangeMult).toBe(1.25);
-    expect(r.swordHitbox).toEqual({ cx: 318, cy: 476, hw: 100, hh: 118.75 });
+    expect(r.swordHitbox).toEqual(r.expectedSwordHitbox);
     expect(r.dashIframes).toBe(21);
     expect(r.magSize).toBe(30);
     expect(r.overclockReload).toBe(65);

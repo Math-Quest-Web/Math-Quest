@@ -5558,12 +5558,12 @@ function raidAttack() {
 const RAID_SWORD_SWING_FRAMES = 14; // how long the visible swing animation plays
 const RAID_SWORD_COOLDOWN_FRAMES = 26; // frames before another swing is allowed
 const RAID_SWORD_DAMAGE = 4;
-const RAID_SWORD_RANGE_X = 80;
-const RAID_SWORD_RANGE_Y = 95;
+const RAID_SWORD_RANGE_X = 130;
+const RAID_SWORD_RANGE_Y = 120;
 // Up/down swings (WPN-05) are narrower and reach only in their own direction, instead of the
 // side swing's box centered symmetrically on the player.
-const RAID_SWORD_UP_HALF_X = 48;
-const RAID_SWORD_UP_REACH = 95;
+const RAID_SWORD_UP_HALF_X = 70;
+const RAID_SWORD_UP_REACH = 150;
 // The blade is only actually "out" for a window in the middle of the swing (matches where the
 // crescent trail is visibly drawn) - this is when a hit can land, not the whole 14 frames.
 const RAID_SWORD_HIT_WINDOW_START = RAID_SWORD_SWING_FRAMES - 4; // swingTimer counts down, so "start" is the higher value
@@ -5578,8 +5578,9 @@ const RAID_SWORD_DIR_VECTORS = {
   upleft: [-0.7071, -0.7071], upright: [0.7071, -0.7071],
   downleft: [-0.7071, 0.7071], downright: [0.7071, 0.7071]
 };
-const RAID_SWORD_DIAG_REACH = 68; // player-centre to diagonal-hitbox-centre distance
-const RAID_SWORD_DIAG_HALF = 42;  // diagonal hitbox half-extent (both axes)
+const RAID_SWORD_DIAG_REACH = 105; // player-centre to diagonal-hitbox-centre distance
+const RAID_SWORD_DIAG_HALF = 68;  // diagonal hitbox half-extent (both axes)
+const RAID_SWORD_SLASH_R = 150; // radius of the big white crescent drawn with a swing (WPN-10), sized to the reach above
 const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
 
 // Absolute swing direction from whichever movement keys are held at the instant the attack starts
@@ -7613,7 +7614,7 @@ function raidDraw() {
     if (!p) return;
     drawPlayerCuphead(raidCtx, p.x, p.y, 36, 48, p.facing || 1,
                p.health || 5, p.maxHealth || 5, p.shield || false, p.invincible || 0, false,
-               { skin: p.skin, gun: p.gun, reload: p.reload || 0, swing: p.swing || 0, swingDir: p.swingDir || 'side', recoil: 0, vx: p.vx || 0, onGround: p.onGround !== false });
+               { skin: p.skin, gun: p.gun, reload: p.reload || 0, swing: p.swing || 0, swingDir: p.swingDir || 'side', slashScale: raidAttackRangeMult(p.utility), recoil: 0, vx: p.vx || 0, onGround: p.onGround !== false });
   });
 
   const lp = raidLocal;
@@ -7633,7 +7634,7 @@ function raidDraw() {
              { skin: lp.skin, gun: lp.gun, recoil: lp.recoil, vx: lp.vx, vy: lp.vy, onGround: lp.onGround,
                reload: raidReloadTimer > 0 ? 1 - raidReloadTimer / raidReloadTotalFrames : 0,
                swing: lp.swingTimer > 0 ? 1 - lp.swingTimer / RAID_SWORD_SWING_FRAMES : 0,
-               swingDir: lp.swingDir || 'side',
+               swingDir: lp.swingDir || 'side', slashScale: raidAttackRangeMult(lp.utility),
                squashKind: lp.squashKind, squashTimer: lp.squashTimer });
 
   raidFx.bursts.forEach(bu => {
@@ -9325,7 +9326,7 @@ function mqDrawGun(ctx, gunId, px, py, facing, reload, recoil, t) {
 // differ by color/glow, same as the rest of the shop's items. swing: 0 at rest, 1 mid-swing,
 // wrapping back down to 0 as the blade returns - see raidSwordSwing / raidLocal.swingTimer.
 
-function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir) {
+function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
   const def = MQ_SWORD_MAP[swordId] || MQ_SWORD_MAP.sword_training;
   swing = swing || 0;
   // ease out-and-back: 0 -> 1 over the first half of the swing, 1 -> 0 over the second half.
@@ -9370,6 +9371,39 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir) {
     ctx.restore();
   }
 
+  // The big sweeping slash (WPN-10): a large white crescent centred on the swing's own direction
+  // that opens up and fades as the blade passes through, sized to the hitbox reach. Opt-in via
+  // slashScale (the live player passes it; shop previews and dash ghosts don't).
+  if (swing > 0 && slashScale > 0) {
+    const fade = Math.max(0, 1 - Math.abs(swing - 0.42) / 0.38);
+    if (fade > 0) {
+      const vec = RAID_SWORD_DIR_VECTORS[dir];
+      const thetaC = dir === 'up' ? 0 : dir === 'down' ? Math.PI
+        : vec ? Math.atan2(vec[0] * facing, -vec[1])
+        : Math.PI / 2; // the default swing slashes straight ahead
+      const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
+      const R = RAID_SWORD_SLASH_R * slashScale;
+      const span = 0.5 + 1.0 * Math.min(1, swing / 0.4); // opens up as the swing starts
+      const a0 = phi - span, a1 = phi + span;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.scale(facing, 1);
+      const g = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+      g.addColorStop(1, 'rgba(255,255,255,0.95)');
+      ctx.globalAlpha = Math.min(1, fade * 1.1);
+      ctx.fillStyle = g;
+      ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(0, 0, R, a0, a1);
+      ctx.quadraticCurveTo(Math.cos(phi) * R * 1.35, Math.sin(phi) * R * 1.35, Math.cos(a0) * R, Math.sin(a0) * R);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   ctx.save();
   ctx.translate(px, py);
   ctx.scale(facing, 1);
@@ -9401,8 +9435,8 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir) {
 }
 
 // Draws whichever weapon is equipped, gun or sword - the only fork the caller needs.
-function mqDrawWeapon(ctx, weaponId, px, py, facing, reload, recoil, swing, t, dir) {
-  if (MQ_SWORD_MAP[weaponId]) mqDrawSword(ctx, weaponId, px, py, facing, swing, t, dir);
+function mqDrawWeapon(ctx, weaponId, px, py, facing, reload, recoil, swing, t, dir, slashScale) {
+  if (MQ_SWORD_MAP[weaponId]) mqDrawSword(ctx, weaponId, px, py, facing, swing, t, dir, slashScale);
   else mqDrawGun(ctx, weaponId, px, py, facing, reload, recoil, t);
 }
 
@@ -9667,7 +9701,7 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
     ctx.strokeStyle = bottom; ctx.lineWidth = 4.6;
     ctx.beginPath(); ctx.moveTo(cx + facing * 14, baseY + 17); ctx.lineTo(gx - facing * 1, gy + 1); ctx.stroke();
-    mqDrawWeapon(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, look.swing || 0, t, look.swingDir || 'side');
+    mqDrawWeapon(ctx, look.gun, gx, gy, facing, look.reload || 0, look.recoil || 0, look.swing || 0, t, look.swingDir || 'side', look.slashScale || 0);
     ctx.fillStyle = hc[0]; ctx.strokeStyle = '#1a1a33'; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.arc(gx, gy + 1, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
