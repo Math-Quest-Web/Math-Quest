@@ -9381,16 +9381,32 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
   // that opens up and fades as the blade passes through, sized to the hitbox reach. Opt-in via
   // slashScale (the live player passes it; shop previews and dash ghosts don't).
   if (swing > 0 && slashScale > 0) {
-    const fade = Math.max(0, 1 - Math.abs(swing - 0.42) / 0.38);
-    if (fade > 0) {
+    // The slash sweeps along its arc from the top end to the bottom end: the head runs ahead
+    // (swing 0.12 -> 0.52) while the tail follows and eats the arc away (swing 0.3 -> 0.8).
+    const head = Math.min(1, Math.max(0, (swing - 0.12) / 0.4));
+    const tail = Math.min(1, Math.max(0, (swing - 0.3) / 0.5));
+    if (head > tail) {
       const vec = RAID_SWORD_DIR_VECTORS[dir];
       const thetaC = dir === 'up' ? 0 : dir === 'down' ? Math.PI
         : vec ? Math.atan2(vec[0] * facing, -vec[1])
         : Math.PI / 2; // the default swing slashes straight ahead
       const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
       const R = RAID_SWORD_SLASH_R * slashScale;
-      const span = 0.6 + 2.0 * Math.min(1, swing / 0.4); // opens up as the swing starts, wrapping ~300 degrees at full
-      const a0 = phi - span, a1 = phi + span;
+      const span = 1.4; // a forward arc of about 160 degrees - it does not surround the player
+      let aStart = phi - span, aEnd = phi + span;
+      // start at whichever end is higher on screen, so the swing always goes top to bottom
+      if (Math.sin(aStart) - Math.sin(aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
+      // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing
+      // through the farthest point and tapering to nothing at the bottom
+      const widthAt = (u) => 0.5 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6);
+      const steps = 28, outer = [], inner = [];
+      for (let i = 0; i <= steps; i++) {
+        const u = tail + (head - tail) * (i / steps);
+        const ang = aStart + (aEnd - aStart) * u;
+        outer.push([Math.cos(ang) * R, Math.sin(ang) * R]);
+        const ri = R * (1 - widthAt(u));
+        inner.push([Math.cos(ang) * ri, Math.sin(ang) * ri]);
+      }
       ctx.save();
       ctx.translate(px, py);
       ctx.scale(facing, 1);
@@ -9398,14 +9414,11 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
       g.addColorStop(0, 'rgba(255,255,255,0)');
       g.addColorStop(0.6, 'rgba(255,255,255,0.5)');
       g.addColorStop(1, 'rgba(255,255,255,0.95)');
-      ctx.globalAlpha = Math.min(1, fade * 1.1);
       ctx.fillStyle = g;
       ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
       ctx.beginPath();
-      ctx.arc(0, 0, R, a0, a1);
-      // inner edge: control point chosen so the crescent's middle is ~0.3R thick whatever the span
-      const ctrl = 1.4 - Math.cos(span);
-      ctx.quadraticCurveTo(Math.cos(phi) * R * ctrl, Math.sin(phi) * R * ctrl, Math.cos(a0) * R, Math.sin(a0) * R);
+      outer.forEach((pt, i) => (i ? ctx.lineTo(pt[0], pt[1]) : ctx.moveTo(pt[0], pt[1])));
+      for (let i = inner.length - 1; i >= 0; i--) ctx.lineTo(inner[i][0], inner[i][1]);
       ctx.closePath();
       ctx.fill();
       ctx.restore();

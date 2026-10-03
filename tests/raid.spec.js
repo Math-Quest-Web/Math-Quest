@@ -976,22 +976,44 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         return { a: px[3], rgb: [px[0], px[1], px[2]] };
       };
       const R = RAID_SWORD_SLASH_R;
-      const far = alphaAt(1, 0.45, 1, Math.round(R * 0.85), 0);       // inside the big crescent, forward
-      const farMirror = alphaAt(-1, 0.45, 1, -Math.round(R * 0.85), 0); // mirrored for a left-facing player
-      const off = alphaAt(1, 0.45, 0, Math.round(R * 0.85), 0);         // crescent off (shop preview, ghosts)
-      const idle = alphaAt(1, 0, 1, Math.round(R * 0.85), 0);           // no swing, nothing drawn
-      const behind = alphaAt(1, 0.45, 1, -Math.round(R * 0.85), 0);     // the crescent is in front, not behind
+      const far = alphaAt(1, 0.45, 1, Math.round(R * 0.9), 0);       // inside the big crescent, forward
+      const farMirror = alphaAt(-1, 0.45, 1, -Math.round(R * 0.9), 0); // mirrored for a left-facing player
+      const off = alphaAt(1, 0.45, 0, Math.round(R * 0.9), 0);         // crescent off (shop preview, ghosts)
+      const idle = alphaAt(1, 0, 1, Math.round(R * 0.9), 0);           // no swing, nothing drawn
+      const behind = alphaAt(1, 0.45, 1, -Math.round(R * 0.9), 0);     // the crescent is in front, not behind
       // The old small swing is gone from the live swing: where the swinging blade and its little
       // trail arcs used to be (forward of the hand, ~42px out) is empty now, and the blade just
       // rests at its held angle (up and back from the hand) instead of sweeping.
       const oldTrailSpot = alphaAt(1, 0.45, 1, 40, -11, 'sword_training');
       const restingBlade = alphaAt(1, 0.45, 1, -19, -23, 'sword_training');
       const previewTrailSpot = alphaAt(1, 0.45, undefined, 40, -11, 'sword_training'); // the shop preview (no slashScale) keeps its small swing
-      // very curved: the crescent wraps right round toward the player - well past the ~170 degrees
-      // it used to cover - so a point 120deg round from straight ahead (cos 120 = -0.5) is still inside it
-      const wrapAng = (120 * Math.PI) / 180;
-      const wrapped = alphaAt(1, 0.45, 1, Math.round(R * 0.85 * Math.cos(wrapAng)), Math.round(R * 0.85 * Math.sin(wrapAng)));
-      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, wrapped };
+      // The slash is a forward arc (about 160 degrees) that sweeps from the TOP to the BOTTOM as
+      // the swing plays, and does not surround the player. ptAt samples a point at fraction u along
+      // the arc (0 = top end, 1 = bottom end) at a fraction of the radius.
+      const ptAt = (swing, u, rad) => {
+        const ang = -1.4 + u * 2.8;
+        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang)));
+      };
+      const topEarly = ptAt(0.2, 0.1, 0.9);
+      const bottomEarly = ptAt(0.2, 0.65, 0.95);
+      const topLate = ptAt(0.6, 0.1, 0.9);
+      const bottomLate = ptAt(0.6, 0.65, 0.95);
+      const backAng = (150 * Math.PI) / 180; // well behind the swing, round toward the player
+      const surrounds = alphaAt(1, 0.45, 1, Math.round(R * 0.9 * Math.cos(backAng)), Math.round(R * 0.9 * Math.sin(backAng)));
+      // thickness along the ray through the arc at fraction u (swing 0.45: both u are drawn)
+      const widthAt = (u) => {
+        const c = document.createElement('canvas'); c.width = 500; c.height = 500;
+        const ctx = c.getContext('2d');
+        mqDrawWeapon(ctx, 'sword_frost', 250, 250, 1, 0, 0, 0.45, 5, 'side', 1);
+        const ang = -1.4 + u * 2.8; let n = 0;
+        for (let rr = R * 0.4; rr < R * 1.1; rr += 1) {
+          const px = ctx.getImageData(250 + Math.round(rr * Math.cos(ang)), 250 + Math.round(rr * Math.sin(ang)), 1, 1).data;
+          if (px[3] > 25) n++;
+        }
+        return n;
+      };
+      const widthNearTop = widthAt(0.35), widthAtApex = widthAt(0.5);
+      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex };
     });
     expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
     expect(r.reachRight).toBeGreaterThanOrEqual(120);
@@ -1006,7 +1028,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.oldTrailSpot.a, 'the old small trail arcs are gone from the live swing').toBe(0);
     expect(r.restingBlade.a, 'the blade rests at its held angle instead of swinging').toBeGreaterThan(100);
     expect(r.previewTrailSpot.a, 'the shop preview still draws its own small swing').toBeGreaterThan(0);
-    expect(r.wrapped.a, 'the crescent is very curved - it wraps well round toward the player').toBeGreaterThan(40);
+    expect(r.topEarly.a, 'the swing starts at the top of the arc').toBeGreaterThan(40);
+    expect(r.bottomEarly.a, 'and has not reached the bottom yet').toBe(0);
+    expect(r.bottomLate.a, 'it sweeps down to the bottom').toBeGreaterThan(40);
+    expect(r.topLate.a, 'and the top has faded away by then').toBe(0);
+    expect(r.surrounds.a, 'the slash does not wrap round behind the player').toBe(0);
+    expect(r.widthAtApex, 'the slash is narrower at its farthest point than near its top').toBeLessThan(r.widthNearTop);
+    expect(r.widthAtApex).toBeGreaterThan(5);
   });
 
   test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
