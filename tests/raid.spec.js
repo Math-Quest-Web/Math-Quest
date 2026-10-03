@@ -800,7 +800,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       // Grounded, boss directly overhead (close enough for the shorter up-swing box to reach,
       // far enough that the wider-but-shallower side box does not): an up-swing should connect,
       // a plain side swing should not.
-      raidG.boss.x = 500; raidG.boss.y = 250;
+      raidG.boss.x = 500; raidG.boss.y = 325;
       T.place(500);
       raidLocal.input = { left: false, right: false, up: false, down: false, space: false };
       raidLocal.swordCooldown = 0;
@@ -966,12 +966,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const reachSide = (side.cx + side.hw) - cx;
       const reachRight = (right.cx + right.hw) - cx;
       const reachUp = (base.y - (up.cy - up.hh)); // how far above the player's top edge the up box extends
+      const down = raidSwordHitbox(Object.assign({ swingDir: 'down' }, base));
 
       // Draws the swing at its peak and returns the pixel alpha at (dx, dy) from the hand.
-      const alphaAt = (facing, swing, slashScale, dx, dy, id) => {
+      const alphaAt = (facing, swing, slashScale, dx, dy, id, dir) => {
         const c = document.createElement('canvas'); c.width = 500; c.height = 500;
         const ctx = c.getContext('2d');
-        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, 0, 0, swing, 5, 'side', slashScale);
+        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, 0, 0, swing, 5, dir || 'side', slashScale);
         const px = ctx.getImageData(250 + dx, 250 + dy, 1, 1).data;
         return { a: px[3], rgb: [px[0], px[1], px[2]] };
       };
@@ -1013,13 +1014,27 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         return n;
       };
       const widthNearTop = widthAt(0.35), widthAtApex = widthAt(0.5);
+      // up / down get the same vertical compression: a wide, low arc over (or under) the player
+      const upPt = (dir, swing, u, rad) => {
+        const phi = dir === 'up' ? -Math.PI / 2 : Math.PI / 2, ang = phi - 1.4 + u * 2.8;
+        return alphaAt(1, swing, 1, Math.round(R * rad * Math.cos(ang)), Math.round(R * rad * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH), 'sword_training', dir);
+      };
+      const upApex = upPt('up', 0.45, 0.5, 0.9), upWide = upPt('up', 0.45, 0.7, 0.96), upWideEarly = upPt('up', 0.2, 0.7, 0.96);
+      const downApex = upPt('down', 0.45, 0.5, 0.9);
       // compressed vertically: the top and bottom ends sit close together (well inside the radius)
       const slashHeight = 2 * R * Math.sin(1.4) * RAID_SWORD_SLASH_SQUASH;
-      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex, slashHeight, sideHh: side.hh, squash: RAID_SWORD_SLASH_SQUASH };
+      return { reachSide, reachRight, reachUp, R, far, farMirror, off, idle, behind, oldTrailSpot, restingBlade, previewTrailSpot, topEarly, bottomEarly, topLate, bottomLate, surrounds, widthNearTop, widthAtApex, slashHeight, sideHh: side.hh, upHw: up.hw, upHh: up.hh, downHw: down.hw, downHh: down.hh, upApex, upWide, upWideEarly, downApex, squash: RAID_SWORD_SLASH_SQUASH };
     });
     expect(r.reachSide, 'side swing reaches well past the old 80px').toBeGreaterThanOrEqual(120);
     expect(r.reachRight).toBeGreaterThanOrEqual(120);
-    expect(r.reachUp, 'up swing reaches well past the old 95px').toBeGreaterThanOrEqual(140);
+    expect(r.upHh * 2, 'the up/down swings are compressed vertically like the side swing').toBeLessThanOrEqual(r.slashHeight);
+    expect(r.downHh * 2).toBeLessThanOrEqual(r.slashHeight);
+    expect(r.upHw, 'and wide instead, spanning the whole low arc').toBeGreaterThanOrEqual(120);
+    expect(r.downHw).toBeGreaterThanOrEqual(120);
+    expect(r.upApex.a, 'the up slash is a low dome over the player').toBeGreaterThan(40);
+    expect(r.downApex.a, 'the down slash is a low dish under the player').toBeGreaterThan(40);
+    expect(r.upWide.a, 'a wide arc, reaching far out to the side').toBeGreaterThan(40);
+    expect(r.upWideEarly.a, 'and it sweeps across rather than appearing all at once').toBe(0);
     expect(r.R, 'the crescent is sized to the reach').toBeGreaterThanOrEqual(120);
     expect(r.far.a, 'a big crescent is drawn out at the swing\'s reach').toBeGreaterThan(60);
     expect(Math.min(...r.far.rgb), 'and it is white, not the blade\'s own colour').toBeGreaterThan(200);
