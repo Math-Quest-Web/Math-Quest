@@ -1615,6 +1615,17 @@ body {
   color: white;
 }
 
+/* RAI-27: the battle fills the whole window (the sidebar is hidden while it runs). */
+body.raid-fs #sidebar { display: none !important; }
+body.raid-fs .raid-game-wrapper {
+  position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; background: #0b1020; margin: 0; max-width: none; border-radius: 0;
+}
+body.raid-fs .raid-game-wrapper canvas {
+  width: min(100vw, calc((100vh - 70px) * 1.6667)); height: auto; border-radius: 0;
+}
+body.raid-fs .raid-ui { width: 100vw; box-sizing: border-box; border-radius: 0; justify-content: center; }
+
 .raid-ui #raidMathShield {
   background: #3b1f6b;
   border-color: #a374ff;
@@ -2654,6 +2665,7 @@ function generateQuestions() {
 }
 
 function showSection(name, clickedButton = null) {
+  if (clickedButton && currentLobbyId) leaveLobby({ stay: true }); // LOB-12: any sidebar button leaves the lobby
   document.querySelectorAll('.section').forEach(section => {
     section.classList.remove('active');
   });
@@ -2675,6 +2687,7 @@ function showSection(name, clickedButton = null) {
 
 function goToPractice() {
   // Go directly to practice with addition set
+  if (currentLobbyId) leaveLobby({ stay: true });
   startPractice('addition');
   // Update the nav button highlight
   document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active-nav'));
@@ -3303,6 +3316,8 @@ function showRaidWaitingReady() {
 }
 
 let waitingRoomLobbyRef = null;
+let lobbyKnownPlayers = []; // player ids last seen in the current lobby (for leaving on tab close)
+let leavingLobby = false;
 
 function listenToLobbyWaitingRoom(lobbyId) {
   cleanupWaitingRoomListeners();
@@ -3311,6 +3326,7 @@ function listenToLobbyWaitingRoom(lobbyId) {
   waitingRoomLobbyRef.on('value', (snap) => {
     const data = snap.val();
     if (!data) return;
+    lobbyKnownPlayers = Object.keys(data.players || {});
 
     if (data.raidStart) {
       beginRaidFromSignal(lobbyId);
@@ -3421,8 +3437,15 @@ async function joinLobby(lobbyId) {
   }
 }
 
-async function leaveLobby() {
-  if (!currentLobbyId || !mathQuestUid) return;
+async function leaveLobby(opts) {
+  if (!currentLobbyId || !mathQuestUid || leavingLobby) return;
+  leavingLobby = true;
+  const stay = !!(opts && opts.stay);
+  const leftId = currentLobbyId;
+  if (stay) { // the click already chose where to go: stop the raid now, finish the clean-up below
+    cleanupWaitingRoomListeners();
+    cleanupRaid();
+  }
 
   try {
     const lobbyRef2 = lobbyRef.child(currentLobbyId);
@@ -3461,13 +3484,49 @@ async function leaveLobby() {
 
     document.getElementById('raidLobbyInfo').textContent =
       'Join a lobby to start the raid!';
-    showSection('lobby');
-    refreshLobbies();
+    if (!stay) {
+      showSection('lobby');
+      refreshLobbies();
+    }
 
   } catch (error) {
     console.error('Error leaving lobby:', error);
+  } finally {
+    leavingLobby = false;
   }
 }
+
+// LOB-12: closing the tab leaves the lobby too. Nothing can be awaited while the page unloads, so
+// every write is started straight away from what this client last saw of the lobby.
+function leaveLobbyOnExit() {
+  if (!currentLobbyId || !mathQuestUid || leavingLobby) return;
+  const id = currentLobbyId;
+  const others = lobbyKnownPlayers.filter(pid => pid !== mathQuestUid);
+  try {
+    if (raidPlayerRef && raidMyId) raidPlayerRef.child(raidMyId).remove();
+    if (raidPresenceRef && raidMyId) raidPresenceRef.child(raidMyId).remove();
+    if (!others.length) {
+      removeLobbyAndRaidData(id);
+    } else {
+      const l = lobbyRef.child(id);
+      l.child('players').child(mathQuestUid).remove();
+      l.child('playerCount').transaction((c) => Math.max(0, (c || 1) - 1));
+      if (isLobbyHost) l.child('hostId').set(others[0]);
+    }
+  } catch (e) { console.error('Error leaving lobby on exit:', e); }
+  currentLobbyId = null;
+}
+window.addEventListener('pagehide', leaveLobbyOnExit);
+
+// RAI-27: Esc (or the browser leaving real fullscreen) drops the window-filling layout so the
+// sidebar and its buttons are usable again; the raid keeps running.
+function raidExitFullscreenLayout() {
+  if (!document.body.classList.contains('raid-fs')) return;
+  document.body.classList.remove('raid-fs');
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') raidExitFullscreenLayout(); });
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) raidExitFullscreenLayout(); });
 
 function resetRaidState() {
   // Reset all raid state variables
@@ -3526,6 +3585,7 @@ function resetRaidState() {
   raidChargeHitState = {};
   raidDisplayPos = {};
   raidDisplaySwing = {};
+  raidRecentHit = {};
   raidPogoState = { lastSwingTimer: 0, bounced: false };
   raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
   raidShieldRegenTimer = 0;
@@ -3612,6 +3672,7 @@ async function refreshLobbies() {
 function listenToLobby(lobbyId) {
   lobbyRef.child(lobbyId).on('value', (snap) => {
     const data = snap.val();
+    if (data) lobbyKnownPlayers = Object.keys(data.players || {});
     if (!data) {
       if (currentLobbyId === lobbyId) {
         alert('🏛️ The lobby host has ended the session.');
@@ -3666,6 +3727,8 @@ let raidPlayerRef = null;
 let raidGameStateRef = null;
 let raidPresenceRef = null;
 let raidMathHitsRef = null;
+let raidHitsRef = null;
+let raidRecentHit = {}; // host: frame of the last hit it delivered to each player (RAI-25)
 let raidMyId = null;
 let raidIsHost = false;
 let raidHostChecked = false;
@@ -3792,6 +3855,9 @@ function startRaidWithLobby(lobbyId, bossType) {
   // Clean up any existing raid listeners
   cleanupRaid();
   bossSheetLoad();   // start fetching the boss sprite sheet (BOS-30)
+  document.body.classList.add('raid-fs'); // RAI-27: the battle fills the window
+  const fsEl = document.documentElement;
+  if (!document.fullscreenElement && fsEl.requestFullscreen) fsEl.requestFullscreen().catch(() => {}); // only works with a recent click; the CSS fallback always applies
 
   raidG.boss.type = BOSS_DEFS[bossType] ? bossType : (currentBossType || 'grinmaw');
 
@@ -3803,6 +3869,7 @@ function startRaidWithLobby(lobbyId, bossType) {
   raidGameStateRef = raidRoomRef.child('gameState');
   raidPresenceRef = raidRoomRef.child('presence');
   raidMathHitsRef = raidRoomRef.child('mathHits');
+  raidHitsRef = raidRoomRef.child('hits');
 
   listenToLobby(lobbyId);
 
@@ -3830,6 +3897,12 @@ function cleanupRaid() {
     raidMathHitsRef.off();
     raidMathHitsRef = null;
   }
+  if (raidHitsRef) {
+    raidHitsRef.off();
+    raidHitsRef = null;
+  }
+  document.body.classList.remove('raid-fs');
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
@@ -3975,22 +4048,58 @@ function raidListenToPlayers() {
     raidG.players = data;
     const count = Object.keys(data).length;
     raidPlayerCountSpan.textContent = count;
+    // Own hits (the host damaging itself) arrive as a write to our own entry; hits from the host on
+    // somebody else come through `hits` instead (RAI-25).
     if (data[raidMyId] && raidLocal.health > 0) {
       const remote = data[raidMyId];
-      if (remote && remote.health !== undefined && remote.health > 0) {
+      if (remote.health !== undefined && remote.health > 0) {
         if (remote.health < raidLocal.health) raidOnLocalPlayerHit();
         raidLocal.health = remote.health;
         raidLocal.invincible = remote.invincible || 0;
-        raidLocal.shield = remote.shield || false;
-        if (remote.facing !== undefined) raidLocal.facing = remote.facing;
-      } else if (remote && remote.health === 0) {
-        if (raidLocal.health > 0) {
-          raidPlayerRef.child(raidMyId).update({ health: raidLocal.health });
-        }
+      } else if (remote.health === 0 && raidLocal.health > 0) {
+        raidLocal.health = 0;
       }
+      raidLocal.shield = remote.shield || false;
     }
     raidUpdateUI();
   });
+}
+
+// RAI-25: a player's own client is the only writer of their health. The host reports a hit on
+// someone else as an event in `hits`; the target applies it once and removes it. (The host used to
+// write the lowered health straight into the target's entry, which the target's next regular sync
+// overwrote - so the hit vanished and only the host ever stayed hurt.)
+function raidApplyHit(hit) {
+  if (raidLocal.health <= 0) return;
+  if (hit.ward) {
+    raidLocal.wardUsed = true;
+    raidLocal.invincible = hit.inv || 30;
+  } else {
+    raidLocal.health = Math.max(0, raidLocal.health - (hit.amount || 1));
+    raidLocal.invincible = hit.inv || 30;
+    raidOnLocalPlayerHit();
+  }
+  raidSendLocalState();
+}
+
+function raidListenToHits() {
+  if (!raidHitsRef) return;
+  raidHitsRef.on('child_added', (snap) => {
+    const hit = snap.val();
+    if (!hit || hit.target !== raidMyId) return;
+    raidHitsRef.child(snap.key).remove();
+    raidApplyHit(hit);
+  });
+}
+
+// RAI-11 / RAI-26: the raid is lost only when nobody is left standing.
+function raidCheckAllDown() {
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id]);
+  if (!ids.length) return;
+  if (ids.every(id => (raidG.players[id].health || 0) <= 0) && !raidG.gameOver) {
+    raidG.gameOver = true;
+    raidSendBossState();
+  }
 }
 
 function raidListenToPresence() {
@@ -4074,25 +4183,32 @@ function startCountdown(callback) {
 
 function raidDamagePlayer(id, p, amount) {
   if (!p || p.shield || p.invincible > 0) return;
-  // Mutate p synchronously (RAI-11) so a second hazard/projectile hitting the same player later
-  // in this same host frame - or before the Firebase round-trip lands - sees invincible>0 right
-  // away, instead of racing the async .update() below.
-  // Warding Sigil absorbs exactly one hit per raid (WPN-03).
+  if ((p.health === undefined ? 5 : p.health) <= 0) return; // already down (RAI-26)
   const inv = raidHurtInvincibleFrames(p.utility); // Thick Skin (WPN-14)
+  const mine = id === raidMyId;
+  // The host's copy of a teammate is only refreshed every few frames, so remember when it last
+  // delivered a hit to each player and don't deliver another while they are still invincible.
+  if (!mine && raidRecentHit[id] !== undefined && raidG.frame - raidRecentHit[id] < inv) return;
+  // Mutate p synchronously (RAI-11) so a second hazard/projectile hitting the same player later
+  // in this same host frame sees invincible>0 right away, instead of racing the async write.
+  // Warding Sigil absorbs exactly one hit per raid (WPN-03).
   if (raidCharmOf(p.utility, 'first_hit_ward') && !p.wardUsed) {
     p.wardUsed = true;
     p.invincible = 30;
-    raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
+    if (mine) raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
+    else { raidRecentHit[id] = raidG.frame; raidHitsRef.push({ target: id, ward: true, inv: 30, at: Date.now() }); }
     return;
   }
   const newHealth = Math.max(0, (p.health || 5) - (amount || 1));
   p.health = newHealth;
   p.invincible = inv;
-  raidPlayerRef.child(id).update({ health: newHealth, invincible: inv });
-  if (newHealth <= 0) {
-    raidG.gameOver = true;
-    raidSendBossState();
+  if (mine) {
+    raidPlayerRef.child(id).update({ health: newHealth, invincible: inv });
+  } else {
+    raidRecentHit[id] = raidG.frame;
+    raidHitsRef.push({ target: id, amount: amount || 1, inv: inv, at: Date.now() });
   }
+  if (newHealth <= 0) raidCheckAllDown();
 }
 
 // Lobbed boss shots (fireballs, bubbles, feathers) must rise and then drop onto their landing spot.
@@ -4626,7 +4742,7 @@ function raidPx(p) { return p.x + 18; }
 // True while a player is clearly off the ground (i.e. has jumped over a ground hazard).
 function raidAirborne(p, h) { return p.y < raidGROUND_Y - 48 - (h === undefined ? 30 : h); }
 function raidRandomPlayer() {
-  const ids = Object.keys(raidG.players).filter(id => raidG.players[id]);
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
   if (!ids.length) return null;
   const id = ids[Math.floor(Math.random() * ids.length)];
   return { id: id, p: raidG.players[id] };
@@ -4636,7 +4752,7 @@ function raidNearestPlayerDir(b) {
   let best = null, bestDist = Infinity;
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
-    if (!p) return;
+    if (!p || p.health === 0) return;
     const d = Math.abs(raidPx(p) - b.x);
     if (d < bestDist) { bestDist = d; best = p; }
   });
@@ -5184,7 +5300,7 @@ function bramblehideCharge(b, dir, laneTarget) {
 // Phase 2+: seed-pods lobbed toward players, each erupting into a thorn spike (not a flame
 // pillar - BOS-40) on landing.
 function bramblehideBrambleToss(b) {
-  const ids = Object.keys(raidG.players);
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
   const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
   targets.slice(0, 2).forEach(tx => {
     const hx = b.x, hy = b.y - 10, T = 50, g = 0.12;
@@ -5278,7 +5394,7 @@ function colossusAttack(b) {
 // Boulder hurl (BOS-41): the golem tears a boulder from its shoulder and lobs one at each player's
 // spot. Big (radius 14), so a swing can parry it or pogo off it (WPN-11); it bursts on the floor.
 function colossusBoulderHurl(b) {
-  const ids = Object.keys(raidG.players).filter(id => raidG.players[id]);
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
   const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
   targets.forEach(px => {
     const tx = clampX(px, 40, 960);
@@ -6145,7 +6261,7 @@ function raidResolveSwingDir(input) {
 }
 
 function raidSwordSwing() {
-  if (raidG.gameOver || raidG.victory) return;
+  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0) return;
   if (countdownActive) return;
   const p = raidLocal;
   if (p.swordCooldown > 0) return;
@@ -6423,6 +6539,11 @@ function raidParryProjectiles() {
 function raidUpdateLocal() {
   if (raidG.gameOver || raidG.victory) return;
   const p = raidLocal;
+  if (p.health <= 0) { // RAI-26: a fallen player watches; the others fight on
+    p.vx = 0; p.swingTimer = 0; p.dashTimer = 0; p.shield = false;
+    if (raidG.frame % 2 === 0) raidSendLocalState();
+    return;
+  }
   // Decremented up front so a squash/stretch pop set fresh later THIS frame (landing, jumping)
   // still reads as its full RAID_SQUASH_FRAMES value for the frame it starts on.
   if (p.squashTimer > 0) p.squashTimer--;
@@ -6545,7 +6666,7 @@ function raidGenerateMath() {
 }
 
 function raidTryShield() {
-  if (raidG.gameOver || raidG.victory) return;
+  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0) return;
   if (countdownActive) return;
   
   if (raidMathShieldCharges > 0) {
@@ -6564,7 +6685,7 @@ function raidTryShield() {
 }
 
 function raidTryDash() {
-  if (raidG.gameOver || raidG.victory) return;
+  if (raidG.gameOver || raidG.victory || raidLocal.health <= 0) return;
   if (countdownActive) return;
   const p = raidLocal;
   if (p.dashCooldown > 0) return;
@@ -8770,6 +8891,7 @@ function raidInit() {
   raidListenToPlayers();
   raidListenToPresence();
   raidListenToMathHits();
+  raidListenToHits();
 
   setTimeout(raidCheckHost, 1500);
 
