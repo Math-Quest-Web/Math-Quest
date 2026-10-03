@@ -6,14 +6,16 @@ const { test, expect } = require('./support/fixtures');
 const BOSSES = ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon'];
 
 // The sounds the game must have, by group (a missing one is a missing sound).
+// (No charm makes a sound: nothing for the Warding Sigil, the Familiar, Second Wind or equipping a charm.)
 const COMBAT = ['swing_training', 'swing_moss', 'swing_frost', 'swing_void', 'swing_dawn', 'hit_boss', 'hit_boss_heavy', 'hit_blocked', 'parry', 'pogo', 'hurt',
-  'shield_on', 'shield_off', 'ward_block', 'minion_shot', 'boss_stunned', 'dash', 'jump', 'double_jump', 'land', 'phase_change', 'boss_defeated', 'victory', 'game_over',
+  'shield_on', 'shield_off', 'boss_stunned', 'dash', 'jump', 'land', 'phase_change', 'boss_defeated', 'victory', 'game_over',
   'countdown_tick', 'countdown_go'];
-const BOSS_ATTACK = ['windup_growl', 'windup_screech', 'windup_charge', 'windup_snort', 'boss_slam', 'boss_swoosh', 'boss_roar', 'boss_vanish', 'boss_appear', 'boss_swim',
+const GROWLS = BOSSES.map((b) => 'growl_' + b), ROARS = BOSSES.map((b) => 'roar_' + b);
+const BOSS_ATTACK = [...GROWLS, ...ROARS, 'boss_slam', 'boss_swoosh', 'boss_vanish', 'boss_appear', 'boss_swim',
   'boss_splash', 'boss_bite', 'boss_inflate', 'boss_deflate', 'boss_charge', 'shot_candy', 'shot_fang', 'shot_ember', 'shot_bubble', 'shot_pod', 'shot_bolt', 'shot_plume',
   'shot_feather', 'shot_void', 'shot_boulder', 'hz_warn', 'hz_shockwave', 'hz_thorn_erupt', 'hz_pillar', 'hz_quake', 'hz_tremor', 'hz_feather_strike', 'hz_chain',
   'hz_orb_charge', 'hz_orb_burst', 'hz_imp'];
-const UI = ['ui_click', 'ui_equip', 'ui_unequip', 'ui_error', 'ui_buy', 'coins', 'crate_shake', 'crate_open', 'reveal_common', 'reveal_uncommon', 'reveal_rare', 'reveal_epic',
+const UI = ['ui_click', 'ui_equip', 'ui_error', 'ui_buy', 'coins', 'crate_shake', 'crate_open', 'reveal_common', 'reveal_uncommon', 'reveal_rare', 'reveal_epic',
   'reveal_legendary', 'dup_coins', 'answer_correct', 'answer_wrong'];
 
 test.describe('Sound engine (SND-01, SND-02)', () => {
@@ -36,6 +38,7 @@ test.describe('Sound engine (SND-01, SND-02)', () => {
     const required = [...COMBAT, ...BOSS_ATTACK, ...UI];
     for (const n of required) expect(r.names, 'sound ' + n + ' exists').toContain(n);
     expect(r.names.length, 'no stray sounds nobody asked for').toBe(required.length);
+    for (const n of ['ward_block', 'minion_shot', 'double_jump', 'ui_unequip']) expect(r.names, 'no sound for charms: ' + n).not.toContain(n);
     for (const n of r.names) {
       const s = r.stats[n];
       expect.soft(s.nan, n + ' has no NaN samples').toBe(false);
@@ -71,10 +74,22 @@ test.describe('Sound engine (SND-01, SND-02)', () => {
       for (let i = 0; i < swings.length; i++) for (let j = i + 1; j < swings.length; j++) pairs.push([swings[i], swings[j], dist(sf[swings[i]], sf[swings[j]])]);
       const reveals = ['reveal_common', 'reveal_uncommon', 'reveal_rare', 'reveal_epic', 'reveal_legendary'];
       const rf = []; for (const n of reveals) rf.push(await feat(n));
+      const bosses = ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon'];
+      const gf = {}; for (const b of bosses) gf[b] = await feat('growl_' + b);
+      const rf2 = {}; for (const b of bosses) rf2[b] = await feat('roar_' + b);
+      const growlPairs = [], roarPairs = [];
+      for (let i = 0; i < bosses.length; i++) for (let j = i + 1; j < bosses.length; j++) {
+        growlPairs.push([bosses[i], bosses[j], dist(gf[bosses[i]], gf[bosses[j]])]);
+        roarPairs.push([bosses[i], bosses[j], dist(rf2[bosses[i]], rf2[bosses[j]])]);
+      }
+      const roarLonger = bosses.every((b) => rf2[b].len > gf[b].len);
       const normal = await feat('hit_boss'), heavy = await feat('hit_boss_heavy');
-      return { pairs, revealLens: rf.map((f) => f.len), revealEnergy: rf.map((f) => f.energy), normalEnergy: normal.energy, heavyEnergy: heavy.energy, normalLen: normal.len, heavyLen: heavy.len };
+      return { growlPairs, roarPairs, roarLonger, pairs, revealLens: rf.map((f) => f.len), revealEnergy: rf.map((f) => f.energy), normalEnergy: normal.energy, heavyEnergy: heavy.energy, normalLen: normal.len, heavyLen: heavy.len };
     });
     for (const [a, b, d] of r.pairs) expect(d, a + ' and ' + b + ' sound different').toBeGreaterThan(0.12);
+    for (const [a, b, d] of r.growlPairs) expect.soft(d, a + ' and ' + b + ' growl differently').toBeGreaterThan(0.12);
+    for (const [a, b, d] of r.roarPairs) expect.soft(d, a + ' and ' + b + ' roar differently').toBeGreaterThan(0.12);
+    expect(r.roarLonger, 'every roar is longer than that boss growl').toBe(true);
     for (let i = 1; i < 5; i++) {
       expect(r.revealLens[i], 'a rarer reveal lasts longer').toBeGreaterThan(r.revealLens[i - 1]);
       expect(r.revealEnergy[i], 'and has more in it').toBeGreaterThan(r.revealEnergy[i - 1]);
@@ -103,7 +118,7 @@ test.describe('Sound engine (SND-01, SND-02)', () => {
       out.silentVolume = MQ_SFX.play('hurt');
       MQ_SFX.setVolume(0.6);
       out.afterUnmute = MQ_SFX.play('hurt');
-      out.pan = MQ_SFX.play('minion_shot', { pan: -0.5, vol: 0.5, pitch: 1.2 });
+      out.pan = MQ_SFX.play('ui_buy', { pan: -0.5, vol: 0.5, pitch: 1.2 });
       return out;
     });
     expect(r.unlocked).toBe(true);
@@ -119,7 +134,7 @@ test.describe('Sound engine (SND-01, SND-02)', () => {
 
   test('SND-02 the sound button mutes and sets the volume, and the choice is remembered', async ({ page }) => {
     await expect(page.locator('#mqSoundBtn')).toBeVisible();
-    expect(await page.evaluate(() => [MQ_SFX.muted, MQ_SFX.volume])).toEqual([false, 0.6]);
+    expect(await page.evaluate(() => [MQ_SFX.muted, MQ_SFX.volume])).toEqual([false, 0.4]);
     await page.locator('#mqSoundBtn').click();
     await expect(page.locator('#mqSoundPanel')).toBeVisible();
     await page.locator('#mqSoundMute').check();
@@ -139,6 +154,75 @@ test.describe('Sound engine (SND-01, SND-02)', () => {
     });
     expect(r.hi).toBe(1); expect(r.lo).toBe(0); expect(r.bad).toBe(0);
     expect(r.afterCorrupt, 'a corrupt saved setting leaves the settings as they were').toEqual([true, 0]);
+  });
+});
+
+test.describe('A calmer mix (SND-06)', () => {
+  test('SND-06 busy moments stay readable: low-priority sounds give way, important ones (hits, hurt, roars) always get through', async ({ page }) => {
+    await page.keyboard.press('Shift');
+    const r = await page.evaluate(async () => {
+      MQ_SFX.setMuted(false); MQ_SFX.setVolume(0.4);
+      const out = {};
+      const burst = ['shot_candy', 'shot_fang', 'shot_ember', 'shot_bolt', 'shot_plume', 'shot_pod', 'hz_warn', 'hz_imp'];
+      out.lowAccepted = burst.filter((n) => MQ_SFX.play(n)).length;
+      out.hurt = MQ_SFX.play('hurt');
+      out.heavy = MQ_SFX.play('hit_boss_heavy');
+      out.roar = MQ_SFX.play('roar_grinmaw');
+      out.midAccepted = ['boss_slam', 'boss_swoosh', 'boss_bite', 'boss_charge', 'boss_splash'].filter((n) => MQ_SFX.play(n)).length;
+      await new Promise((res) => setTimeout(res, 500));
+      out.lowLater = MQ_SFX.play('shot_candy'); // quiet again: allowed
+      out.levels = Object.fromEntries(['shot_candy', 'hz_warn', 'jump', 'land', 'dash', 'ui_click', 'swing_training', 'hit_boss', 'growl_grinmaw', 'roar_grinmaw'].map((n) => [n, MQ_SFX_LEVEL(n)]));
+      out.priorities = Object.fromEntries(['hurt', 'hit_boss', 'roar_wyrm', 'swing_moss', 'ui_buy', 'boss_slam', 'shot_candy', 'hz_warn', 'jump', 'land'].map((n) => [n, MQ_SFX_PRIORITY(n)]));
+      out.gaps = Object.fromEntries(['swing_training', 'hurt', 'jump', 'land', 'dash', 'shot_candy', 'growl_wyrm', 'hz_warn'].map((n) => [n, MQ_SFX_DEFS[n].gap]));
+      return out;
+    });
+    expect(r.lowAccepted, 'a burst of shots and pings is thinned out to a couple').toBeLessThanOrEqual(2);
+    expect(r.hurt).toBe(true);
+    expect(r.heavy).toBe(true);
+    expect(r.roar).toBe(true);
+    expect(r.midAccepted, 'ordinary boss sounds are capped when it is busy').toBeLessThanOrEqual(3);
+    expect(r.lowLater, 'and fine again once it calms down').toBe(true);
+    expect(r.priorities).toEqual({ hurt: 3, hit_boss: 3, roar_wyrm: 3, swing_moss: 3, ui_buy: 3, boss_slam: 2, shot_candy: 1, hz_warn: 1, jump: 1, land: 1 });
+    // the chatty ones are turned down, and the sounds you want to hear are not
+    for (const n of ['shot_candy', 'hz_warn', 'jump', 'land', 'dash', 'ui_click']) expect(r.levels[n], n + ' is quieter').toBeLessThan(0.75);
+    expect(r.levels.hit_boss).toBeGreaterThanOrEqual(0.85);
+    expect(r.levels.roar_grinmaw).toBeGreaterThanOrEqual(0.85);
+    // and spaced out so the same sound cannot machine-gun
+    expect(r.gaps.swing_training).toBeGreaterThanOrEqual(120);
+    expect(r.gaps.hurt).toBeGreaterThanOrEqual(250);
+    expect(r.gaps.jump).toBeGreaterThanOrEqual(150);
+    expect(r.gaps.land).toBeGreaterThanOrEqual(250);
+    expect(r.gaps.dash).toBeGreaterThanOrEqual(300);
+    expect(r.gaps.shot_candy).toBeGreaterThanOrEqual(150);
+    expect(r.gaps.growl_wyrm).toBeGreaterThanOrEqual(500);
+    expect(r.gaps.hz_warn).toBeGreaterThanOrEqual(700);
+  });
+
+  test('SND-06 each boss growls in its own voice at its windups, a teammate swing is quieter than yours, and only hard landings thump', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const out = {};
+      raidSfxReset(); raidSfxTick();
+      MQ_SFX.recording = true;
+      out.growls = {};
+      for (const b of BOSS_ORDER) out.growls[b] = [...new Set(Object.values(MQ_BOSS_SFX[b]).filter((n) => n && n.startsWith('growl_')))];
+      // a teammate's swing is played at half volume
+      raidG.players.mate = { x: 700, y: 452, facing: 1, health: 5, maxHealth: 5, skin: 'skin_classic', gun: 'sword_moss', swingTimer: 0, swingDir: 'right', onGround: true };
+      raidSfxReset(); raidSfxTick(); raidG.players.mate.swingTimer = 13; raidSfxTick();
+      out.mateVol = MQ_SFX.lastOpts && MQ_SFX.lastOpts.vol;
+      raidLocal.gun = 'sword_moss'; raidLocal.swordCooldown = 0; raidSwordSwing();
+      out.myVol = MQ_SFX.lastOpts && MQ_SFX.lastOpts.vol;
+      // landings: a small drop is silent, a long fall thumps
+      const land = (fromY) => { T.place(500, fromY); raidLocal.onGround = false; raidLocal.vy = 0; MQ_SFX.log.length = 0; for (let i = 0; i < 120; i++) raidUpdateLocal(); return MQ_SFX.log.filter((n) => n === 'land').length; };
+      out.smallDrop = land(raidGROUND_Y - 48 - 30);
+      out.bigDrop = land(100);
+      return out;
+    });
+    for (const b of BOSSES) expect(r.growls[b], b + ' growls in its own voice').toEqual(['growl_' + b]);
+    expect(r.mateVol, 'a teammate swing is quieter').toBeLessThan(0.7);
+    expect(r.myVol === undefined || r.myVol >= 0.9, 'your own swing is full volume').toBe(true);
+    expect(r.smallDrop, 'stepping down is silent').toBe(0);
+    expect(r.bigDrop, 'a long fall lands with a thump').toBe(1);
   });
 });
 
@@ -221,7 +305,7 @@ test.describe('Combat sounds (SND-03)', () => {
       MQ_SFX.recording = true;
       const out = {};
       MQ_SFX.log.length = 0; raidLocal.health -= 1; raidSfxTick(); out.hurt = MQ_SFX.log.slice();
-      MQ_SFX.log.length = 0; raidG.players[raidMyId].wardUsed = true; raidSfxTick(); out.ward = MQ_SFX.log.slice();
+      MQ_SFX.log.length = 0; raidG.players[raidMyId].wardUsed = true; raidSfxTick(); out.ward = MQ_SFX.log.slice(); // Warding Sigil: silent
       MQ_SFX.log.length = 0; raidLocal.dashCooldown = 0; raidTryDash(); out.dash = MQ_SFX.log.slice();
       // a ground jump
       T.place(500); raidLocal.onGround = true; raidLocal.vy = 0; raidLocal.dashTimer = 0; raidLocal.wasJumpPressed = false;
@@ -235,7 +319,7 @@ test.describe('Combat sounds (SND-03)', () => {
       // a double jump with Second Wind
       raidLocal.utility = 'util_double';
       T.place(500, 300); raidLocal.onGround = false; raidLocal.vy = 0; raidLocal.airJumpsUsed = 0; raidLocal.wasJumpPressed = false; raidLocal.dashTimer = 0;
-      raidLocal.input.jump = true; MQ_SFX.log.length = 0; raidUpdateLocal(); out.double = MQ_SFX.log.slice();
+      raidLocal.input.jump = true; MQ_SFX.log.length = 0; raidUpdateLocal(); out.double = MQ_SFX.log.slice(); // Second Wind: silent
       raidLocal.utility = ''; raidLocal.input.jump = false;
       // the shield goes up, then times out
       raidLocal.shield = false; raidMathShieldCharges = 1;
@@ -244,16 +328,16 @@ test.describe('Combat sounds (SND-03)', () => {
       return out;
     });
     expect(r.hurt).toEqual(['hurt']);
-    expect(r.ward).toEqual(['ward_block']);
+    expect(r.ward, 'the Warding Sigil is silent').toEqual([]);
     expect(r.dash).toEqual(['dash']);
     expect(r.jump).toEqual(['jump']);
     expect(r.land, 'a landing from a jump is heard once').toEqual(['land']);
-    expect(r.double).toEqual(['double_jump']);
+    expect(r.double, 'Second Wind is silent').toEqual([]);
     expect(r.shieldOn).toEqual(['shield_on']);
     expect(r.shieldOff).toEqual(['shield_off']);
   });
 
-  test('SND-03 the Familiar firing, a stunned boss, a phase change, victory and defeat each have a sound, once', async ({ page }) => {
+  test('SND-03 a stunned boss, a phase change (with that boss own roar), victory and defeat each have a sound, once; the Familiar is silent', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       T.prepBoss('grinmaw', 1);
@@ -272,10 +356,10 @@ test.describe('Combat sounds (SND-03)', () => {
       MQ_SFX.log.length = 0; raidG.gameOver = true; raidSfxTick(); raidSfxTick(); out.defeat = MQ_SFX.log.slice();
       return out;
     });
-    expect(r.minion).toEqual(['minion_shot']);
+    expect(r.minion, 'the Familiar is silent').toEqual([]);
     expect(r.stun).toEqual(['boss_stunned']);
     expect(r.stunStays).toEqual([]);
-    expect(r.phase).toEqual(['phase_change']);
+    expect(r.phase).toEqual(['phase_change', 'roar_grinmaw']);
     expect(r.phaseStays).toEqual([]);
     expect(r.victory, 'victory fanfare plus the boss going down, once').toEqual(['boss_defeated', 'victory']);
     expect(r.defeat).toEqual(['game_over']);
@@ -340,8 +424,8 @@ test.describe('Boss sounds (SND-04)', () => {
       raidG.boss.anim = { state: 'slamDown', timer: 1 }; raidSfxTick();
       return { first, after: MQ_SFX.log.slice() };
     });
-    expect(r.first).toEqual(['windup_charge']);
-    expect(r.after).toEqual(['windup_charge', 'boss_slam']);
+    expect(r.first).toEqual(['growl_colossus']);
+    expect(r.after).toEqual(['growl_colossus', 'boss_slam']);
   });
 });
 
@@ -365,8 +449,8 @@ test.describe('Interface sounds (SND-05)', () => {
       return out;
     });
     expect(r.equip).toEqual(['ui_equip']);
-    expect(r.charmOn).toEqual(['ui_equip']);
-    expect(r.charmOff).toEqual(['ui_unequip']);
+    expect(r.charmOn, 'equipping a charm is silent').toEqual([]);
+    expect(r.charmOff, 'and so is taking it off').toEqual([]);
     expect(r.refused).toEqual(['ui_error']);
     expect(r.broke).toEqual(['ui_error']);
     expect(r.bought).toEqual(['ui_buy']);
