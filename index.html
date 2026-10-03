@@ -2780,6 +2780,7 @@ function handleAnswer(selected, selectedButton) {
       bestStreak = streak;
     }
     feedback.innerText = '🎉 Correct! Great job!';
+    sfx('answer_correct');
     selectedButton.style.background = 'var(--success)';
     selectedButton.style.color = 'white';
     selectedButton.style.boxShadow = '0 5px 0 #2fa866';
@@ -2787,6 +2788,7 @@ function handleAnswer(selected, selectedButton) {
   } else {
     streak = 0;
     feedback.innerText = '❌ Not quite! The answer is ' + correct;
+    sfx('answer_wrong');
     selectedButton.style.background = 'var(--danger)';
     selectedButton.style.color = 'white';
     selectedButton.style.boxShadow = '0 5px 0 #d74361';
@@ -3723,6 +3725,7 @@ function resetRaidState() {
   raidChargeHitState = {};
   raidDisplayPos = {};
   raidDisplaySwing = {};
+  raidSfxReset();
   raidRecentHit = {};
   raidPogoState = { lastSwingTimer: 0, bounced: false };
   raidMathShieldCharges = RAID_MATH_ENABLED ? 1 : 2;
@@ -4320,6 +4323,7 @@ function startCountdown(callback) {
     countdownNumber.textContent = countdownValue;
     countdownText.textContent = countdownValue > 1 ? 'Starting in...' : 'GO!';
     
+    if (countdownValue > 1) sfx('countdown_tick'); else if (countdownValue === 1) sfx('countdown_go');
     if (countdownValue <= 0) {
       clearInterval(countdownInterval);
       countdownInterval = null;
@@ -6477,6 +6481,7 @@ function raidSwordSwing() {
   if (p.swordCooldown > 0) return;
   p.swordCooldown = raidSwordCooldownFrames(); // Quick Hands (WPN-14)
   p.swingTimer = RAID_SWORD_SWING_FRAMES;
+  sfx(MQ_SWING_SFX[p.gun] || 'swing_training'); // each sword swings with its own sound (SND-03)
   // Direction is read once, at the moment the swing starts (WPN-05), so releasing the key
   // mid-swing doesn't change an already-playing animation.
   p.swingDir = raidResolveSwingDir(p.input);
@@ -6674,6 +6679,7 @@ function raidCheckLocalPogo() {
   }
   if (touching) {
     raidPogoState.bounced = true;
+    sfx('pogo');
     p.vy = raidPogoVy(); // Pogo Spring bounces higher (WPN-14)
     p.jumpBoosting = false; // a clean fixed-height bounce, not modulated by stale jump-hold
     p.onGround = false;
@@ -6806,6 +6812,7 @@ function raidUpdateLocal() {
   else if (p.vy > 0) gravity *= raidFallGravityMult(); // Light Step: a gentler fall (WPN-14)
   p.vy += gravity;
   p.y += p.vy;
+  const landVy = p.vy; // how hard it comes down, for the landing sound
   const wasOnGround = p.onGround; // RAI-21: edge-detect the landing transition, for squash-stretch
   if (p.y >= raidGROUND_Y - p.h) { // >= so a grounded dash (no gravity pushing past the floor) still counts as grounded
     p.y = raidGROUND_Y - p.h;
@@ -6813,7 +6820,10 @@ function raidUpdateLocal() {
     p.onGround = true;
     p.jumpBoosting = false;
     p.airJumpsUsed = 0; // Second Wind's air jump refills on landing (WPN-06)
-    if (!wasOnGround) { p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'land'; }
+    if (!wasOnGround) {
+      p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'land';
+      if (landVy > 5) sfx('land', { vol: Math.min(1, landVy / 12) }); // only a hard landing thumps
+    }
   } else {
     p.onGround = false;
   }
@@ -6825,6 +6835,7 @@ function raidUpdateLocal() {
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
+    sfx('jump');
   } else if (p.input.jump && !p.wasJumpPressed && !p.onGround && (p.airJumpsUsed || 0) < raidMaxAirJumps()) {
     // Second Wind (WPN-06): one extra jump while airborne, edge-detected on the key press so
     // holding jump doesn't spend it repeatedly the instant it becomes eligible (e.g. at the
@@ -6841,7 +6852,7 @@ function raidUpdateLocal() {
   if (p.invincible > 0) p.invincible--;
   if (p.shield) {
     p.shieldTimer--;
-    if (p.shieldTimer <= 0) p.shield = false;
+    if (p.shieldTimer <= 0) { p.shield = false; sfx('shield_off'); }
   }
   if (p.dashCooldown > 0) p.dashCooldown--;
   if (p.dashTimer > 0) p.dashTimer--;
@@ -6883,6 +6894,7 @@ function raidTryShield() {
     raidMathShieldCharges--;
     raidLocal.shield = true;
     raidLocal.shieldTimer = raidShieldDurationFrames();
+    sfx('shield_on');
     raidUpdateUI();
     raidSendLocalState();
   } else if (RAID_MATH_ENABLED) {
@@ -6904,6 +6916,7 @@ function raidTryDash() {
   p.vx = p.dashDir * RAID_DASH_SPEED;
   p.invincible = Math.max(p.invincible, raidDashInvincibleFrames());
   p.dashCooldown = raidDashCooldownFrames();
+  sfx('dash');
   raidUpdateUI();
   raidSendLocalState();
 }
@@ -8147,7 +8160,108 @@ function raidTriggerHitStop(frames) {
 const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [], bursts: [] };
 const RAID_BURST_FRAMES = 12; // RAI-23: how long the local player's hit burst lasts
 
+// ---- sound triggers (SND-03, SND-04) ----
+// Sounds are worked out each frame from state every client already has (the synced boss, its shots and
+// hazards, the players list), so a teammate's swing or a boss move is heard by everyone, once, and a
+// joining client does not hear a burst of old events (the first tick only takes a baseline).
+const MQ_HAZARD_SFX = {
+  shockwave: { spawn: 'hz_shockwave' }, imp: { spawn: 'hz_imp' },
+  chainLash: { spawn: 'hz_warn', strike: 'hz_chain' }, voidOrb: { spawn: 'hz_orb_charge', burst: 'hz_orb_burst' }, // (the burst sounds when the orb is gone)
+  pillar: { spawn: 'hz_warn', strike: 'hz_pillar' }, thornSpike: { spawn: 'hz_warn', strike: 'hz_thorn_erupt' },
+  quake: { spawn: 'hz_quake' }, tremor: { spawn: 'hz_warn', strike: 'hz_tremor' }, featherFall: { spawn: 'hz_warn', strike: 'hz_feather_strike' }
+};
+let raidSfx = null;
+function raidSfxReset() {
+  raidSfx = { ready: false, bossType: '', state: '', exposed: 0, transition: 0, hp: null, health: null, wardUsed: false,
+    shotCounts: {}, hzCounts: {}, struck: {}, orbs: {}, anims: {}, minions: 0, swing: {}, ended: false };
+}
+raidSfxReset();
+function raidSfxTick() {
+  const S = raidSfx, b = raidG.boss;
+  if (!b) return;
+  const play = S.ready ? sfx : () => false; // the first tick only records where things stand
+  const bpan = { pan: sfxPan(b.x) };
+
+  // the boss takes a hit: heavy for big damage (a stunned boss takes double)
+  if (S.hp !== null && b.hp < S.hp) play(S.hp - b.hp >= 6 ? 'hit_boss_heavy' : 'hit_boss', bpan);
+  S.hp = b.hp;
+  // me getting hurt, and the Warding Sigil soaking a hit
+  if (S.health !== null && raidLocal.health < S.health) play('hurt');
+  S.health = raidLocal.health;
+  // (no sound for any charm: the Warding Sigil soaking a hit is silent)
+  // phase change and stun
+  if ((b.transition || 0) > 0 && S.transition === 0) { play('phase_change'); play('roar_' + b.type, bpan); } // the rumble, then that boss's own roar
+  S.transition = b.transition || 0;
+  if ((b.exposed || 0) > 0 && S.exposed === 0) play('boss_stunned', bpan);
+  S.exposed = b.exposed || 0;
+  // the boss starts a new move
+  const state = (b.anim && b.anim.state) || 'idle';
+  if (S.bossType !== b.type) { S.bossType = b.type; S.state = state; }
+  else if (state !== S.state) {
+    S.state = state;
+    const snd = MQ_BOSS_SFX[b.type] && MQ_BOSS_SFX[b.type][state];
+    if (snd) play(snd, bpan);
+  }
+  // boss shots appearing (once per kind per frame, however many at a time)
+  const shots = {}, shotX = {};
+  raidG.projectiles.forEach(pr => { if (!pr.isWarning && pr.isBossProjectile) { shots[pr.kind] = (shots[pr.kind] || 0) + 1; shotX[pr.kind] = pr.x; } });
+  Object.keys(shots).forEach(k => { if (shots[k] > (S.shotCounts[k] || 0) && MQ_SHOT_SFX[k]) play(MQ_SHOT_SFX[k], { pan: sfxPan(shotX[k]) }); });
+  S.shotCounts = shots;
+  // (the Familiar's bolts are silent too)
+  // floor hazards: a sound when one appears, and when a marked strike goes off
+  const hz = {}, live = {};
+  raidG.hazards.forEach(h => {
+    hz[h.kind] = (hz[h.kind] || 0) + 1;
+    const def = MQ_HAZARD_SFX[h.kind];
+    if (!def) return;
+    const key = h.kind + ':' + Math.round(h.x !== undefined ? h.x : h.tx) + ':' + (h.delay || 0);
+    live[key] = true;
+    const t = (h.timer || 0) - (h.delay || 0);
+    const due = (h.kind === 'pillar' && h.timer >= 32) || (h.kind === 'thornSpike' && h.timer >= RAID_THORN_WARN)
+      || (h.kind === 'tremor' && t >= RAID_TREMOR_WARN) || (h.kind === 'featherFall' && t >= RAID_FEATHERFALL_WARN)
+      || (h.kind === 'chainLash' && t >= 62);
+    if (due && !S.struck[key]) { S.struck[key] = true; if (def.strike) play(def.strike, { pan: sfxPan(h.x !== undefined ? h.x : h.tx) }); }
+    if (h.kind === 'voidOrb') S.orbs[key] = { timer: h.timer || 0, x: h.tx !== undefined ? h.tx : b.x };
+  });
+  Object.keys(S.struck).forEach(k => { if (!live[k]) delete S.struck[k]; });
+  // a void orb that has hovered its full time and is gone has just burst into shots
+  Object.keys(S.orbs).forEach(k => {
+    if (live[k]) return;
+    if (S.orbs[k].timer >= 120) play('hz_orb_burst', { pan: sfxPan(S.orbs[k].x) });
+    delete S.orbs[k];
+  });
+  Object.keys(hz).forEach(k => { const def = MQ_HAZARD_SFX[k]; if (def && def.spawn && hz[k] > (S.hzCounts[k] || 0)) play(def.spawn); });
+  S.hzCounts = hz;
+  // sparks on the boss: a parry, or a hit that bounced off
+  const seen = {};
+  raidG.slamAnimations.forEach(a => {
+    if (a.phase !== 'parry' && a.phase !== 'blocked') return;
+    const key = a.phase + ':' + Math.round(a.x) + ':' + Math.round(a.y);
+    seen[key] = true;
+    if (!S.anims[key]) play(a.phase === 'parry' ? 'parry' : 'hit_blocked', { pan: sfxPan(a.x) });
+  });
+  S.anims = seen;
+  // teammates swinging: their synced swing timer going up means a new swing
+  const swing = {};
+  Object.keys(raidG.players).forEach(id => {
+    if (id === raidMyId) return;
+    const pl = raidG.players[id];
+    if (!pl) return;
+    const t = pl.swingTimer > 0 ? pl.swingTimer : 0;
+    if (t > (S.swing[id] || 0)) play(MQ_SWING_SFX[pl.gun] || 'swing_training', { pan: sfxPan(pl.x + 18), vol: 0.5 }); // a teammate's swing, quieter than yours
+    swing[id] = t;
+  });
+  S.swing = swing;
+  // the fight ends
+  if (!S.ended) {
+    if (raidG.victory) { S.ended = true; play('boss_defeated'); play('victory'); }
+    else if (raidG.gameOver) { S.ended = true; play('game_over'); }
+  }
+  S.ready = true;
+}
+
 function raidFxTick() {
+  raidSfxTick();
   const b = raidG.boss;
   if (raidFx.lastBossHp === null || b.hp > raidFx.lastBossHp) {
     raidFx.lastBossHp = b.hp;
@@ -11041,6 +11155,7 @@ function mqBuyItem(itemId) {
   if (!item || price === null) return { ok: false, reason: 'unavailable' };
   if (mqProfile.owned[itemId]) return { ok: false, reason: 'owned' };
   if (mqProfile.coins < price) {
+    sfx('ui_error');
     mqToast('Not enough coins - ' + item.name + ' costs ' + price.toLocaleString() + ' and you have ' + mqProfile.coins.toLocaleString() + '.');
     return { ok: false, reason: 'coins', need: price, have: mqProfile.coins };
   }
@@ -11048,6 +11163,7 @@ function mqBuyItem(itemId) {
   mqProfile.owned[itemId] = 1;
   mqSaveProfile();
   mqRefreshCoinUI();
+  sfx('ui_buy');
   mqToast('Bought ' + item.name + ' for ' + price.toLocaleString() + ' coins!');
   if (mqShopTab === 'inv') mqRenderInventory();
   return { ok: true, price: price };
@@ -11102,6 +11218,7 @@ function mqAwardRaidVictory() {
   const coinMult = mqCoinMultiplier(mqProfile.equipped.utility);
   const total = Math.round((base + bonus) * coinMult);
   mqProfile.coins += total;
+  sfx('coins');
   mqProfile.stats.raids++;
   mqSaveProfile();
   mqRefreshCoinUI();
@@ -11340,6 +11457,7 @@ const mqOpenTimers = { a: 0, b: 0, c: 0 };
 function mqOpenCrate(crateId) {
   const crate = MQ_CRATE_MAP[crateId];
   if (mqProfile.coins < crate.price) {
+    sfx('ui_error');
     mqToast('Not enough coins - you need ' + (crate.price - mqProfile.coins) + ' more. Beat a raid boss to earn some!');
     return;
   }
@@ -11370,8 +11488,12 @@ function mqShowOpening(crate, item, dup, refund) {
       <div class="mq-open-reveal" id="mqReveal" style="display:none"></div>
     </div>`;
   m.classList.add('open');
+  sfx('crate_shake');
 
   const reveal = () => {
+    sfx('crate_open');
+    setTimeout(() => sfx('reveal_' + item.rarity), 140);
+    if (dup) setTimeout(() => sfx('dup_coins'), 450);
     clearTimeout(mqOpenTimers.a); clearTimeout(mqOpenTimers.b); clearTimeout(mqOpenTimers.c);
     mqEl('mqStage').style.display = 'none';
     const fl = mqEl('mqFlash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
@@ -11431,6 +11553,7 @@ function mqEquipItem(itemId) {
     } else {
       const chk = mqCharmEquipCheck(mqProfile.equipped.utility, itemId);
       if (!chk.ok) {
+        sfx('ui_error');
         mqToast(chk.reason === 'slots'
           ? 'All ' + MQ_CHARM_SLOTS + ' charm slots are full - take one off first.'
           : item.name + ' costs ' + chk.need + ' charm points but you only have ' + chk.left + ' left (of ' + MQ_CHARM_BUDGET + ').');
@@ -11440,6 +11563,7 @@ function mqEquipItem(itemId) {
     }
   } else {
     mqProfile.equipped[MQ_SLOT_KEY[item.slot]] = itemId;
+    sfx('ui_equip');
   }
   mqSaveProfile();
   if (mqShopTab === 'inv') mqRenderInventory();
@@ -11546,6 +11670,386 @@ function mqStartTick() {
 
 mqRefreshCoinUI();
 
+</script>
+
+<script>
+// ============================================================
+// SOUND EFFECTS (spec section 8.6): everything is synthesized with the Web Audio API - there are no
+// audio files. MQ_SFX_DEFS describes each sound as a few oscillator tones and filtered noise bursts;
+// MQ_SFX plays them (after the first click or key press, which browsers require) or renders them
+// offline so the tests can check the actual samples. sfx(name, opts) is the one call the game makes.
+// ============================================================
+
+// Each def: dur = how long the sound lasts (seconds), gap = the shortest time between two plays of it
+// (ms), build(S) = the notes. S.tone(type, f0, f1, dur, vol, {delay, a, detune, lp, wob:[hz,depth]}) and
+// S.noise(dur, vol, {delay, a, type, f0, f1, q}). Frequencies glide from f0 to f1.
+const MQ_SFX_DEFS = {
+  // ---------- combat: sword swings (one per sword, so you can hear which sword a player has) ----------
+  swing_training: { dur: 0.22, gap: 120, build: (S) => { S.noise(0.17, 0.4, { type: 'bandpass', f0: 500, f1: 2200, q: 1.1, a: 0.02 }); S.tone('triangle', 300, 180, 0.12, 0.1); } },
+  swing_moss: { dur: 0.26, gap: 120, build: (S) => { S.noise(0.2, 0.3, { type: 'highpass', f0: 2600, f1: 4600, a: 0.03 }); [0.03, 0.08, 0.13].forEach((d) => S.noise(0.04, 0.22, { type: 'bandpass', f0: 3400, f1: 2800, q: 3, delay: d })); S.tone('sine', 520, 720, 0.14, 0.06, { delay: 0.02 }); } },
+  swing_frost: { dur: 0.5, gap: 120, build: (S) => { S.noise(0.18, 0.3, { type: 'bandpass', f0: 1500, f1: 5200, q: 1.5, a: 0.02 }); S.tone('sine', 1760, 1760, 0.45, 0.11, { delay: 0.04, a: 0.01 }); S.tone('sine', 2640, 2640, 0.35, 0.07, { delay: 0.07, a: 0.01 }); } },
+  swing_void: { dur: 0.36, gap: 120, build: (S) => { S.tone('sawtooth', 110, 60, 0.32, 0.16, { lp: 700 }); S.tone('sawtooth', 114, 62, 0.32, 0.12, { lp: 700 }); S.noise(0.28, 0.32, { type: 'bandpass', f0: 300, f1: 900, q: 0.9, a: 0.05 }); } },
+  swing_dawn: { dur: 0.42, gap: 120, build: (S) => { S.noise(0.18, 0.28, { type: 'bandpass', f0: 800, f1: 3800, q: 1.2, a: 0.02 }); [659, 831, 988].forEach((f, i) => S.tone('sine', f, f, 0.36, 0.08, { delay: 0.03 + i * 0.04, a: 0.02 })); S.noise(0.2, 0.12, { type: 'highpass', f0: 6000, f1: 8000, delay: 0.06 }); } },
+
+  // ---------- combat: hits, parry, pogo, damage ----------
+  hit_boss: { dur: 0.28, gap: 80, build: (S) => { S.noise(0.12, 0.6, { type: 'lowpass', f0: 1800, f1: 300 }); S.tone('sine', 180, 60, 0.16, 0.5); S.tone('square', 1200, 900, 0.04, 0.08); } },
+  hit_boss_heavy: { dur: 0.6, gap: 80, build: (S) => { S.noise(0.22, 0.75, { type: 'lowpass', f0: 2600, f1: 200 }); S.tone('sine', 120, 38, 0.32, 0.8); S.tone('sine', 880, 880, 0.42, 0.14, { delay: 0.02 }); S.tone('sine', 1320, 1320, 0.34, 0.1, { delay: 0.02 }); S.tone('square', 1500, 700, 0.06, 0.1); } },
+  hit_blocked: { dur: 0.2, gap: 100, build: (S) => { S.tone('triangle', 1500, 1500, 0.15, 0.2); S.tone('triangle', 2300, 2300, 0.12, 0.14); S.noise(0.05, 0.2, { type: 'highpass', f0: 4000, f1: 6000 }); } },
+  parry: { dur: 0.5, gap: 100, build: (S) => { [1318, 1975, 2637].forEach((f, i) => S.tone('sine', f, f, 0.45 - i * 0.08, 0.2 - i * 0.04, { a: 0.003 })); S.noise(0.06, 0.32, { type: 'highpass', f0: 3000, f1: 5000 }); S.tone('sine', 3136, 3136, 0.3, 0.07, { delay: 0.08 }); } },
+  pogo: { dur: 0.3, gap: 120, build: (S) => { S.tone('triangle', 220, 660, 0.18, 0.3); S.tone('triangle', 330, 880, 0.18, 0.15, { delay: 0.05 }); S.tone('sine', 440, 220, 0.1, 0.1, { delay: 0.18 }); } },
+  hurt: { dur: 0.4, gap: 250, build: (S) => { S.noise(0.2, 0.6, { type: 'lowpass', f0: 900, f1: 200 }); S.tone('sawtooth', 240, 90, 0.3, 0.32, { lp: 900 }); S.tone('sine', 85, 45, 0.25, 0.45); } },
+  shield_on: { dur: 0.3, gap: 200, build: (S) => { S.tone('sine', 400, 820, 0.2, 0.2); S.tone('sine', 1200, 1600, 0.25, 0.08, { delay: 0.05 }); } },
+  shield_off: { dur: 0.25, gap: 200, build: (S) => { S.tone('sine', 820, 380, 0.2, 0.16); } },
+  boss_stunned: { dur: 0.45, gap: 400, build: (S) => { [700, 600, 500].forEach((f, i) => S.tone('sine', f, f * 0.96, 0.14, 0.16, { delay: i * 0.12, wob: [9, 12] })); } },
+
+  // ---------- player movement ----------
+  dash: { dur: 0.26, gap: 300, build: (S) => { S.noise(0.22, 0.4, { type: 'bandpass', f0: 800, f1: 3000, q: 1, a: 0.02 }); S.tone('sine', 200, 500, 0.16, 0.1); } },
+  jump: { dur: 0.16, gap: 150, build: (S) => { S.tone('sine', 260, 520, 0.12, 0.2); } },
+  land: { dur: 0.16, gap: 250, build: (S) => { S.noise(0.08, 0.35, { type: 'lowpass', f0: 500, f1: 200 }); S.tone('sine', 120, 60, 0.1, 0.35); } },
+
+  // ---------- fight flow ----------
+  phase_change: { dur: 1.0, gap: 800, build: (S) => { S.tone('sine', 55, 45, 0.9, 0.6); S.tone('sawtooth', 110, 240, 0.85, 0.2, { lp: 900, a: 0.2 }); S.noise(0.85, 0.3, { type: 'bandpass', f0: 200, f1: 1600, q: 0.8, a: 0.3 }); } },
+  boss_defeated: { dur: 1.6, gap: 1500, build: (S) => { S.noise(1.2, 0.6, { type: 'lowpass', f0: 3200, f1: 100 }); S.tone('sine', 100, 30, 1.1, 0.6); [523, 784, 1047].forEach((f, i) => S.tone('triangle', f, f, 0.5, 0.14, { delay: 0.7 + i * 0.12 })); } },
+  victory: { dur: 1.3, gap: 1500, build: (S) => { [523, 659, 784, 1047].forEach((f, i) => S.tone('square', f, f, 0.2, 0.13, { delay: i * 0.14, lp: 3000 })); [523, 659, 784, 1047].forEach((f) => S.tone('triangle', f, f, 0.6, 0.12, { delay: 0.6 })); } },
+  game_over: { dur: 1.1, gap: 1500, build: (S) => { S.tone('sawtooth', 300, 60, 0.9, 0.3, { lp: 900 }); S.noise(0.8, 0.25, { type: 'lowpass', f0: 1500, f1: 100 }); S.tone('sine', 150, 40, 1.0, 0.3, { delay: 0.1 }); } },
+  countdown_tick: { dur: 0.16, gap: 200, build: (S) => { S.tone('sine', 660, 660, 0.12, 0.25); } },
+  countdown_go: { dur: 0.5, gap: 200, build: (S) => { S.tone('sine', 880, 880, 0.4, 0.25); S.tone('sine', 1320, 1320, 0.35, 0.18, { delay: 0.02 }); } },
+
+  // ---------- boss growls (one voice per boss) at their wind-ups, and a roar for each at a phase change ----------
+  growl_grinmaw: { dur: 0.75, gap: 500, build: (S) => S.growl({ f0: 75, f1: 125, f2: 62, dur: 0.75, vol: 1.4, formants: [[500, 5, 1], [900, 6, 0.6], [2400, 8, 0.25]], rough: 32, depth: 0.7, vib: [5, 4], breath: 0.12, breathF: 500 }) },
+  roar_grinmaw: { dur: 1.3, gap: 800, build: (S) => { S.growl({ f0: 60, f1: 150, f2: 52, dur: 1.3, vol: 1.6, formants: [[450, 5, 1], [800, 6, 0.7], [2200, 8, 0.3]], rough: 28, depth: 0.75, vib: [4, 5], breath: 0.2, breathF: 400, a: 0.15 }); S.tone('sine', 50, 38, 1.1, 0.4); } },
+  growl_warden: { dur: 0.85, gap: 500, build: (S) => S.growl({ f0: 330, f1: 430, f2: 200, dur: 0.85, vol: 1.1, formants: [[350, 10, 1], [1900, 12, 0.5], [2800, 10, 0.2]], vib: [6, 22], breath: 0.25, breathType: 'highpass', breathF: 2500, a: 0.12 }) },
+  roar_warden: { dur: 1.4, gap: 800, build: (S) => { S.growl({ f0: 420, f1: 520, f2: 180, dur: 1.4, vol: 1.1, formants: [[350, 10, 1], [1900, 12, 0.5], [2800, 10, 0.2]], vib: [5, 30], breath: 0.3, breathType: 'highpass', breathF: 2500, a: 0.15 }); S.growl({ f0: 210, f1: 260, f2: 90, dur: 1.4, vol: 0.9, delay: 0.05, formants: [[350, 10, 1], [1900, 12, 0.5]], vib: [4, 20], a: 0.15 }); } },
+  growl_wyrm: { dur: 0.8, gap: 500, build: (S) => { [[130, 0], [138, 0.02], [122, 0.04]].forEach(([f, d]) => S.growl({ f0: f, f1: f * 1.7, f2: f * 1.1, dur: 0.8 - d, delay: d, vol: 0.9, formants: [[700, 5, 1], [1100, 6, 0.7], [2200, 8, 0.3]], rough: 40, depth: 0.5, vib: [7, 6] })); S.noise(0.7, 0.18, { type: 'highpass', f0: 3000, f1: 5000, a: 0.15 }); } },
+  roar_wyrm: { dur: 1.4, gap: 800, build: (S) => { [[110, 0], [118, 0.03], [102, 0.06]].forEach(([f, d]) => S.growl({ f0: f, f1: f * 2, f2: f * 0.9, dur: 1.4 - d, delay: d, vol: 1.0, formants: [[650, 5, 1], [1050, 6, 0.7], [2100, 8, 0.3]], rough: 36, depth: 0.55, vib: [6, 8], a: 0.15 })); S.noise(1.2, 0.25, { type: 'highpass', f0: 2500, f1: 5500, a: 0.25 }); } },
+  growl_glutton: { dur: 0.8, gap: 500, build: (S) => { S.growl({ f0: 55, f1: 90, f2: 48, dur: 0.8, vol: 1.3, formants: [[300, 5, 1], [700, 5, 0.7]], rough: 11, depth: 0.8, vib: [3, 4] }); [[0.12, 300], [0.28, 420], [0.45, 350], [0.6, 500]].forEach(([d, f]) => S.tone('sine', f, f * 1.6, 0.07, 0.16, { delay: d })); } },
+  roar_glutton: { dur: 1.3, gap: 800, build: (S) => { S.growl({ f0: 50, f1: 100, f2: 42, dur: 1.3, vol: 1.5, formants: [[280, 5, 1], [650, 5, 0.7]], rough: 10, depth: 0.85, vib: [3, 5], a: 0.15 }); [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0].forEach((d, i) => S.tone('sine', 280 + (i % 3) * 90, 500 + (i % 3) * 120, 0.08, 0.15, { delay: d })); } },
+  growl_bramblehide: { dur: 0.45, gap: 500, build: (S) => { S.growl({ f0: 100, f1: 85, f2: 70, dur: 0.45, vol: 1.2, formants: [[450, 6, 1], [1000, 6, 0.6]], rough: 45, depth: 0.6, breath: 0.3, breathType: 'lowpass', breathF: 700, a: 0.03 }); S.noise(0.18, 0.35, { type: 'bandpass', f0: 600, f1: 300, q: 1.5, delay: 0.3 }); } },
+  roar_bramblehide: { dur: 1.0, gap: 800, build: (S) => { S.growl({ f0: 105, f1: 90, f2: 75, dur: 0.45, vol: 1.3, formants: [[450, 6, 1], [1000, 6, 0.6]], rough: 45, depth: 0.6, breath: 0.3, breathType: 'lowpass', breathF: 700, a: 0.03 }); S.growl({ f0: 90, f1: 140, f2: 60, dur: 0.55, vol: 1.5, delay: 0.45, formants: [[450, 6, 1], [900, 6, 0.7]], rough: 38, depth: 0.7, breath: 0.35, breathType: 'lowpass', breathF: 600, a: 0.05 }); } },
+  growl_colossus: { dur: 0.9, gap: 500, build: (S) => { S.growl({ f0: 42, f1: 62, f2: 38, dur: 0.9, vol: 2.0, formants: [[140, 4, 1], [420, 5, 0.7], [1200, 6, 0.3]], rough: 18, depth: 0.75, a: 0.1 }); S.noise(0.8, 0.3, { type: 'lowpass', f0: 500, f1: 200, a: 0.1 }); S.tone('square', 180, 120, 0.12, 0.1, { delay: 0.5, lp: 900 }); } },
+  roar_colossus: { dur: 1.5, gap: 800, build: (S) => { S.growl({ f0: 38, f1: 70, f2: 34, dur: 1.5, vol: 2.2, formants: [[130, 4, 1], [400, 5, 0.7], [1100, 6, 0.3]], rough: 16, depth: 0.8, a: 0.15 }); S.noise(1.3, 0.35, { type: 'lowpass', f0: 600, f1: 150, a: 0.15 }); S.tone('square', 170, 110, 0.15, 0.12, { delay: 0.7, lp: 900 }); S.tone('square', 150, 100, 0.15, 0.1, { delay: 1.0, lp: 900 }); } },
+  growl_griffon: { dur: 0.55, gap: 500, build: (S) => { S.growl({ f0: 1100, f1: 2100, f2: 1500, dur: 0.55, vol: 0.8, formants: [[1500, 8, 1], [3200, 10, 0.5]], vib: [18, 40], a: 0.03 }); S.noise(0.4, 0.12, { type: 'highpass', f0: 4000, f1: 6000 }); } },
+  roar_griffon: { dur: 1.1, gap: 800, build: (S) => { S.growl({ f0: 1000, f1: 2200, f2: 1400, dur: 0.5, vol: 0.9, formants: [[1500, 8, 1], [3200, 10, 0.5]], vib: [16, 45], a: 0.03 }); S.growl({ f0: 1200, f1: 2500, f2: 1000, dur: 0.6, vol: 0.9, delay: 0.5, formants: [[1600, 8, 1], [3400, 10, 0.5]], vib: [18, 50], a: 0.03 }); S.noise(1.0, 0.12, { type: 'highpass', f0: 4000, f1: 6500 }); } },
+
+  // ---------- boss attacks: wind-ups and moves ----------
+  boss_slam: { dur: 0.7, gap: 300, build: (S) => { S.noise(0.5, 0.6, { type: 'lowpass', f0: 2500, f1: 80 }); S.tone('sine', 90, 30, 0.55, 0.6); S.tone('sine', 60, 30, 0.4, 0.35, { delay: 0.08 }); } },
+  boss_swoosh: { dur: 0.5, gap: 250, build: (S) => { S.noise(0.42, 0.5, { type: 'bandpass', f0: 300, f1: 1800, q: 0.8, a: 0.1 }); S.tone('sine', 180, 120, 0.3, 0.1); } },
+  boss_vanish: { dur: 0.7, gap: 250, build: (S) => { S.tone('sine', 700, 120, 0.6, 0.18, { wob: [7, 20] }); S.noise(0.5, 0.15, { type: 'bandpass', f0: 2000, f1: 400, q: 2 }); } },
+  boss_appear: { dur: 0.5, gap: 250, build: (S) => { S.tone('sine', 120, 700, 0.4, 0.18, { wob: [7, 20] }); S.tone('sine', 1400, 1400, 0.3, 0.1, { delay: 0.3 }); } },
+  boss_swim: { dur: 0.5, gap: 250, build: (S) => { S.noise(0.4, 0.4, { type: 'bandpass', f0: 600, f1: 200, q: 1.5, a: 0.05 }); S.tone('sine', 300, 120, 0.3, 0.2); } },
+  boss_splash: { dur: 0.45, gap: 250, build: (S) => { S.noise(0.35, 0.55, { type: 'bandpass', f0: 1200, f1: 3000, q: 0.8, a: 0.02 }); S.tone('sine', 200, 500, 0.15, 0.2); } },
+  boss_bite: { dur: 0.3, gap: 250, build: (S) => { S.tone('square', 220, 90, 0.08, 0.3); S.noise(0.1, 0.5, { type: 'bandpass', f0: 1500, f1: 600, q: 2 }); S.tone('sine', 100, 50, 0.2, 0.5, { delay: 0.04 }); } },
+  boss_inflate: { dur: 0.6, gap: 250, build: (S) => { S.tone('sine', 150, 420, 0.55, 0.22, { wob: [10, 25] }); S.noise(0.5, 0.15, { type: 'bandpass', f0: 300, f1: 900, q: 1, a: 0.2 }); } },
+  boss_deflate: { dur: 0.4, gap: 250, build: (S) => { S.tone('sine', 420, 140, 0.35, 0.2, { wob: [10, 25] }); S.noise(0.3, 0.2, { type: 'bandpass', f0: 900, f1: 300, q: 1 }); } },
+  boss_charge: { dur: 0.7, gap: 250, build: (S) => { for (let i = 0; i < 5; i++) { S.noise(0.1, 0.5, { type: 'lowpass', f0: 400, f1: 150, delay: i * 0.1 }); S.tone('sine', 70, 45, 0.1, 0.5, { delay: i * 0.1 }); } } },
+
+  // ---------- boss projectiles (one per kind) ----------
+  shot_candy: { dur: 0.2, gap: 150, build: (S) => { S.tone('sine', 300, 900, 0.17, 0.3); S.noise(0.08, 0.2, { type: 'bandpass', f0: 1500, f1: 3000, q: 2 }); } },
+  shot_fang: { dur: 0.16, gap: 150, build: (S) => { S.noise(0.1, 0.25, { type: 'highpass', f0: 3000, f1: 6000 }); S.tone('square', 1200, 600, 0.1, 0.1); } },
+  shot_ember: { dur: 0.4, gap: 150, build: (S) => { S.noise(0.32, 0.4, { type: 'bandpass', f0: 400, f1: 1600, q: 0.8, a: 0.04 }); S.tone('sawtooth', 200, 120, 0.2, 0.08, { lp: 800 }); } },
+  shot_bubble: { dur: 0.2, gap: 150, build: (S) => { S.tone('sine', 250, 700, 0.12, 0.28); S.tone('sine', 400, 900, 0.08, 0.15, { delay: 0.05 }); } },
+  shot_pod: { dur: 0.22, gap: 150, build: (S) => { S.tone('sine', 200, 450, 0.2, 0.25); S.noise(0.1, 0.2, { type: 'bandpass', f0: 800, f1: 400, q: 2 }); } },
+  shot_bolt: { dur: 0.2, gap: 150, build: (S) => { S.tone('sawtooth', 1800, 300, 0.15, 0.2, { lp: 4000 }); S.noise(0.1, 0.15, { type: 'highpass', f0: 4000, f1: 6000 }); } },
+  shot_plume: { dur: 0.2, gap: 150, build: (S) => { S.noise(0.15, 0.18, { type: 'highpass', f0: 3000, f1: 5000, a: 0.02 }); S.tone('sine', 1400, 1000, 0.1, 0.08); } },
+  shot_feather: { dur: 0.2, gap: 150, build: (S) => { S.noise(0.16, 0.14, { type: 'highpass', f0: 3500, f1: 6000, a: 0.03 }); S.tone('sine', 1700, 1300, 0.1, 0.06); } },
+  shot_void: { dur: 0.4, gap: 150, build: (S) => { S.tone('sine', 150, 100, 0.34, 0.3, { wob: [8, 14] }); S.noise(0.3, 0.2, { type: 'lowpass', f0: 600, f1: 200 }); } },
+  shot_boulder: { dur: 0.35, gap: 150, build: (S) => { S.noise(0.26, 0.4, { type: 'lowpass', f0: 600, f1: 200 }); S.tone('sine', 100, 60, 0.25, 0.4); } },
+
+  // ---------- floor hazards ----------
+  hz_warn: { dur: 0.12, gap: 700, build: (S) => { S.tone('sine', 880, 880, 0.09, 0.14); } },
+  hz_shockwave: { dur: 0.6, gap: 200, build: (S) => { S.noise(0.5, 0.4, { type: 'lowpass', f0: 250, f1: 120, a: 0.05 }); S.tone('sine', 60, 50, 0.5, 0.4); } },
+  hz_thorn_erupt: { dur: 0.3, gap: 200, build: (S) => { S.noise(0.15, 0.5, { type: 'highpass', f0: 2500, f1: 5000 }); S.tone('sawtooth', 200, 420, 0.1, 0.18, { lp: 1500 }); S.noise(0.2, 0.3, { type: 'lowpass', f0: 500, f1: 200, delay: 0.03 }); } },
+  hz_pillar: { dur: 0.5, gap: 200, build: (S) => { S.noise(0.42, 0.6, { type: 'bandpass', f0: 300, f1: 2000, q: 0.7, a: 0.03 }); S.tone('sine', 100, 70, 0.3, 0.3); } },
+  hz_quake: { dur: 0.7, gap: 200, build: (S) => { S.noise(0.6, 0.7, { type: 'lowpass', f0: 500, f1: 80 }); S.tone('sine', 50, 40, 0.6, 0.6); } },
+  hz_tremor: { dur: 0.35, gap: 200, build: (S) => { S.noise(0.25, 0.5, { type: 'bandpass', f0: 150, f1: 500, q: 1 }); S.tone('sine', 80, 50, 0.25, 0.5); } },
+  hz_feather_strike: { dur: 0.35, gap: 200, build: (S) => { S.noise(0.28, 0.4, { type: 'highpass', f0: 2000, f1: 5200, a: 0.02 }); S.tone('sine', 1500, 600, 0.2, 0.1); } },
+  hz_chain: { dur: 0.4, gap: 200, build: (S) => { S.noise(0.06, 0.5, { type: 'highpass', f0: 2500, f1: 4000 }); S.tone('triangle', 800, 800, 0.3, 0.2); S.tone('triangle', 1230, 1230, 0.25, 0.14); S.tone('sine', 90, 50, 0.2, 0.4); } },
+  hz_orb_charge: { dur: 0.7, gap: 200, build: (S) => { S.tone('sine', 200, 900, 0.65, 0.2, { a: 0.15, wob: [6, 18] }); S.tone('sine', 400, 1300, 0.6, 0.08, { a: 0.2 }); } },
+  hz_orb_burst: { dur: 0.45, gap: 200, build: (S) => { S.noise(0.2, 0.4, { type: 'bandpass', f0: 1200, f1: 300, q: 1 }); [880, 1180, 1500].forEach((f, i) => S.tone('sine', f, f * 0.7, 0.2, 0.12, { delay: i * 0.04 })); } },
+  hz_imp: { dur: 0.2, gap: 200, build: (S) => { S.tone('square', 600, 1100, 0.14, 0.12, { lp: 2500 }); } },
+
+  // ---------- interface, shop and practice ----------
+  ui_click: { dur: 0.06, gap: 40, build: (S) => { S.tone('sine', 700, 480, 0.045, 0.14); } },
+  ui_equip: { dur: 0.22, gap: 60, build: (S) => { S.tone('sine', 520, 520, 0.09, 0.2); S.tone('sine', 780, 780, 0.12, 0.2, { delay: 0.08 }); } },
+  ui_error: { dur: 0.2, gap: 100, build: (S) => { S.tone('square', 200, 150, 0.16, 0.13, { lp: 900 }); } },
+  ui_buy: { dur: 0.4, gap: 80, build: (S) => { S.tone('sine', 1318, 1318, 0.14, 0.2); S.tone('sine', 1760, 1760, 0.3, 0.22, { delay: 0.09 }); S.noise(0.03, 0.12, { type: 'highpass', f0: 5000, f1: 7000 }); } },
+  coins: { dur: 0.6, gap: 200, build: (S) => { [1047, 1319, 1568, 2093].forEach((f, i) => S.tone('sine', f, f, 0.2, 0.18, { delay: i * 0.08 })); } },
+  crate_shake: { dur: 0.45, gap: 200, build: (S) => { for (let i = 0; i < 4; i++) { S.noise(0.07, 0.35, { type: 'lowpass', f0: 500, f1: 200, delay: i * 0.1 }); S.tone('sine', 90, 70, 0.07, 0.3, { delay: i * 0.1 }); } } },
+  crate_open: { dur: 0.5, gap: 200, build: (S) => { S.tone('sine', 150, 90, 0.12, 0.4); S.noise(0.35, 0.4, { type: 'bandpass', f0: 600, f1: 4000, q: 0.8, a: 0.02 }); S.tone('sine', 1200, 2400, 0.25, 0.1, { delay: 0.1 }); } },
+  reveal_common: { dur: 0.3, gap: 200, build: (S) => { S.tone('sine', 660, 660, 0.25, 0.2); } },
+  reveal_uncommon: { dur: 0.45, gap: 200, build: (S) => { [660, 880].forEach((f, i) => S.tone('sine', f, f, 0.28, 0.2, { delay: i * 0.1 })); } },
+  reveal_rare: { dur: 0.6, gap: 200, build: (S) => { [660, 880, 1100].forEach((f, i) => S.tone('sine', f, f, 0.32, 0.2, { delay: i * 0.1 })); S.tone('triangle', 330, 330, 0.5, 0.08); } },
+  reveal_epic: { dur: 0.85, gap: 200, build: (S) => { [523, 659, 784, 1047].forEach((f, i) => S.tone('triangle', f, f, 0.4, 0.2, { delay: i * 0.1 })); S.tone('sine', 2093, 2093, 0.4, 0.1, { delay: 0.4 }); S.noise(0.3, 0.1, { type: 'highpass', f0: 6000, f1: 8000, delay: 0.4 }); } },
+  reveal_legendary: { dur: 1.2, gap: 200, build: (S) => { [523, 659, 784, 1047, 1319].forEach((f, i) => S.tone('triangle', f, f, 0.55, 0.2, { delay: i * 0.1 })); [523, 659, 784, 1047].forEach((f) => S.tone('sine', f * 2, f * 2, 0.7, 0.07, { delay: 0.6 })); S.noise(0.5, 0.14, { type: 'highpass', f0: 6000, f1: 9000, delay: 0.5 }); } },
+  dup_coins: { dur: 0.4, gap: 200, build: (S) => { [1319, 1568].forEach((f, i) => S.tone('sine', f, f, 0.15, 0.16, { delay: i * 0.08 })); } },
+  answer_correct: { dur: 0.3, gap: 100, build: (S) => { S.tone('sine', 784, 784, 0.1, 0.22); S.tone('sine', 1047, 1047, 0.22, 0.22, { delay: 0.09 }); } },
+  answer_wrong: { dur: 0.3, gap: 100, build: (S) => { S.tone('sawtooth', 220, 150, 0.25, 0.16, { lp: 800 }); } }
+};
+
+// Which sound a boss animation state makes when it begins. null = silent on purpose (a recovery, a
+// stun - the stun has its own sound - or a state that only moves the boss). Every state a boss can
+// enter must be listed here (a test checks), so a new move cannot ship without a sound decision.
+const MQ_BOSS_SFX = {
+  grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', spit: 'boss_inflate', summon: 'roar_grinmaw', dazed: null, settle: null },
+  warden: { raise: 'growl_warden', cast: 'growl_warden', fade: 'boss_vanish', ghost: null, materialize: 'boss_appear', strike: 'boss_slam', return: null, dazed: null, settle: null },
+  wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, settle: null },
+  glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', inflate: 'growl_glutton', deflate: 'boss_deflate', retreat: null, dazed: null, settle: null },
+  bramblehide: { rootWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', tossWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
+  colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', chargeGlow: 'growl_colossus', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },
+  griffon: { volleyWindup: 'growl_griffon', stormWindup: 'growl_griffon', rainWindup: 'growl_griffon', swoop: 'boss_swoosh', track: null, plunge: 'boss_swoosh', thud: 'boss_slam', soar: null, strafeAim: 'growl_griffon', strafe: 'boss_swoosh', strafeReturn: null, settle: null }
+};
+// Boss projectile kind -> its launch sound.
+const MQ_SHOT_SFX = { candy: 'shot_candy', fang: 'shot_fang', ember: 'shot_ember', bubble: 'shot_bubble', pod: 'shot_pod', bolt: 'shot_bolt', plume: 'shot_plume', feather: 'shot_feather', void: 'shot_void', boulder: 'shot_boulder' };
+// Sword id -> its swing sound.
+const MQ_SWING_SFX = { sword_training: 'swing_training', sword_moss: 'swing_moss', sword_frost: 'swing_frost', sword_void: 'swing_void', sword_dawn: 'swing_dawn' };
+
+// How loud each sound is relative to the others: the chatty ones (shots, markers, footsteps) are turned
+// down, the ones you want to hear (hits, roars) are not.
+function MQ_SFX_LEVEL(name) {
+  if (name.startsWith('shot_')) return 0.6;
+  if (name === 'hz_warn') return 0.5;
+  if (name.startsWith('hz_')) return 0.75;
+  if (name === 'jump' || name === 'land') return 0.6;
+  if (name === 'dash') return 0.7;
+  if (name.startsWith('shield_')) return 0.7;
+  if (name === 'ui_click') return 0.6;
+  if (name.startsWith('swing_')) return 0.85;
+  if (name.startsWith('growl_')) return 0.9;
+  if (name.startsWith('boss_') && name !== 'boss_defeated' && name !== 'boss_stunned') return 0.8;
+  return 1;
+}
+// 3 = always plays (hits, damage, roars, victory, interface); 2 = ordinary boss moves; 1 = background
+// (shots, markers, footsteps), which give way when it is busy so a hectic fight stays readable.
+function MQ_SFX_PRIORITY(name) {
+  if (/^(swing_|hit_|parry|pogo|hurt|phase_change|roar_|boss_defeated|boss_stunned|victory|game_over|countdown_|ui_|coins|crate_|reveal_|dup_|answer_)/.test(name)) return 3;
+  if (name.startsWith('shot_') || name === 'hz_warn' || name === 'hz_imp' || name === 'jump' || name === 'land' || name === 'dash' || name.startsWith('shield_')) return 1;
+  return 2;
+}
+
+const MQ_SFX = (function () {
+  const KEY = 'mathquest_sound_v1';
+  const noiseBuffers = new WeakMap();
+  const st = {
+    muted: false, volume: 0.4, ctx: null, master: null, voices: 0, last: {}, recent: [],
+    recording: false, log: [], lastOpts: null, defs: MQ_SFX_DEFS
+  };
+
+  function load() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (raw && typeof raw === 'object') {
+        if (typeof raw.muted === 'boolean') st.muted = raw.muted;
+        if (typeof raw.volume === 'number' && isFinite(raw.volume)) st.volume = Math.max(0, Math.min(1, raw.volume));
+      }
+    } catch (e) { /* storage unavailable or corrupt: defaults */ }
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify({ muted: st.muted, volume: st.volume })); } catch (e) { /* ignore */ } }
+
+  function noiseBuffer(ctx) {
+    let b = noiseBuffers.get(ctx);
+    if (!b) {
+      b = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = b.getChannelData(0);
+      let seed = 12345;
+      for (let i = 0; i < d.length; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; d[i] = (seed / 4294967296) * 2 - 1; }
+      noiseBuffers.set(ctx, b);
+    }
+    return b;
+  }
+
+  // The note builder for one play: S.tone / S.noise schedule nodes into `dest` starting at t0.
+  function builder(ctx, dest, t0, pitch) {
+    const env = (g, t, a, dur, vol) => {
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + Math.min(a, dur * 0.5));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    };
+    return {
+      tone(type, f0, f1, dur, vol, o) {
+        o = o || {};
+        const t = t0 + (o.delay || 0);
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(f0 * pitch, t);
+        if (f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1 * pitch), t + dur);
+        if (o.detune) osc.detune.value = o.detune;
+        env(g, t, o.a || 0.005, dur, vol);
+        let tail = osc;
+        if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; osc.connect(f); tail = f; }
+        tail.connect(g); g.connect(dest);
+        if (o.wob) { // vibrato: a slow oscillator wobbling the pitch
+          const lfo = ctx.createOscillator(), lg = ctx.createGain();
+          lfo.frequency.value = o.wob[0]; lg.gain.value = o.wob[1];
+          lfo.connect(lg); lg.connect(osc.frequency);
+          lfo.start(t); lfo.stop(t + dur + 0.05);
+        }
+        osc.start(t); osc.stop(t + dur + 0.05);
+      },
+      // A voice: a buzzy pulse (the throat) with a pitch that rises and falls, vibrato, a roughness that
+      // chops the loudness (the growl), shaped by resonant filters (the mouth: formants) plus breath.
+      // o: f0 -> f1 -> f2 Hz, dur, vol, formants [[Hz, Q, gain]...], rough Hz + depth 0..1, vib [Hz, depth Hz], breath
+      growl(o) {
+        const t = t0 + (o.delay || 0), dur = o.dur;
+        const osc = ctx.createOscillator();
+        osc.type = o.wave || 'sawtooth';
+        osc.frequency.setValueAtTime(o.f0 * pitch, t);
+        osc.frequency.linearRampToValueAtTime(o.f1 * pitch, t + dur * 0.35);
+        osc.frequency.linearRampToValueAtTime(o.f2 * pitch, t + dur);
+        if (o.vib) {
+          const lfo = ctx.createOscillator(), lg = ctx.createGain();
+          lfo.frequency.value = o.vib[0]; lg.gain.value = o.vib[1] * pitch;
+          lfo.connect(lg); lg.connect(osc.frequency); lfo.start(t); lfo.stop(t + dur + 0.05);
+        }
+        const am = ctx.createGain();
+        const depth = o.depth || 0;
+        am.gain.value = 1 - depth / 2;
+        if (o.rough && depth) {
+          const l = ctx.createOscillator(), lg = ctx.createGain();
+          l.frequency.value = o.rough; lg.gain.value = depth / 2;
+          l.connect(lg); lg.connect(am.gain); l.start(t); l.stop(t + dur + 0.05);
+        }
+        osc.connect(am);
+        const bank = ctx.createGain();
+        (o.formants || [[800, 5, 1]]).forEach(f => {
+          const bp = ctx.createBiquadFilter(), g = ctx.createGain();
+          bp.type = 'bandpass'; bp.frequency.value = f[0]; bp.Q.value = f[1]; g.gain.value = f[2];
+          am.connect(bp); bp.connect(g); g.connect(bank);
+        });
+        const env = ctx.createGain(), a = o.a || 0.08, vol = Math.max(0.0002, o.vol);
+        env.gain.setValueAtTime(0.0001, t);
+        env.gain.exponentialRampToValueAtTime(vol, t + Math.min(a, dur * 0.5));
+        env.gain.setValueAtTime(vol, t + dur * 0.6);
+        env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        bank.connect(env); env.connect(dest);
+        osc.start(t); osc.stop(t + dur + 0.05);
+        if (o.breath) this.noise(dur, o.breath, { type: o.breathType || 'bandpass', f0: o.breathF || 800, f1: o.breathF || 800, q: 1, a: 0.1, delay: o.delay || 0 });
+      },
+      noise(dur, vol, o) {
+        o = o || {};
+        const t = t0 + (o.delay || 0);
+        const src = ctx.createBufferSource(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+        src.buffer = noiseBuffer(ctx); src.loop = true;
+        f.type = o.type || 'lowpass';
+        f.frequency.setValueAtTime(Math.max(20, (o.f0 || 1000) * pitch), t);
+        if (o.f1 && o.f1 !== o.f0) f.frequency.exponentialRampToValueAtTime(Math.max(20, o.f1 * pitch), t + dur);
+        f.Q.value = o.q || 0.7;
+        env(g, t, o.a || 0.004, dur, vol);
+        src.connect(f); f.connect(g); g.connect(dest);
+        src.start(t, (t * 7.31) % 0.8); src.stop(t + dur + 0.05);
+      }
+    };
+  }
+
+  const api = Object.assign(st, {
+    names() { return Object.keys(MQ_SFX_DEFS); },
+    load, save,
+    setMuted(m) { st.muted = !!m; save(); api.syncButton && api.syncButton(); },
+    setVolume(v) {
+      v = Number(v); if (!isFinite(v)) return;
+      st.volume = Math.max(0, Math.min(1, v));
+      if (st.master) st.master.gain.value = st.volume;
+      save(); api.syncButton && api.syncButton();
+    },
+    // Browsers only start audio after a click or key press: create the audio context on the first one.
+    unlock() {
+      if (!st.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        try {
+          st.ctx = new AC();
+          st.master = st.ctx.createGain(); st.master.gain.value = st.volume;
+          const comp = st.ctx.createDynamicsCompressor(); // keeps a busy fight from clipping
+          st.master.connect(comp); comp.connect(st.ctx.destination);
+        } catch (e) { st.ctx = null; return null; }
+      }
+      if (st.ctx.state === 'suspended') st.ctx.resume();
+      return st.ctx;
+    },
+    // Play a sound. opts: { pitch (1 = as designed), pan (-1..1), vol (0..1 extra) }. Returns whether it started.
+    play(name, opts) {
+      const d = MQ_SFX_DEFS[name];
+      if (!d) return false;
+      opts = opts || {};
+      if (st.recording) { st.log.push(name); st.lastOpts = opts; }
+      if (st.muted || st.volume <= 0) return false;
+      const now = performance.now();
+      if (now - (st.last[name] || -1e9) < d.gap) return false;
+      if (!st.ctx || st.ctx.state === 'closed') return false; // no click yet: browsers keep audio locked
+      // when it is busy, background sounds give way (SND-06): thin them out, never the important ones
+      const pri = MQ_SFX_PRIORITY(name);
+      st.recent = st.recent.filter(ts => now - ts < 300);
+      if (pri === 1 && st.recent.length >= 2) return false;
+      if (pri === 2 && st.recent.length >= 4) return false;
+      if (st.voices >= (pri === 3 ? 14 : 10)) return false;
+      st.last[name] = now;
+      st.recent.push(now);
+      const c = st.ctx;
+      let dest = st.master;
+      if (opts.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, opts.pan)); p.connect(dest); dest = p; }
+      const vol = (opts.vol === undefined ? 1 : opts.vol) * MQ_SFX_LEVEL(name);
+      if (vol < 0.999) { const g = c.createGain(); g.gain.value = Math.max(0, vol); g.connect(dest); dest = g; }
+      st.voices++;
+      d.build(builder(c, dest, c.currentTime + 0.005, opts.pitch || 1));
+      setTimeout(() => { st.voices--; }, (d.dur + 0.1) * 1000);
+      return true;
+    },
+    // Render a sound offline to samples (for the tests): { data: Float32Array, rate }.
+    async render(name, opts) {
+      const d = MQ_SFX_DEFS[name];
+      const rate = 22050, len = Math.ceil((d.dur + 0.3) * rate);
+      const oc = new OfflineAudioContext(1, len, rate);
+      const master = oc.createGain(); master.gain.value = 1; master.connect(oc.destination);
+      d.build(builder(oc, master, 0, (opts && opts.pitch) || 1));
+      const buf = await oc.startRendering();
+      return { data: buf.getChannelData(0), rate: rate };
+    }
+  });
+  load();
+  return api;
+})();
+
+// The one call the game makes: a safe no-op if anything about audio is unavailable.
+function sfx(name, opts) {
+  try { return MQ_SFX.play(name, opts); } catch (e) { return false; }
+}
+// Pan a sound by where it happens on the 1000 px-wide arena (a little, so it never hard-pans).
+function sfxPan(x) { return Math.max(-0.6, Math.min(0.6, (x / 1000 - 0.5) * 1.2)); }
+
+// ---- the floating sound button: mute, and a volume slider ----
+(function () {
+  const css = document.createElement('style');
+  css.textContent = '#mqSoundWrap{position:fixed;left:12px;bottom:12px;z-index:9000;font-family:Arial,sans-serif}' +
+    '#mqSoundBtn{width:38px;height:38px;border-radius:50%;border:none;background:rgba(30,30,60,0.85);color:#fff;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4)}' +
+    '#mqSoundBtn:hover{background:rgba(60,60,110,0.95)}' +
+    '#mqSoundPanel{display:none;position:absolute;left:44px;bottom:0;background:rgba(30,30,60,0.95);color:#fff;padding:10px 12px;border-radius:12px;font-size:13px;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.5)}' +
+    '#mqSoundWrap.open #mqSoundPanel{display:block}#mqSoundPanel input[type=range]{vertical-align:middle;width:110px}' +
+    '#mqSoundPanel label{display:block;margin-top:6px;cursor:pointer}';
+  document.head.appendChild(css);
+  const wrap = document.createElement('div');
+  wrap.id = 'mqSoundWrap';
+  wrap.innerHTML = '<button id="mqSoundBtn" title="Sound" aria-label="Sound settings">🔊</button>' +
+    '<div id="mqSoundPanel">Volume <input id="mqSoundVol" type="range" min="0" max="100" step="5">' +
+    '<label><input id="mqSoundMute" type="checkbox"> Mute</label></div>';
+  document.body.appendChild(wrap);
+  const btn = wrap.querySelector('#mqSoundBtn'), vol = wrap.querySelector('#mqSoundVol'), mute = wrap.querySelector('#mqSoundMute');
+  MQ_SFX.syncButton = () => {
+    btn.textContent = MQ_SFX.muted || MQ_SFX.volume <= 0 ? '🔇' : '🔊';
+    vol.value = Math.round(MQ_SFX.volume * 100);
+    mute.checked = MQ_SFX.muted;
+  };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); wrap.classList.toggle('open'); });
+  vol.addEventListener('input', () => MQ_SFX.setVolume(vol.value / 100));
+  mute.addEventListener('change', () => MQ_SFX.setMuted(mute.checked));
+  document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) wrap.classList.remove('open'); });
+  MQ_SFX.syncButton();
+})();
+
+// Audio unlocks on the first click or key press; every button click gets a soft tick.
+['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => MQ_SFX.unlock(), { capture: true }));
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('button');
+  if (b && !b.disabled && b.id !== 'mqSoundBtn') sfx('ui_click');
+}, true);
 </script>
 
 </body>
