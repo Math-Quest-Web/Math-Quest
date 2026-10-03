@@ -4156,6 +4156,8 @@ function raidHitBoss(b, proj) {
   b.hitFlash = 10;
   raidTriggerHitStop(bigHit ? 8 : 5);
   raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 15, phase: 'impact', timer: 0 });
+  // WPN-09: a sword hit also gets a directional slash-impact (bullets carry no dir, so they don't).
+  if (proj.dir) raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'slashHit', timer: 0, dir: proj.dir });
   raidSendBossState();
 }
 
@@ -5700,7 +5702,7 @@ function raidCheckSwordSwings(b) {
     const box = raidSwordHitbox(p);
     if (Math.abs(box.cx - b.x) < bhb.hw + box.hw && Math.abs(box.cy - b.y) < bhb.hh + box.hh) {
       st.hasHit = true;
-      raidHitBoss(b, { x: box.cx, y: box.cy, damage: RAID_SWORD_DAMAGE });
+      raidHitBoss(b, { x: box.cx, y: box.cy, damage: RAID_SWORD_DAMAGE, dir: p.swingDir || 'side' });
     }
   });
 }
@@ -6017,6 +6019,38 @@ function raidSwingBodyLean(dir, swing, facing) {
   else if (dir === 'side') hx = facing; // unchanged feel: leans into whichever way you're facing
   else hx = 0; // 'up'/'down': no horizontal lean
   return hx * 0.16 * e;
+}
+
+// RAI-22 attack pose, driven by the same synced swing progress (0..1) every client already gets:
+// anticipation (0-25%) crouches and pulls back away from the swing, the strike (25-55%) lunges
+// and stretches along it, recovery (55-100%) settles back to neutral. Absolute direction, like the
+// swing itself; 'side' follows facing. Original placeholder motion, not copied from any game.
+function raidAttackPose(dir, swing, facing) {
+  const idle = { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1 };
+  if (!(swing > 0)) return idle;
+  const v = RAID_SWORD_DIR_VECTORS[dir] || [facing, 0];
+  let lunge, crouch;
+  if (swing < 0.25) { const t = swing / 0.25; lunge = -0.4 * t; crouch = t; }
+  else if (swing < 0.55) { const t = (swing - 0.25) / 0.3; lunge = -0.4 + 1.4 * t; crouch = 1 - t; }
+  else { const t = (swing - 0.55) / 0.45; lunge = 1 - t; crouch = 0; }
+  const stretch = Math.max(0, lunge);
+  return {
+    dx: v[0] * lunge * 8,
+    dy: Math.min(0, v[1] * lunge * 6), // upward lunges lift; downward ones never sink into the floor
+    rot: 0,
+    sx: 1 + crouch * 0.06 + stretch * 0.1 * Math.abs(v[0]) - stretch * 0.05 * Math.abs(v[1]),
+    sy: 1 - crouch * 0.08 + stretch * 0.1 * Math.abs(v[1]) - stretch * 0.04 * Math.abs(v[0])
+  };
+}
+
+// RAI-23 hurt pose, derived from the already-synced `invincible` counter so teammates see it too:
+// hits set it to 30, so the first 8 frames (30..22) flinch - tilt and shove back away from the
+// facing, squashed - easing out as it counts down. Dash i-frames top out at 21, so they never
+// read as a flinch.
+function raidHurtPose(invincible, facing) {
+  if (!(invincible >= 22)) return { dx: 0, rot: 0, sx: 1, sy: 1 };
+  const t = (invincible - 22) / 8;
+  return { dx: -facing * 6 * t, rot: -facing * 0.35 * t, sx: 1 + 0.12 * t, sy: 1 - 0.14 * t };
 }
 
 function raidSubmitEventAnswer() {
@@ -7059,7 +7093,8 @@ function raidTriggerHitStop(frames) {
   raidHitStopTimer = Math.max(raidHitStopTimer, frames);
 }
 
-const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [] };
+const raidFx = { lastBossHp: null, lastHealth: null, lastTransition: 0, shake: 0, hurtFlash: 0, floaters: [], bursts: [] };
+const RAID_BURST_FRAMES = 12; // RAI-23: how long the local player's hit burst lasts
 
 function raidFxTick() {
   const b = raidG.boss;
@@ -7078,6 +7113,8 @@ function raidFxTick() {
     raidFx.shake = Math.max(raidFx.shake, 11);
     raidFx.hurtFlash = 14;
     raidFx.lastHealth = raidLocal.health;
+    // RAI-23: a white shockwave ring and shards at the player's centre - local-only, like the flash
+    raidFx.bursts.push({ x: raidLocal.x + raidLocal.w / 2, y: raidLocal.y + raidLocal.h / 2, life: RAID_BURST_FRAMES });
   }
   if (b.transition > 0 && raidFx.lastTransition === 0) raidFx.shake = Math.max(raidFx.shake, 22);
   raidFx.lastTransition = b.transition || 0;
@@ -7087,6 +7124,8 @@ function raidFxTick() {
   if (raidFx.hurtFlash > 0) raidFx.hurtFlash--;
   raidFx.floaters.forEach(f => { f.y -= 0.9; f.life--; });
   raidFx.floaters = raidFx.floaters.filter(f => f.life > 0);
+  raidFx.bursts.forEach(bu => { bu.life--; });
+  raidFx.bursts = raidFx.bursts.filter(bu => bu.life > 0);
 }
 
 function raidDraw() {
@@ -7209,6 +7248,30 @@ function raidDraw() {
         raidCtx.arc(x, y, 3 + (1 - anim.life / 20) * 5, 0, Math.PI * 2);
         raidCtx.fill();
       }
+    } else if (anim.phase === 'slashHit') {
+      // WPN-09: white streaks fanning out along the direction of the blow (all around for the
+      // default side swing), a bright core flash, and a short crescent edge - original placeholder.
+      const prog = 1 - anim.life / 10;
+      const v = RAID_SWORD_DIR_VECTORS[anim.dir];
+      const fan = v ? 1.1 : Math.PI;
+      const base = v ? Math.atan2(v[1], v[0]) : 0;
+      raidCtx.save();
+      raidCtx.lineCap = 'round';
+      raidCtx.strokeStyle = `rgba(255,255,255,${0.95 * (1 - prog)})`;
+      for (let i = 0; i < 7; i++) {
+        const ang = base + ((i / 6) * 2 - 1) * fan;
+        const r0 = 8 + prog * 14, r1 = 20 + prog * 44 + (i % 2) * 10;
+        raidCtx.lineWidth = 4 - prog * 3;
+        raidCtx.beginPath();
+        raidCtx.moveTo(anim.x + Math.cos(ang) * r0, anim.y + Math.sin(ang) * r0);
+        raidCtx.lineTo(anim.x + Math.cos(ang) * r1, anim.y + Math.sin(ang) * r1);
+        raidCtx.stroke();
+      }
+      raidCtx.fillStyle = `rgba(255,255,255,${0.9 * (1 - prog)})`;
+      raidCtx.beginPath();
+      raidCtx.arc(anim.x, anim.y, 14 * (1 - prog) + 3, 0, Math.PI * 2);
+      raidCtx.fill();
+      raidCtx.restore();
     } else if (anim.phase === 'blocked') {
       raidCtx.strokeStyle = `rgba(220,220,220,${anim.life / 10})`;
       raidCtx.lineWidth = 2;
@@ -7573,6 +7636,24 @@ function raidDraw() {
                swingDir: lp.swingDir || 'side',
                squashKind: lp.squashKind, squashTimer: lp.squashTimer });
 
+  raidFx.bursts.forEach(bu => {
+    const prog = 1 - bu.life / RAID_BURST_FRAMES;
+    raidCtx.save();
+    raidCtx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - prog)})`;
+    raidCtx.lineWidth = 4 - prog * 3;
+    raidCtx.beginPath();
+    raidCtx.arc(bu.x, bu.y, 14 + prog * 46, 0, Math.PI * 2);
+    raidCtx.stroke();
+    raidCtx.lineCap = 'round';
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2 + 0.4;
+      raidCtx.beginPath();
+      raidCtx.moveTo(bu.x + Math.cos(ang) * (18 + prog * 30), bu.y + Math.sin(ang) * (18 + prog * 30));
+      raidCtx.lineTo(bu.x + Math.cos(ang) * (30 + prog * 50), bu.y + Math.sin(ang) * (30 + prog * 50));
+      raidCtx.stroke();
+    }
+    raidCtx.restore();
+  });
   raidFx.floaters.forEach(f => {
     raidCtx.globalAlpha = Math.min(1, f.life / (f.max * 0.5));
     raidCtx.font = f.big ? 'bold 34px sans-serif' : 'bold 22px sans-serif';
@@ -9465,8 +9546,11 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
   const mvGrounded = look.onGround !== false;
   const mvMoving = Math.abs(mvx) > 0.5;
   const bob = mvGrounded ? Math.sin(t * (mvMoving ? 0.35 : 0.08)) * (mvMoving ? 3 : 1.6) : 0;
+  // RAI-22/RAI-23: attack and hurt poses layer on top of the movement pose.
+  const atk = raidAttackPose(look.swingDir, look.swing, facing);
+  const hurt = raidHurtPose(invincible, facing);
   const lean = (mvGrounded ? Math.max(-0.12, Math.min(0.12, mvx * 0.02)) : raidAirLean(look.vy))
-    + raidSwingBodyLean(look.swingDir, look.swing, facing);
+    + raidSwingBodyLean(look.swingDir, look.swing, facing) + hurt.rot;
   if (!look.noShadow) {
     // Drawn before the scale-down/bob transform below, so the shadow stays a constant-size
     // ground shadow instead of shrinking and bobbing along with the body above it.
@@ -9486,9 +9570,9 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
   // RAI-21: a landing thump squashes wide/flat, a jump launch stretches tall/thin, both decaying
   // back to 1:1 over RAID_SQUASH_FRAMES - layered on top of the fixed WPN-20 scale-down.
   const squash = raidSquashScale(look.squashKind, look.squashTimer);
-  ctx.scale(MQ_PLAYER_SCALE * squash.sx, MQ_PLAYER_SCALE * squash.sy);
+  ctx.scale(MQ_PLAYER_SCALE * squash.sx * atk.sx * hurt.sx, MQ_PLAYER_SCALE * squash.sy * atk.sy * hurt.sy);
   ctx.translate(-cx, -(baseY + h));
-  ctx.translate(0, bob);
+  ctx.translate(atk.dx + hurt.dx, bob + atk.dy);
 
   if (sk.back) { ctx.save(); sk.back(ctx, c); ctx.restore(); }
 

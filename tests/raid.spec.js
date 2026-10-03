@@ -622,6 +622,83 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.matchesLiveVx).toBe(true);
     expect(r.matchesLiveOnGround).toBe(true);
   });
+
+  test('RAI-22 a sword swing has an attack pose: anticipation pulls back, the strike lunges toward the swing, recovery settles', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const idle = raidAttackPose('right', 0, 1);
+      const windup = raidAttackPose('right', 0.1, 1);
+      const strike = raidAttackPose('right', 0.4, 1);
+      const recovered = raidAttackPose('right', 0.999, 1);
+      const leftStrike = raidAttackPose('left', 0.4, 1);
+      const upStrike = raidAttackPose('up', 0.55, 1); // peak of the lunge
+      const sideFacingLeft = raidAttackPose('side', 0.4, -1);
+      const hash = (swing) => {
+        const c = document.createElement('canvas'); c.width = 80; c.height = 120;
+        const ctx = c.getContext('2d');
+        drawPlayerCuphead(ctx, 20, 30, 36, 48, 1, 5, 5, false, 0, true, { noBar: true, noShadow: true, noGun: true, t: 0, swing, swingDir: 'right' });
+        const d = ctx.getImageData(0, 0, 80, 120).data;
+        let h = 7; for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) % 1000000007;
+        return h;
+      };
+      return {
+        idle, windupDx: windup.dx, windupSy: windup.sy, strikeDx: strike.dx, recoveredDx: recovered.dx,
+        leftStrikeDx: leftStrike.dx, upStrikeDy: upStrike.dy, upStrikeSy: upStrike.sy, sideFacingLeftDx: sideFacingLeft.dx,
+        posesDiffer: hash(0.1) !== hash(0.4) && hash(0.4) !== hash(0.8)
+      };
+    });
+    expect(r.idle).toEqual({ dx: 0, dy: 0, rot: 0, sx: 1, sy: 1 });
+    expect(r.windupDx, 'anticipation pulls back away from the swing').toBeLessThan(0);
+    expect(r.windupSy, 'anticipation crouches').toBeLessThan(1);
+    expect(r.strikeDx, 'the strike lunges toward the swing').toBeGreaterThan(0);
+    expect(Math.abs(r.recoveredDx), 'recovery settles back to neutral').toBeLessThan(0.5);
+    expect(r.leftStrikeDx, 'absolute direction: a left swing lunges left').toBeLessThan(0);
+    expect(r.upStrikeDy, 'an up swing lunges up').toBeLessThan(0);
+    expect(r.upStrikeSy, 'an up swing stretches tall').toBeGreaterThan(1);
+    expect(r.sideFacingLeftDx, 'the default swing follows facing').toBeLessThan(0);
+    expect(r.posesDiffer, 'the body is drawn differently at each phase of the swing').toBe(true);
+  });
+
+  test('RAI-23 taking a hit plays a hurt pose (recoil, tilt, squash) that eases out, and the local player gets a hit burst', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const none = raidHurtPose(0, 1);
+      const dashing = raidHurtPose(21, 1); // dash i-frames are not a hurt pose
+      const impact = raidHurtPose(30, 1);
+      const easing = raidHurtPose(26, 1);
+      const flipped = raidHurtPose(30, -1);
+      const hash = (invincible) => {
+        const c = document.createElement('canvas'); c.width = 80; c.height = 120;
+        const ctx = c.getContext('2d');
+        drawPlayerCuphead(ctx, 20, 30, 36, 48, 1, 5, 5, false, invincible, true, { noBar: true, noShadow: true, noGun: true, t: 0 });
+        const d = ctx.getImageData(0, 0, 80, 120).data;
+        let h = 7; for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) % 1000000007;
+        return h;
+      };
+      // the hit burst: spawned when the local health drops, expires after its own lifetime
+      raidFx.lastHealth = 5; raidFx.bursts = [];
+      raidLocal.health = 5; raidFxTick();
+      const before = raidFx.bursts.length;
+      raidLocal.health = 4; raidFxTick();
+      const spawned = raidFx.bursts.length;
+      for (let i = 0; i < 20; i++) raidFxTick();
+      const expired = raidFx.bursts.length;
+      raidLocal.health = 5; raidFx.lastHealth = 5;
+      return {
+        none, dashing, impactRot: impact.rot, impactDx: impact.dx, impactSy: impact.sy, easingRot: easing.rot,
+        flippedRot: flipped.rot, poseDrawn: hash(23) !== hash(0), before, spawned, expired
+      };
+    });
+    expect(r.none).toEqual({ dx: 0, rot: 0, sx: 1, sy: 1 });
+    expect(r.dashing, 'dash invincibility is not a hurt pose').toEqual({ dx: 0, rot: 0, sx: 1, sy: 1 });
+    expect(r.impactRot, 'recoils (tilts back, away from the facing)').toBeLessThan(0);
+    expect(r.impactDx).toBeLessThan(0);
+    expect(r.impactSy, 'squashes on impact').toBeLessThan(1);
+    expect(Math.abs(r.easingRot), 'eases out over the following frames').toBeLessThan(Math.abs(r.impactRot));
+    expect(r.flippedRot, 'recoil is mirrored for a left-facing player').toBeGreaterThan(0);
+    expect(r.poseDrawn, 'the hurt pose changes how the body is drawn').toBe(true);
+    expect(r.before).toBe(0);
+    expect(r.spawned, 'a hit burst spawns when the local health drops').toBe(1);
+    expect(r.expired, 'the burst expires').toBe(0);
+  });
 });
 
 test.describe('Equipment: weapons and utility (spec 8.5)', () => {
@@ -1171,6 +1248,49 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.damageNotDoubled, 'the pogo check never deals damage itself').toBe(true);
     expect(r.alsoBouncedWithDamage).toBe(true);
     expect(r.nonHostBounces, 'the bounce works the same whether this client is host or not').toBe(true);
+  });
+
+  test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a bullet hit does not', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      raidLocal.gun = 'sword_training';
+      T.prepBoss('grinmaw', 1);
+      raidG.boss.x = 500; raidG.boss.y = 300;
+      raidG.slamAnimations = [];
+
+      // a real connecting right-swing leaves a slashHit tagged with its own direction
+      T.place(500 - RAID_SWORD_RANGE_X / 2, 300 - 24);
+      raidLocal.swordCooldown = 0;
+      raidLocal.input = { left: false, right: true, up: false, down: false, space: false };
+      raidSwordSwing();
+      raidLocal.input.right = false;
+      for (let i = 0; i < RAID_SWORD_SWING_FRAMES; i++) {
+        if (raidLocal.swingTimer > 0) raidLocal.swingTimer--;
+        raidSendLocalState();
+        raidCheckSwordSwings(raidG.boss);
+      }
+      const hits = raidG.slamAnimations.filter((a) => a.phase === 'slashHit');
+
+      // a bullet hit carries no direction, so it keeps only the generic impact spark
+      raidG.slamAnimations = [];
+      raidHitBoss(raidG.boss, { x: 500, y: 300, damage: 3 });
+      const bulletSlash = raidG.slamAnimations.filter((a) => a.phase === 'slashHit').length;
+      const bulletImpact = raidG.slamAnimations.filter((a) => a.phase === 'impact').length;
+
+      // drawing every direction (and an unknown one) paints pixels and does not throw
+      let drewAll = true;
+      for (const dir of ['up', 'down', 'left', 'right', 'upleft', 'upright', 'downleft', 'downright', 'side']) {
+        raidG.slamAnimations = [{ x: 500, y: 300, life: 8, phase: 'slashHit', timer: 2, dir }];
+        try { raidDraw(); } catch (e) { drewAll = false; }
+      }
+      return { count: hits.length, dir: hits[0] && hits[0].dir, life: hits[0] && hits[0].life, bulletSlash, bulletImpact, drewAll };
+    });
+    expect(r.count, 'one slash-impact per connecting swing').toBe(1);
+    expect(r.dir).toBe('right');
+    expect(r.life).toBeGreaterThan(0);
+    expect(r.bulletSlash, 'a bullet hit has no slash-impact').toBe(0);
+    expect(r.bulletImpact, 'a bullet hit keeps the generic impact spark').toBe(1);
+    expect(r.drewAll, 'every swing direction draws its slash-impact without error').toBe(true);
   });
 
   test('WPN-20 the player is drawn smaller, feet-anchored, with a Hollow Knight-style face and horns', async ({ page }) => {
