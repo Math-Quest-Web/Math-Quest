@@ -9383,7 +9383,7 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
         : Math.PI / 2; // the default swing slashes straight ahead
       const phi = thetaC - Math.PI / 2; // canvas arc angle of the swing's centre line
       const R = RAID_SWORD_SLASH_R * slashScale;
-      const span = 0.5 + 1.0 * Math.min(1, swing / 0.4); // opens up as the swing starts
+      const span = 0.6 + 1.4 * Math.min(1, swing / 0.4); // opens up as the swing starts, wrapping ~230 degrees at full
       const a0 = phi - span, a1 = phi + span;
       ctx.save();
       ctx.translate(px, py);
@@ -9397,7 +9397,9 @@ function mqDrawSword(ctx, swordId, px, py, facing, swing, t, dir, slashScale) {
       ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16;
       ctx.beginPath();
       ctx.arc(0, 0, R, a0, a1);
-      ctx.quadraticCurveTo(Math.cos(phi) * R * 1.35, Math.sin(phi) * R * 1.35, Math.cos(a0) * R, Math.sin(a0) * R);
+      // inner edge: control point chosen so the crescent's middle is ~0.3R thick whatever the span
+      const ctrl = 1.4 - Math.cos(span);
+      ctx.quadraticCurveTo(Math.cos(phi) * R * ctrl, Math.sin(phi) * R * ctrl, Math.cos(a0) * R, Math.sin(a0) * R);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
