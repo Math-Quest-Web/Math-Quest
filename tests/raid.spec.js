@@ -383,7 +383,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
       };
     });
-    expect(r.constants).toEqual({ grav: 0.25, vy: -7, holdGrav: 0.1, holdFrames: 12 });
+    expect(r.constants).toEqual({ grav: 0.25, vy: -7.7, holdGrav: 0.1, holdFrames: 12 });
     expect(r.tap).toBeGreaterThan(85);
     expect(r.tap).toBeLessThan(125);
     expect(r.fullHold, 'holding the whole way up still rises beyond a tap').toBeGreaterThan(r.tap + 30);
