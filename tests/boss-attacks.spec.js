@@ -216,7 +216,7 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
     expect(r.frames).toEqual([24, 44, 64]);
     expect(r.kinds).toEqual(['fang', 'fang', 'fang']);
     r.speeds.forEach((s) => expect(s).toBeCloseTo(1.9 + 0.35, 1));
-    r.heads.forEach((dx, i) => expect(Math.abs(dx - [-70, 0, 70][i])).toBeLessThan(12)); // heads: left, middle, right
+    r.heads.forEach((dx, i) => expect(Math.abs(dx - [-52.5, 0, 52.5][i])).toBeLessThan(12)); // heads: left, middle, right (pulled in with the smaller Wyrm)
   });
 
   test('BOS-22 fire spit: arcing fireballs (2, or 3 from phase 2) land on a spot and erupt into a flame pillar', async ({ page }) => {
@@ -808,9 +808,14 @@ test.describe('Ground-anchored bosses (BOS-43)', () => {
   });
 
   test('BOS-43 Grinmaw (a floating boss, for contrast) hovers clear of the floor - but low (BOS-44)', async ({ page }) => {
-    const r = await heightAboveGround(page, 'grinmaw');
-    expect(r.min, 'still floats above the floor').toBeGreaterThan(130);
-    expect(r.max, 'but nowhere near the old ~420px - a small hop reaches it').toBeLessThan(260);
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const bottoms = [];
+      for (let i = 0; i < 40; i++) { T.step(1); bottoms.push(raidGROUND_Y - (raidG.boss.y + BOSS_HURT.grinmaw.bounds.y1)); } // gap between the body's bottom and the floor
+      return { min: Math.min(...bottoms), max: Math.max(...bottoms) };
+    });
+    expect(r.min, 'the body still floats well above the floor').toBeGreaterThan(110);
+    expect(r.max, 'but low - a small hop reaches it').toBeLessThan(180);
   });
 
   const canMeleeGrounded = async (page, type) => page.evaluate(async (t) => {
@@ -845,31 +850,39 @@ test.describe('Ground-anchored bosses (BOS-43)', () => {
 });
 
 test.describe('Bosses hover near the ground (BOS-44)', () => {
-  // For every boss: can a player whose body centre is at a given height reach it with a swing?
-  const reach = (page, type, playerCentreY, dir) => page.evaluate(async ([t, y, d]) => {
+  // For every boss: can a swing from a player whose body centre is at a given height, standing right under the
+  // boss, touch the boss's drawn body at any point of the swing? (The real slash against the real silhouette.)
+  const reach = (page, type, playerCentreY, dirs, frames = 1) => page.evaluate(async ([t, y, ds, n]) => {
     await T.setupRaid(t);
+    T.prepBoss(t, 1); // idle only, no attacks
     T.step(2); // let the boss settle into its idle position
-    const b = raidG.boss;
-    const p = { x: b.x - 18, y: y - 24, facing: 1, swingDir: d, utility: '' }; // y is the player's centre
-    const box = raidSwordHitbox(p);
-    const h = raidBossHalfExtent(b.type);
-    return Math.abs(box.cx - b.x) < h.hw + box.hw && Math.abs(box.cy - b.y) < h.hh + box.hh;
-  }, [type, playerCentreY, dir]);
-  // body-centre height: standing / at the top of a tap jump / at the top of a full held jump
-  const STAND = 500 - 24, HOP = 500 - 24 - 100, FULL = 500 - 24 - 150;
+    let hit = false;
+    for (let f = 0; f < n && !hit; f++) {
+      if (f) T.step(7); // sample the idle bob / path across about 3 more seconds
+      const b = raidG.boss;
+      for (const d of ds) {
+        const p = { x: b.x - 18, y: y - 24, facing: 1, swingDir: d, utility: '' }; // y is the player's centre
+        if (raidSwingHitsBoss(p, b)) hit = true;
+      }
+    }
+    return hit;
+  }, [type, playerCentreY, dirs, frames]);
+  // body-centre height: standing / at the top of a tap jump (about 120 px) / at the top of a full held jump (about 170 px)
+  const STAND = 500 - 24, HOP = 500 - 24 - 120, FULL = 500 - 24 - 170;
   const FLOATERS = ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon'];
+  const ALL_DIRS = ['side', 'up', 'down', 'left', 'right', 'upleft', 'upright', 'downleft', 'downright'];
 
   for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon', 'bramblehide', 'colossus']) {
     test('BOS-44 ' + boss + ' can be hit with a swing from the top of a small hop', async ({ page }) => {
-      expect(await reach(page, boss, HOP, 'side'), 'a tap-height jump reaches it').toBe(true);
+      expect(await reach(page, boss, HOP, ALL_DIRS), 'a swing from a tap-height jump reaches it').toBe(true);
     });
     test('BOS-44 ' + boss + ' can be pogoed from the top of a held jump', async ({ page }) => {
-      expect(await reach(page, boss, FULL, 'down'), 'a down swing from a full jump reaches it').toBe(true);
+      expect(await reach(page, boss, FULL, ['down']), 'a down swing from a full jump reaches it').toBe(true);
     });
   }
   for (const boss of FLOATERS) {
-    test('BOS-44 ' + boss + ' still floats - it cannot be hit while standing on the ground', async ({ page }) => {
-      expect(await reach(page, boss, STAND, 'side')).toBe(false);
+    test('BOS-44 ' + boss + ' still floats - no swing, in any direction, hits it from the ground, at any point of its idle bob', async ({ page }) => {
+      expect(await reach(page, boss, STAND, ALL_DIRS, 60)).toBe(false);
     });
   }
 });

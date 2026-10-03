@@ -256,8 +256,8 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       const out = [];
       for (const sword of MQ_SWORDS.map((s) => s.id)) {
         raidLocal.gun = sword;
-        const box = raidSwordHitbox(Object.assign({}, raidLocal, { swingDir: 'side', utility: '' }));
-        out.push([RAID_SWORD_DAMAGE, RAID_SWORD_COOLDOWN_FRAMES, RAID_SWORD_SWING_FRAMES, box.hw, box.hh].join(','));
+        const bb = raidPolyBounds(raidSlashWorldPoly(Object.assign({}, raidLocal, { swingDir: 'side', utility: '' }), 0.45));
+        out.push([RAID_SWORD_DAMAGE, RAID_SWORD_COOLDOWN_FRAMES, RAID_SWORD_SWING_FRAMES, bb.x0, bb.x1, bb.y0, bb.y1].join(','));
       }
       const dims = MQ_SKINS.map((s) => { raidLocal.skin = s.id; return [raidLocal.w, raidLocal.h, raidLocal.maxHealth].join(','); });
       return { swords: [...new Set(out)], dims: [...new Set(dims)] };

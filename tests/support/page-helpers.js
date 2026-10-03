@@ -43,6 +43,14 @@ window.T = {
 
   me() { return raidG.players[raidMyId]; },
 
+  // A point well inside the slash a player's swing draws at a given swingTimer (default 8, mid-swing):
+  // handy for putting a boss or a shot exactly where the blade is. p needs x, y, facing, swingDir.
+  slashPoint(p, timer = 8) {
+    const poly = raidSlashWorldPoly(p, raidSwingProgress(timer));
+    const n = (poly.length / 2) | 0, a = poly[(n / 2) | 0], b = poly[poly.length - 1 - ((n / 2) | 0)];
+    return { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
+  },
+
   // Put the local player at horizontal centre x (feet on the ground unless y is given, y = top edge).
   place(x, y, extra) {
     y = y === undefined ? raidGROUND_Y - 48 : y;
