@@ -114,7 +114,7 @@ async function runAllTests() {
   // ============================================================
   group('Group 3: DOM Elements (Tests 7-13)');
   ['raidCanvas','lobbyList','countdownOverlay','raidHealth',
-   'raidShield','raidBossHp','raidAmmo'].forEach(id => {
+   'raidShield','raidBossHp'].forEach(id => {
     assert(game.document.getElementById(id) !== null, '#' + id + ' exists');
   });
 

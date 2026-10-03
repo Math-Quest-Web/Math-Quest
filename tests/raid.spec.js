@@ -52,56 +52,18 @@ test.describe('Multiplayer model (spec 8.1)', () => {
     expect(r).toEqual({ hp: 42, phase: 2 });
   });
 
-  test('RAI-02 each player publishes position, health, shield, facing, reload, skin and gun', async ({ page }) => {
+  test('RAI-02 each player publishes position, health, shield, facing, skin and weapon', async ({ page }) => {
     const p = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       mqProfile.equipped.skin = 'skin_wizard'; mqProfile.owned.skin_wizard = 1;
-      raidLocal.skin = 'skin_wizard'; raidLocal.gun = 'gun_standard';
+      raidLocal.skin = 'skin_wizard'; raidLocal.gun = 'sword_frost';
       raidLocal.x = 321; raidLocal.y = 400; raidLocal.facing = -1; raidLocal.shield = true;
-      raidReloadTimer = 50;
       raidSendLocalState();
       return __fb.db.get('bossRaid/9001/players/' + raidMyId);
     });
-    expect(Object.keys(p)).toEqual(expect.arrayContaining(['x', 'y', 'health', 'shield', 'invincible', 'facing', 'reload', 'skin', 'gun', 'lastUpdate']));
-    expect(p).toMatchObject({ x: 321, y: 400, health: 5, shield: true, facing: -1, skin: 'skin_wizard', gun: 'gun_standard' });
-    expect(p.reload).toBeCloseTo(0.5, 2);
-  });
-
-  test('RAI-03 non-host shots are relayed to the host, which spawns and clears them', async ({ page }) => {
-    const r = await page.evaluate(async () => {
-      await T.setupRaid('grinmaw');
-      T.prepBoss('grinmaw', 1);
-      const out = {};
-      // a non-host player shoots: nothing spawns locally, the shot goes to the shots node
-      raidIsHost = false; raidLocal.gun = 'gun_ember';
-      raidShootProjectile();
-      out.localBullets = raidG.playerProjectiles.length;
-      const queued = Object.values(__fb.db.get('bossRaid/9001/shots') || {});
-      out.queued = queued.length; out.queuedGun = queued[0] && queued[0].gun; out.queuedHasTime = !!(queued[0] && queued[0].t);
-      // still queued while we are not host (only the host consumes them)
-      out.stillQueued = Object.keys(__fb.db.get('bossRaid/9001/shots') || {}).length;
-      // the host receives a shot from another client
-      raidIsHost = true;
-      await raidShotsRef.push({ x: 400, y: 300, vx: 0, vy: -6, r: 6, life: 120, damage: 3, owner: 'other_client', gun: 'gun_frost', t: Date.now() });
-      out.hostBullets = raidG.playerProjectiles.filter((p) => p.owner === 'other_client').length;
-      out.hostGun = (raidG.playerProjectiles.find((p) => p.owner === 'other_client') || {}).gun;
-      out.hostHasTime = 't' in (raidG.playerProjectiles.find((p) => p.owner === 'other_client') || {});
-      // stale shots (> 4 s old) are dropped
-      await raidShotsRef.push({ x: 400, y: 300, vx: 0, vy: -6, r: 6, life: 120, damage: 3, owner: 'stale_client', gun: 'gun_frost', t: Date.now() - 10000 });
-      out.staleBullets = raidG.playerProjectiles.filter((p) => p.owner === 'stale_client').length;
-      out.leftover = Object.keys(__fb.db.get('bossRaid/9001/shots') || {}).filter((k) => true).length;
-      return out;
-    });
-    expect(r.localBullets).toBe(0);
-    expect(r.queued).toBe(1);
-    expect(r.queuedGun).toBe('gun_ember');
-    expect(r.queuedHasTime).toBe(true);
-    expect(r.stillQueued).toBe(1);
-    expect(r.hostBullets).toBe(1);
-    expect(r.hostGun).toBe('gun_frost');
-    expect(r.hostHasTime).toBe(false);
-    expect(r.staleBullets).toBe(0);
-    expect(r.leftover).toBe(1); // only the non-host's own queued shot from above remains
+    expect(Object.keys(p)).toEqual(expect.arrayContaining(['x', 'y', 'health', 'shield', 'invincible', 'facing', 'skin', 'gun', 'lastUpdate']));
+    expect(p).toMatchObject({ x: 321, y: 400, health: 5, shield: true, facing: -1, skin: 'skin_wizard', gun: 'sword_frost' });
+    expect(p, 'guns, ammo and reloading are gone').not.toHaveProperty('reload');
   });
 
   test('RAI-05 hit checks use the player centre and remote players are drawn where they really are', async ({ page }) => {
@@ -139,7 +101,7 @@ test.describe('Multiplayer model (spec 8.1)', () => {
 });
 
 test.describe('Player controls and stats (spec 8.2)', () => {
-  test('RAI-10 keyboard: arrows move, Z jumps, Up only aims, Space/X attack, Shift/E shields, C dashes, R reloads', async ({ page }) => {
+  test('RAI-10 keyboard: arrows move, Z jumps, Up only aims, Space/X swing, Shift/E shields, C dashes', async ({ page }) => {
     await page.evaluate(() => T.setupRaid('grinmaw'));
     await keyDown(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(true);
     await keyUp(page, 'ArrowLeft'); expect(await page.evaluate(() => raidLocal.input.left)).toBe(false);
@@ -152,11 +114,11 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(await page.evaluate(() => raidLocal.input.up), 'Z only jumps - it does not aim up').toBe(false);
     await keyUp(page, 'z'); expect(await page.evaluate(() => raidLocal.input.jump)).toBe(false);
 
-    await keyDown(page, ' ');
-    expect(await page.evaluate(() => raidAmmo)).toBe(19);
-    await page.evaluate(() => { for (let i = 0; i < RAID_FIRE_DELAY; i++) raidUpdateLocal(); }); // clear the fire-rate limit (RAI-12)
-    await keyDown(page, 'x'); // Hollow Knight-style "attack" - fires the gun, same as Space
-    expect(await page.evaluate(() => raidAmmo)).toBe(18);
+    await keyDown(page, ' '); // Space swings the sword
+    expect(await page.evaluate(() => raidLocal.swingTimer)).toBe(await page.evaluate(() => RAID_SWORD_SWING_FRAMES));
+    await page.evaluate(() => { raidLocal.swordCooldown = 0; raidLocal.swingTimer = 0; });
+    await keyDown(page, 'x'); // Hollow Knight-style "attack" key swings it too
+    expect(await page.evaluate(() => raidLocal.swingTimer)).toBe(await page.evaluate(() => RAID_SWORD_SWING_FRAMES));
     await keyDown(page, 'e');
     expect(await page.evaluate(() => raidLocal.shield)).toBe(true);
     await page.evaluate(() => { raidLocal.shield = false; });
@@ -166,8 +128,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180);
     await keyDown(page, 'x'); // attack, not dash, while X means attack
     expect(await page.evaluate(() => raidLocal.dashCooldown)).toBe(180); // unchanged - X never dashes
-    await keyDown(page, 'r');
-    expect(await page.evaluate(() => raidReloadTimer)).toBe(100);
+    await keyDown(page, 'r'); // there is no reload key any more
+    expect(await page.evaluate(() => typeof raidStartReload)).toBe('undefined');
   });
 
   test('RAI-10 holding Up never makes the player jump - it only aims the swing upward', async ({ page }) => {
@@ -256,83 +218,6 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.afterSecond).toEqual({ health: 4, invincible: 30 });
     expect(r.wardAfterFirst).toEqual({ health: 5, wardUsed: true, invincible: 30 });
     expect(r.wardAfterSecond).toEqual({ health: 5 });
-  });
-
-  test('RAI-12 shooting: 20 rounds, 7-frame delay, straight-up 3-damage bullets from the muzzle', async ({ page }) => {
-    const r = await page.evaluate(async () => {
-      await T.setupRaid('grinmaw');
-      T.place(500); raidLocal.facing = 1;
-      const out = { max: raidMaxAmmo, start: raidAmmo, hud: document.getElementById('raidAmmo').textContent, fireDelay: RAID_FIRE_DELAY };
-      const muzzle = raidGunMuzzle();
-      raidShootProjectile(); raidShootProjectile(); // second call is inside the fire delay
-      out.afterTwoCalls = raidAmmo;
-      const b = raidG.playerProjectiles[raidG.playerProjectiles.length - 1];
-      out.bullet = { vx: Math.abs(b.vx) < 0.3, vy: b.vy, damage: b.damage, life: b.life, gun: b.gun, atMuzzle: b.x === muzzle.x && b.y === muzzle.y };
-      for (let i = 0; i < 7; i++) raidUpdateLocal();
-      raidShootProjectile();
-      out.afterDelay = raidAmmo;
-      return out;
-    });
-    expect(r.max).toBe(20);
-    expect(r.start).toBe(20);
-    expect(r.hud).toBe('20/20');
-    expect(r.fireDelay).toBe(7);
-    expect(r.afterTwoCalls).toBe(19);
-    expect(r.bullet).toEqual({ vx: true, vy: -6, damage: 3, life: 120, gun: 'gun_standard', atMuzzle: true });
-    expect(r.afterDelay).toBe(18);
-  });
-
-  test('RAI-13 empty magazine auto-reloads for 100 frames, no shooting meanwhile, no passive ammo regen', async ({ page }) => {
-    const r = await page.evaluate(async () => {
-      await T.setupRaid('grinmaw');
-      const out = {};
-      for (let i = 0; i < 20; i++) { raidShootProjectile(); if (i < 19) for (let k = 0; k < RAID_FIRE_DELAY; k++) raidUpdateLocal(); }
-      out.ammoEmpty = raidAmmo; out.timer = raidReloadTimer; out.reloadFrames = RAID_RELOAD_FRAMES;
-      raidShootProjectile(); out.shotDuringReload = raidAmmo;
-      for (let i = 0; i < 99; i++) raidUpdateLocal();
-      out.almostDone = [raidAmmo, raidReloadTimer];
-      raidUpdateLocal();
-      out.done = [raidAmmo, raidReloadTimer];
-      // no regen when not reloading
-      raidAmmo = 12; for (let i = 0; i < 400; i++) raidUpdateLocal();
-      out.noRegen = raidAmmo;
-      // R reloads early; ignored when already full
-      raidStartReload(); out.manual = raidReloadTimer;
-      for (let i = 0; i < 100; i++) raidUpdateLocal();
-      raidStartReload(); out.fullIgnored = raidReloadTimer;
-      return out;
-    });
-    expect(r).toEqual({ ammoEmpty: 0, timer: 100, reloadFrames: 100, shotDuringReload: 0, almostDone: [0, 1], done: [20, 0], noRegen: 12, manual: 100, fullIgnored: 0 });
-  });
-
-  test('RAI-14 reload animation is visible, changes over time, syncs to teammates and shows on the HUD', async ({ page }) => {
-    const r = await page.evaluate(async () => {
-      await T.setupRaid('grinmaw');
-      const out = {};
-      const ringPixels = (reload) => {
-        const c = document.createElement('canvas'); c.width = 120; c.height = 170;
-        const ctx = c.getContext('2d');
-        drawPlayerCuphead(ctx, 40, 100, 36, 48, 1, 5, 5, false, 0, true, { reload, noBar: true, noShadow: true, t: 0 });
-        const d = ctx.getImageData(45, 20, 26, 26).data; // where the ring sits above the head
-        let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
-        return { ring: n, hash: Array.from(ctx.getImageData(0, 0, 120, 170).data).reduce((a, v, i) => (a + v * ((i % 97) + 1)) % 1000003, 0) };
-      };
-      out.noReload = ringPixels(0).ring;
-      out.reloading = ringPixels(0.5).ring;
-      const frames = [0, 0.1, 0.25, 0.45, 0.7, 0.9].map((p) => ringPixels(p).hash);
-      out.distinctFrames = new Set(frames).size;
-      raidReloadTimer = 50; raidSendLocalState();
-      out.synced = __fb.db.get('bossRaid/9001/players/' + raidMyId).reload;
-      raidUpdateUI(); out.hudReloading = document.getElementById('raidAmmo').textContent;
-      raidReloadTimer = 0; raidUpdateUI(); out.hudNormal = document.getElementById('raidAmmo').textContent;
-      return out;
-    });
-    expect(r.noReload).toBe(0);
-    expect(r.reloading).toBeGreaterThan(50);
-    expect(r.distinctFrames).toBe(6);
-    expect(r.synced).toBeCloseTo(0.5, 2);
-    expect(r.hudReloading).toBe('RELOADING');
-    expect(r.hudNormal).toBe('20/20');
   });
 
   test('RAI-15 shield blocks for 90 frames; starts with 2 charges (max 3) and recharges every 7 seconds', async ({ page }) => {
@@ -787,24 +672,35 @@ test.describe('Player controls and stats (spec 8.2)', () => {
 });
 
 test.describe('Equipment: weapons and utility (spec 8.5)', () => {
-  test('WPN-01 the weapon slot shoots with a gun and swings with a sword', async ({ page }) => {
+
+  test('WPN-01 the weapon slot is always a sword: a fresh save equips the Training Nail, X/Space swings it, and an old gun id falls back safely', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
-      raidLocal.gun = 'gun_standard';
-      raidAmmo = raidMaxAmmo; raidFireCooldown = 0; raidReloadTimer = 0;
-      raidG.playerProjectiles = [];
-      raidAttack();
-      const shot = raidG.playerProjectiles.length === 1 && raidG.playerProjectiles[0].kind !== 'melee';
-
+      const out = {};
+      out.defaultWeapon = mqDefaultProfile().equipped.gun;
+      out.defaultOwnedGun = Object.keys(mqDefaultProfile().owned).filter((k) => k.startsWith('gun_'));
+      out.noGunItems = MQ_ITEMS.filter((i) => i.type === 'gun' || /^gun_/.test(i.id)).length;
       raidLocal.gun = 'sword_training';
       raidLocal.swordCooldown = 0; raidLocal.swingTimer = 0;
-      const ammoBefore = raidAmmo;
-      raidAttack();
-      return { shot, swung: raidLocal.swingTimer > 0, ammoUnchanged: raidAmmo === ammoBefore };
+      raidSwordSwing();
+      out.swung = raidLocal.swingTimer === RAID_SWORD_SWING_FRAMES;
+      // a teammate on an old client may still publish a gun id: it must draw as a sword, not crash
+      const c = document.createElement('canvas'); c.width = 120; c.height = 120;
+      let drew = true;
+      try { drawPlayerCuphead(c.getContext('2d'), 40, 40, 36, 48, 1, 5, 5, false, 0, false, { gun: 'gun_standard', swing: 0.3, noBar: true, noShadow: true }); } catch (e) { drew = false; }
+      out.legacyIdDraws = drew;
+      // ...and none of the shooting machinery exists any more
+      out.gone = ['raidShootProjectile', 'raidStartReload', 'raidAttack', 'raidGunMuzzle', 'drawPlayerBullet', 'mqDrawGun'].filter((n) => typeof window[n] !== 'undefined');
+      out.goneState = ['raidAmmo', 'raidMaxAmmo', 'raidReloadTimer', 'raidShotsRef'].filter((n) => { try { return typeof eval(n) !== 'undefined'; } catch (e) { return false; } });
+      return out;
     });
-    expect(r.shot).toBe(true);
-    expect(r.swung).toBe(true);
-    expect(r.ammoUnchanged, 'a sword swing does not touch the gun magazine').toBe(true);
+    expect(r.defaultWeapon).toBe('sword_training');
+    expect(r.defaultOwnedGun).toEqual([]);
+    expect(r.noGunItems, 'there are no gun items left').toBe(0);
+    expect(r.swung, 'the attack swings the sword').toBe(true);
+    expect(r.legacyIdDraws, 'an old gun id from a save or an old client draws as the default sword').toBe(true);
+    expect(r.gone, 'no shooting functions remain').toEqual([]);
+    expect(r.goneState, 'no ammo/reload/relay state remains').toEqual([]);
   });
 
   test('WPN-02 a side swing damages the boss only on real hitbox overlap, at most once per swing, and respects its cooldown', async ({ page }) => {
@@ -850,20 +746,13 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       stepSwing();
       const secondBlocked = raidG.boss.hp === hpBefore;
 
-      // a melee hit is resolved directly against the boss, never through the bullet array
-      const c = document.createElement('canvas'); c.width = 40; c.height = 40;
-      const ctx = c.getContext('2d');
-      drawPlayerBullet(ctx, { x: 20, y: 20, r: 6, kind: 'melee', gun: 'sword_training' });
-      const drewNothing = ctx.getImageData(0, 0, 40, 40).data.every((v, i) => i % 4 !== 3 || v === 0);
-
-      return { startedFull, missedHit, connected, cooldownSet, secondBlocked, drewNothing };
+      return { startedFull, missedHit, connected, cooldownSet, secondBlocked };
     });
     expect(r.startedFull, 'the swing animation plays even on a miss').toBe(true);
     expect(r.missedHit, 'out of reach deals no damage').toBe(true);
     expect(r.connected, 'in reach deals RAID_SWORD_DAMAGE exactly once').toBe(true);
     expect(r.cooldownSet).toBe(true);
     expect(r.secondBlocked, 'cooldown blocks an immediate second swing').toBe(true);
-    expect(r.drewNothing, 'a melee hit never renders as a bullet').toBe(true);
   });
 
   test('WPN-05 up and down swings hit in their own direction, not to the side, and the down key is wired', async ({ page }) => {
@@ -1058,7 +947,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const alphaAt = (facing, swing, slashScale, dx, dy, id, dir) => {
         const c = document.createElement('canvas'); c.width = 500; c.height = 500;
         const ctx = c.getContext('2d');
-        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, 0, 0, swing, 5, dir || 'side', slashScale);
+        mqDrawWeapon(ctx, id || 'sword_frost', 250, 250, facing, swing, 5, dir || 'side', slashScale);
         const px = ctx.getImageData(250 + dx, 250 + dy, 1, 1).data;
         return { a: px[3], rgb: [px[0], px[1], px[2]] };
       };
@@ -1091,7 +980,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       const widthAt = (u) => {
         const c = document.createElement('canvas'); c.width = 500; c.height = 500;
         const ctx = c.getContext('2d');
-        mqDrawWeapon(ctx, 'sword_frost', 250, 250, 1, 0, 0, 0.45, 5, 'side', 1);
+        mqDrawWeapon(ctx, 'sword_frost', 250, 250, 1, 0.45, 5, 'side', 1);
         const ang = -1.4 + u * 2.8; let n = 0;
         for (let rr = R * 0.4; rr < R * 1.1; rr += 1) {
           const px = ctx.getImageData(250 + Math.round(rr * Math.cos(ang)), 250 + Math.round(rr * Math.sin(ang) * RAID_SWORD_SLASH_SQUASH), 1, 1).data;
@@ -1147,7 +1036,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.sideHh, 'the side hitbox is no taller than the slash it covers').toBeLessThanOrEqual(r.slashHeight / 2 + 10);
   });
 
-  test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Quick Hands, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
+  test('WPN-03 the utility slot: Swift Boots, Vital Core, Feather Cloak, Lucky Charm and Warding Sigil each apply their effect', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
@@ -1160,12 +1049,6 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
 
       raidLocal.utility = 'util_feather';
       out.jumpHold = raidJumpHoldFrames(); out.baseHold = RAID_JUMP_HOLD_FRAMES;
-
-      raidLocal.utility = 'util_hands';
-      out.reloadFrames = raidReloadFrames(); // round(100 * 0.8)
-
-      raidLocal.utility = null;
-      out.reloadDefault = raidReloadFrames();
 
       raidLocal.utility = 'util_ward';
       const p = Object.assign({}, T.me(), { utility: 'util_ward', wardUsed: false, shield: false, invincible: 0 });
@@ -1186,14 +1069,12 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.dashCooldown).toBe(135);
     expect(r.maxHealth).toBe(6);
     expect(r.jumpHold).toBe(Math.round(r.baseHold * 1.3)); // Feather Cloak: +30% hold time
-    expect(r.reloadFrames).toBe(80);
-    expect(r.reloadDefault).toBe(100);
     expect(r.wardAbsorbed, 'the first hit is absorbed and marks wardUsed').toBe(true);
     expect(r.secondHitLandsAfterWard, 'only the first hit per raid is warded').toBe(true);
     expect(r.coinBonus).toBe(187);
   });
 
-  test('WPN-03 the 10 new charms: Nimble Treads, Iron Skin, Reinforced Plating, Mending Charm, Long Reach, Phantom Step, Extended Mag and Overclock Coil each apply their effect', async ({ page }) => {
+  test('WPN-03 the new charms: Nimble Treads, Iron Skin, Reinforced Plating, Mending Charm, Long Reach and Phantom Step each apply their effect', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const out = {};
@@ -1224,12 +1105,6 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       raidLocal.utility = 'util_dashi';
       out.dashIframes = raidDashInvincibleFrames(); // round(14 * 1.5)
 
-      raidLocal.utility = 'util_ammo';
-      out.magSize = raidMagSizeForLoadout(); // round(20 * 1.5)
-
-      raidLocal.utility = 'util_swift_reload';
-      out.overclockReload = raidReloadFrames(); // round(100 * 0.65)
-
       raidLocal.utility = null;
       out.defaultSpeed = raidMaxSpeed();
       out.defaultKnockback = raidKnockbackMult();
@@ -1237,7 +1112,6 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.defaultShieldRegen = raidShieldRegenFrames();
       out.defaultRangeMult = raidAttackRangeMult();
       out.defaultDashIframes = raidDashInvincibleFrames();
-      out.defaultMagSize = raidMagSizeForLoadout();
       return out;
     });
     expect(r.maxSpeed).toBeCloseTo(8.05, 5);
@@ -1248,8 +1122,6 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.attackRangeMult).toBe(1.25);
     expect(r.swordHitbox).toEqual(r.expectedSwordHitbox);
     expect(r.dashIframes).toBe(21);
-    expect(r.magSize).toBe(30);
-    expect(r.overclockReload).toBe(65);
     // defaults (no utility equipped) are unaffected
     expect(r.defaultSpeed).toBe(7);
     expect(r.defaultKnockback).toBe(1);
@@ -1257,7 +1129,6 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.defaultShieldRegen).toBe(420);
     expect(r.defaultRangeMult).toBe(1);
     expect(r.defaultDashIframes).toBe(14);
-    expect(r.defaultMagSize).toBe(20);
   });
 
   test('WPN-06 Second Wind grants exactly one extra jump in the air, refilled on landing, and only while equipped', async ({ page }) => {
@@ -1463,7 +1334,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.nonHostBounces, 'the bounce works the same whether this client is host or not').toBe(true);
   });
 
-  test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a bullet hit does not', async ({ page }) => {
+  test('WPN-09 a sword hit shows a directional slash-impact burst on the boss; a Familiar bolt hit does not', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       raidLocal.gun = 'sword_training';
@@ -1484,11 +1355,16 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       }
       const hits = raidG.slamAnimations.filter((a) => a.phase === 'slashHit');
 
-      // a bullet hit carries no direction, so it keeps only the generic impact spark
+      // a Familiar bolt hit carries no direction, so it keeps only the generic impact spark
       raidG.slamAnimations = [];
       raidHitBoss(raidG.boss, { x: 500, y: 300, damage: 3 });
-      const bulletSlash = raidG.slamAnimations.filter((a) => a.phase === 'slashHit').length;
-      const bulletImpact = raidG.slamAnimations.filter((a) => a.phase === 'impact').length;
+      const boltSlash = raidG.slamAnimations.filter((a) => a.phase === 'slashHit').length;
+      const boltImpact = raidG.slamAnimations.filter((a) => a.phase === 'impact').length;
+
+      // the Familiar's bolt has its own little glowing orb (it is the only projectile the player side has)
+      const bc = document.createElement('canvas'); bc.width = 40; bc.height = 40;
+      drawMinionBolt(bc.getContext('2d'), { x: 20, y: 20, vx: 3, vy: -2, r: 4 });
+      const boltPixels = bc.getContext('2d').getImageData(0, 0, 40, 40).data.filter((v, i) => i % 4 === 3 && v > 40).length;
 
       // drawing every direction (and an unknown one) paints pixels and does not throw
       let drewAll = true;
@@ -1496,13 +1372,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         raidG.slamAnimations = [{ x: 500, y: 300, life: 8, phase: 'slashHit', timer: 2, dir }];
         try { raidDraw(); } catch (e) { drewAll = false; }
       }
-      return { count: hits.length, dir: hits[0] && hits[0].dir, life: hits[0] && hits[0].life, bulletSlash, bulletImpact, drewAll };
+      return { count: hits.length, dir: hits[0] && hits[0].dir, life: hits[0] && hits[0].life, boltSlash, boltImpact, boltPixels, drewAll };
     });
     expect(r.count, 'one slash-impact per connecting swing').toBe(1);
     expect(r.dir).toBe('right');
     expect(r.life).toBeGreaterThan(0);
-    expect(r.bulletSlash, 'a bullet hit has no slash-impact').toBe(0);
-    expect(r.bulletImpact, 'a bullet hit keeps the generic impact spark').toBe(1);
+    expect(r.boltSlash, 'a Familiar bolt hit has no slash-impact').toBe(0);
+    expect(r.boltImpact, 'a Familiar bolt hit keeps the generic impact spark').toBe(1);
+    expect(r.boltPixels, 'the Familiar bolt is drawn').toBeGreaterThan(20);
     expect(r.drewAll, 'every swing direction draws its slash-impact without error').toBe(true);
   });
 

@@ -15,7 +15,7 @@ Math Quest is an educational math game played in the browser. It has three parts
 1. **Practice** - single-player multiple-choice math questions.
 2. **Community** - players create and share their own question sets.
 3. **Boss Raid** - a cartoon multiplayer boss battle (up to 6 players) with a coin economy, a shop
-   with loot crates, and cosmetic player and gun skins.
+   with loot crates, and cosmetic player skins and swords.
 
 Target audience: kids and students. Tone: friendly, cartoon, no scary content.
 
@@ -23,7 +23,7 @@ Target audience: kids and students. Tone: friendly, cartoon, no scary content.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| GEN-01 | The app is **one HTML file**, `index.html` (HTML, CSS and JS), plus **one image asset**: the boss sprite sheet `assets/boss-sheet.webp` (BOS-30). No build step, no framework, no local scripts or stylesheets. All other art (players, guns, crates, backgrounds) is drawn with canvas paths and CSS. | Done |
+| GEN-01 | The app is **one HTML file**, `index.html` (HTML, CSS and JS), plus **one image asset**: the boss sprite sheet `assets/boss-sheet.webp` (BOS-30). No build step, no framework, no local scripts or stylesheets. All other art (players, swords, crates, backgrounds) is drawn with canvas paths and CSS. | Done |
 | GEN-02 | Hosted on Firebase Hosting, project `mathquest-f54b5`, hosting target `mathquest`, live at `https://math-quest-site.web.app`. | Done |
 | GEN-03 | Every push to `main` deploys automatically via GitHub Actions (`.github/workflows/firebase-hosting-merge.yml`). The workflow deploys **hosting only** - not Firestore or Realtime Database rules. | Done |
 | GEN-04 | `index.html` must be served with `Cache-Control: no-cache, max-age=0, must-revalidate` (set in `firebase.json`) so players never run stale JS after a deploy. | Done |
@@ -90,9 +90,8 @@ lives in section `raid`.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| RAI-01 | **Host-authoritative.** The raid host (lowest sorted player id) simulates the boss, bullets, hazards and damage, and publishes them to `bossRaid/<id>/gameState`. Clients render that state. If the host leaves, host status moves to the next player. | Done |
-| RAI-02 | Each player writes their own position, health, shield, facing, reload progress, skin and gun to `bossRaid/<id>/players/<raidId>` (about every 2 frames). | Done |
-| RAI-03 | **Shot relay.** Non-host players' bullets are pushed to `bossRaid/<id>/shots`; the host consumes and deletes them and spawns the bullet. (Without this, only the host could damage the boss.) Shots older than 4 s are dropped. | Done |
+| RAI-01 | **Host-authoritative.** The raid host (lowest sorted player id) simulates the boss, Familiar bolts, hazards and damage, and publishes them to `bossRaid/<id>/gameState`. Clients render that state. If the host leaves, host status moves to the next player. | Done |
+| RAI-02 | Each player writes their own position, health, shield, facing, skin and weapon (the `gun` field - the name is kept for compatibility, it always holds a sword id now) to `bossRaid/<id>/players/<raidId>` (about every 2 frames). | Done |
 | RAI-04 | Nothing written to Firebase may contain `undefined` (Firebase rejects it); use `''`, `0`, `false` or `null`. | Rule |
 | RAI-05 | Players are stored by their top-left corner; hit checks use the player's centre (`x + 18`, `y + 24`). Remote players are drawn at their true position. | Done |
 
@@ -100,15 +99,12 @@ lives in section `raid`.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| RAI-10 | **Controls (Hollow Knight-style):** Left/Right move, Z jumps (it is the only jump key - Up never jumps, it only aims the sword upward, WPN-05), X or Space attack (shoot), Shift or E shield, C dash, R reload. | Done |
+| RAI-10 | **Controls (Hollow Knight-style):** Left/Right move, Z jumps (it is the only jump key - Up never jumps, it only aims the sword upward, WPN-05), X or Space swing the sword, Shift or E shield, C dash. | Done |
 | RAI-11 | Player has 5 hearts. After a hit the player is invincible for 30 frames. If any player reaches 0 hearts the raid is lost (Defeated). | Done |
-| RAI-12 | **Shooting:** 20-round magazine, 7-frame delay between shots, bullets fly straight up from the gun muzzle, 3 damage each, life 120 frames. | Done |
-| RAI-13 | **Reloading:** the magazine reloads automatically when it hits 0 (R reloads early). A reload takes 100 frames (about 1.7 s) during which the player cannot shoot. There is no passive ammo regeneration. | Done |
-| RAI-14 | **Reload animation:** the gun tilts out, the old magazine drops, a new one slides in, the gun snaps back with a spark; a progress ring above the head shows reload progress to everyone. The HUD shows `n/20` or `RELOADING`. | Done |
 | RAI-15 | **Shield:** blocks damage for 90 frames. Starts with 2 charges, max 3, and recharges +1 every 420 frames (7 s). | Done |
 | RAI-16 | **Dash:** C gives a committed 11-frame burst at speed 14 (about 154 px - a little farther than the old 120 px; it bypasses the normal accel/friction/speed-cap handling so the burst isn't immediately clamped back down) plus 14 frames of invincibility. **A dash keeps your height:** gravity and vertical speed are switched off for as long as it lasts (a grounded dash stays grounded, an airborne one holds its exact height) and the jump key does nothing mid-dash; gravity takes over again when it ends. It leaves a short trail of afterimages; 180-frame (3 s) cooldown, shortened by the Swift Boots utility item (WPN-03). | Done |
 | RAI-17 | **Movement:** acceleration `RAID_ACCEL` 0.55 with friction 0.85, so running tops out near 3 px/frame (a bit slower than before; Nimble Treads scales the acceleration, so it really speeds you up). **Jump (Hollow Knight-style, variable height, deliberately low because the bosses hover near the ground - BOS-44):** a tap rises about 100px under normal gravity (`RAID_GRAVITY` 0.4, initial velocity `RAID_JUMP_VY` -9); holding the jump key keeps reduced gravity (`RAID_JUMP_HOLD_GRAVITY` 0.16) applied for up to `RAID_JUMP_HOLD_FRAMES` (10) frames or until the apex, reaching roughly 150px. A jump (of either height) clears low ground hazards. | Done |
-| RAI-18 | **Boss hit area** (the box a player's shot must land in to damage the boss) is sized per boss type (`BOSS_HITBOX`), not one fixed box for every boss - the Wyrm in particular is wider (its three heads spread further than its body is tall), so its hit area is wider too. An untargetable boss (BOS-09) still can't be hit, regardless of its hit area's size. | Done |
+| RAI-18 | **Boss hit area** (the box a player's swing (or a Familiar bolt) must overlap to damage the boss) is sized per boss type (`BOSS_HITBOX`), not one fixed box for every boss - the Wyrm in particular is wider (its three heads spread further than its body is tall), so its hit area is wider too. An untargetable boss (BOS-09) still can't be hit, regardless of its hit area's size. | Done |
 | RAI-19 | **Impact frame on taking a hit:** a small knockback away from the hit (opposite the player's facing), a bright white flash for the first ~6 of the player's 30 invincibility frames (fading to the ongoing orange flicker after), and a brief hit-stop (full engine freeze, a handful of frames) - felt on whichever client the hit player is on, host or not. | Done |
 | RAI-20 | **Movement animation:** while grounded, the player bobs (a small idle sway, a bigger/faster bob while running) and leans slightly into the direction of travel; none of it while airborne. Driven by the shared frame counter and the player's synced `vx`/`onGround`, so it plays the same for every client watching a teammate. | Done |
 | RAI-22 | **Attack pose (placeholder animation):** a sword swing animates the whole body, not just the blade, in three phases keyed to the already-synced swing progress - anticipation (first 25%: crouch and pull back away from the swing), strike (25-55%: lunge and stretch along the swing's own absolute direction; the default swing follows facing; downward lunges never sink into the floor), recovery (55-100%: settle to neutral). Teammates see it too, since it needs no extra synced field. Original placeholder motion, not copied from any game's art. | Done |
@@ -133,14 +129,14 @@ lives in section `raid`.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| WPN-01 | **Weapon slot:** equipping a gun or a sword changes what the X/Space attack button does - shoot (RAI-12) with a gun, swing (WPN-02) with a sword. Guns and swords are otherwise both just "the weapon slot" - stored under the same `equipped.gun` profile key and the same `raidLocal.gun` field - so nothing else about equipping or syncing needs to know which kind is active. | Done |
-| WPN-02 | **Sword combat, hitbox-accurate:** X/Space swings instead of shooting - no ammo or reload. Every host frame, each player's direction-aware melee hitbox (WPN-05) is tested for real overlap against the boss's own hit area (`BOSS_HITBOX`/RAI-18) during the few frames the blade is actually extended (mid-swing, not the whole 14-frame animation) - a hit only lands on genuine overlap, at most once per swing, 4 damage, 26-frame cooldown between swings. Resolved identically for host and non-host players from each player's synced position/direction (no separate relay path), and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) as a bullet - no boss-side code differs between being shot and being cut. | Done |
+| WPN-01 | **Weapon slot:** the weapon slot always holds a sword - there are no guns, ammo or reloading. A fresh save owns and equips the Training Nail, and X/Space swings whichever sword is equipped (WPN-02). The slot is still stored under the `equipped.gun` profile key and the `raidLocal.gun` / synced `gun` field so existing saves and teammates need no migration; a leftover gun id from an old save or an old client simply draws (and plays) as the default sword. | Done |
+| WPN-02 | **Sword combat, hitbox-accurate:** X/Space swings the sword. Every host frame, each player's direction-aware melee hitbox (WPN-05) is tested for real overlap against the boss's own hit area (`BOSS_HITBOX`/RAI-18) during the few frames the blade is actually extended (mid-swing, not the whole 14-frame animation) - a hit only lands on genuine overlap, at most once per swing, 4 damage, 26-frame cooldown between swings. Resolved identically for host and non-host players from each player's synced position/direction (no separate relay path), and triggers the same hurt-pose/flash/hit-stop feedback (BOS-13) as any other hit on the boss. | Done |
 | WPN-04 | **White slash (Hollow Knight-style):** the swing's slash (the big crescent in the live game, the small trail arc in the shop preview) always renders white, regardless of the equipped sword's own color - only the blade itself keeps that sword's tint. | Done |
 | WPN-05 | **8-way directional swings:** whichever movement keys (Up/Down/Left/Right) are held at the moment X/Space is pressed decide the swing's direction - all 8 combinations (4 cardinal, 4 diagonal), plus the default forward "side" swing when no direction is held. Direction is **absolute world-space, not facing-relative**: holding Left always aims left, even if the player is still facing right. Each direction has its own, differently-shaped melee hitbox (the 4 cardinals are all the same shape turned to face their own direction (WPN-10), so the reach is the same whichever way you swing; diagonals get a smaller, roughly-square hitbox). Direction is locked in for the whole swing once it starts (releasing the key mid-swing doesn't change it). | Done |
 | WPN-08 | **Pogo bounce (Hollow Knight nail-bounce):** a downward swing (WPN-05) that connects with the boss while airborne bounces the player upward at a fixed speed (the same magnitude as a full jump), clearing any held jump-boost so it's a clean snap rather than a modulated hold. At most one bounce per swing. Resolved purely client-side against each player's own synced state, so it's instant and identical whether that client is the raid host or not - damage itself is unaffected, still resolved only through the existing host-authoritative melee hit check (WPN-02), never duplicated by the bounce. | Done |
-| WPN-09 | **Slash impact (placeholder animation):** a sword hit on the boss adds a short white slash-impact burst at the contact point - streaks fanning out along the swing's own direction (all around for the default side swing) plus a bright core flash - on top of the generic impact spark, visible to every client. Bullet hits carry no direction and keep only the generic spark. | Done |
+| WPN-09 | **Slash impact (placeholder animation):** a sword hit on the boss adds a short white slash-impact burst at the contact point - streaks fanning out along the swing's own direction (all around for the default side swing) plus a bright core flash - on top of the generic impact spark, visible to every client. Hits with no direction (a Familiar bolt) keep only the generic spark. | Done |
 | WPN-10 | **Long, sweeping slash:** every swing direction reaches farther than the original swing, though shorter than the first long version (left, right, up and down are one shape turned to face each way, so the player always has the same reach - 100 px out from the body along the swing and 62 px either side of it; diagonals reach 80 px with a 52 px half-extent), so the hitbox covers the whole visible slash. The live player draws a large white slash (radius 115 px, scaled by Long Reach): a forward arc of about 160 degrees centred on the swing's own direction - it does not surround the player - compressed vertically (squashed to 55% across its direction, so its top and bottom ends sit close together while the forward reach is unchanged) that sweeps from its top end to its bottom end as the swing plays (head runs ahead, tail follows and fades it away). It is fat near the top, narrows through its farthest point and tapers to nothing at the bottom, and is mirrored for a left-facing player. Every direction is the same slash turned to face it (rotated, then squashed across its direction), so up and down are the side slash pointing up or down - same shape, same reach. This slash is the whole live swing animation: the old sweeping blade and small trail arcs are gone, and the blade just rests at its held angle. Dash afterimages draw no slash; only the shop preview (which has no room for it) keeps the old small swing. The slash is original art. | Done |
-| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). 16 charms across all 5 rarities: | Done |
+| WPN-03 | **Utility slot:** a second, optional equip slot (separate from the weapon and skin slots) for one item with a small persistent effect; equipping another item swaps it, and clicking the equipped item again unequips it (the only slot that can be empty). 13 charms across all 5 rarities: | Done |
 
 | Item | Rarity | Effect |
 |------|--------|--------|
@@ -148,15 +144,12 @@ lives in section `raid`.
 | Lucky Charm | Common | +10% coins from every win |
 | Nimble Treads | Common | +15% move speed |
 | Iron Skin | Common | Half the knockback when you are hit |
-| Quick Hands | Uncommon | Reload 20% faster |
 | Reinforced Plating | Uncommon | Shield blocks 30% longer |
 | Mending Charm | Uncommon | Shield recharges 50% faster |
 | Feather Cloak | Rare | Hold jump 30% longer for extra height |
-| Long Reach | Rare | +25% sword reach and bullet range |
+| Long Reach | Rare | +25% sword reach (and a bigger slash) |
 | Phantom Step | Rare | Dash invincibility lasts 50% longer |
 | Vital Core | Epic | +1 max heart |
-| Extended Mag | Epic | +50% magazine size |
-| Overclock Coil | Epic | Reload 35% faster |
 | Warding Sigil | Legendary | Absorbs the first hit taken each raid |
 | Second Wind | Legendary | Adds one extra jump in the air (WPN-06) |
 | Spectral Familiar | Legendary | A companion that orbits you and fires at the boss for you (WPN-07) |
@@ -164,8 +157,8 @@ lives in section `raid`.
 | ID | Requirement | Status |
 |----|-------------|--------|
 | WPN-06 | **Second Wind (double jump):** while airborne and holding the charm, one extra jump is available - edge-detected on the key press (not the whole time it's held) so it can't be spammed the instant it becomes eligible. Refills the moment the player lands. The air jump is a smaller hop than the first jump (70% of its launch speed, about half the height) and holding the key does not boost it. | Done |
-| WPN-07 | **Spectral Familiar (minion):** while equipped, a small companion orbits its owner and, every 90 frames, fires a weak (1 damage) aimed shot at the boss. Host-simulated and synced like a hazard; the shot itself is resolved through the same bullet/hit pipeline as everything else - no separate collision code. Despawns the frame the charm is unequipped. | Done |
-| WPN-20 | **Character redesign:** the whole player silhouette is drawn about 15% smaller, anchored at the feet so it doesn't sink into or float off the ground (the health bar and reload ring above the head keep their original size and position, unaffected by the scale-down). The face is Hollow Knight-styled: big flat black eyes and no visible mouth, with small horns instead of the old red pom-pom (a skin can still cover the horns with its own headwear via `noHorns`). | Done |
+| WPN-07 | **Spectral Familiar (minion):** while equipped, a small companion orbits its owner and, every 90 frames, fires a weak (1 damage) aimed shot at the boss. Host-simulated and synced like a hazard; the bolt itself is resolved through the same projectile/hit pipeline as everything else - no separate collision code. Despawns the frame the charm is unequipped. | Done |
+| WPN-20 | **Character redesign:** the whole player silhouette is drawn about 15% smaller, anchored at the feet so it doesn't sink into or float off the ground (the health bar above the head keeps its original size and position, unaffected by the scale-down). The face is Hollow Knight-styled: big flat black eyes and no visible mouth, with small horns instead of the old red pom-pom (a skin can still cover the horns with its own headwear via `noHorns`). | Done |
 
 ## 9. Boss design rules and bosses
 
@@ -181,13 +174,13 @@ lives in section `raid`.
 | BOS-06 | Attacks never repeat back-to-back. In phase 3 the boss follows a move, 30% of the time, with a second different one after 60 idle frames. | Done |
 | BOS-07 | **Aimed** projectiles (candy, fangs, void shots) are slow, at most 3 px/frame. **Lobbed** shots (fireballs, bubbles) fly a short, visible arc of at most about 1.6 s to a landing spot; fireballs erupt into a flame pillar there and bubbles pop. All use fair hitboxes centred on the player (see RAI-05). | Done |
 | BOS-08 | **Phases:** phase 2 below 60% HP, phase 3 below 30%. Each change is a 100-frame beat: the boss pulses, is invulnerable (dashed ring), the arena is cleared, and a PHASE banner plays with screen shake. New attacks unlock in phase 2. | Done |
-| BOS-09 | Bosses are untargetable (shots pass through) while faded out or submerged. | Done |
+| BOS-09 | Bosses are untargetable (swings and bolts pass through) while faded out or submerged. | Done |
 | BOS-10 | Each boss has its own animations and arena background; all boss animations run on the host and sync through boss state. | Done |
 | BOS-11 | **Stun:** after its big moves a boss is stunned for **120 frames (2 s)** and takes **double damage**. | Done |
 | BOS-12 | **Vulnerability is shown, not told.** A stunned boss tilts, sags and has dizzy stars circling its head. There is no text or icon saying "weak/exposed". | Done |
 | BOS-13 | Feedback: screen shake on hits and phase changes, floating damage numbers, red flash when the local player is hit, phase notches at 60% and 30% on the boss HP bar. **Every hit on the boss** (not just the big stun) briefly shows its hurt pose and a white flash, and triggers a short hit-stop felt by every client (see RAI-19 for the player's own impact frame). | Done |
 | BOS-14 | The boss HP bar is large, fixed at the top of the screen (not attached to the boss). | Done |
-| BOS-43 | **Ground-anchored bosses** (Bramblehide, Colossus) sit at floor height (`raidGROUND_Y` minus their own hit-area half-height) with only a small idle bob - no floating drift like the other bosses. A grounded player can melee or shoot them without needing to jump first. | Done |
+| BOS-43 | **Ground-anchored bosses** (Bramblehide, Colossus) sit at floor height (`raidGROUND_Y` minus their own hit-area half-height) with only a small idle bob - no floating drift like the other bosses. A grounded player can melee them without needing to jump first. | Done |
 | BOS-44 | **Bosses hover near the ground.** The five floating bosses idle low (`BOSS_HOVER_Y`: Grinmaw 320, Warden 310, Wyrm 300, Glutton 345, Griffon 305 px from the top of the arena, so roughly 150-200 px above the floor) instead of up near the top of the screen. With the low jump (RAI-17) a small tap-hop puts a side swing on every one of them, the top of a held jump puts a down swing (pogo, WPN-08) on them, and none of the five can be hit while standing on the floor. The ground-anchored two (BOS-43) are unchanged. Lobbed boss shots (fireballs, bubbles, feathers) are launched on a rise-then-fall arc that peaks about 70 px above the launch point (`RAID_LOB_RISE`; same flight time and landing spot as before), so a low boss does not fling them flat through the body of the player - they only threaten near where they come down. | Done |
 
 ### 9.2 The seven bosses
@@ -246,40 +239,39 @@ Frame counts are the durations of each animation state (60 frames = 1 second).
 | SHP-03 | Each crate has an **Odds** button showing every item's exact percentage, grouped by rarity with rarity totals; each crate's odds sum to 100%. | Done |
 | SHP-04 | Opening a crate deducts the price, plays an animation (shake, lid pops, flash), then reveals the item with a rarity banner and confetti that scales with rarity. Insufficient coins shows a message and does nothing. | Done |
 | SHP-05 | **Duplicates convert to coins:** Common 10, Uncommon 25, Rare 60, Epic 150, Legendary 350. | Done |
-| SHP-06 | **My Items** shows a 3-row loadout (Player skin, Slot 1: Weapon, Slot 2: Utility) with an animated preview (fires/reloads for a gun, swings for a sword), filters (All / Player Skins / Weapons / Utility), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, each card's blurb, and an Equip button per owned item. | Done |
-| SHP-07 | One player skin and one weapon (a gun or a sword) are always equipped; the utility slot is optional and can be unequipped by clicking it again. Only owned items can be equipped; the default skin, gun and sword are always owned. | Done |
-| SHP-08 | Equipped items are used in every raid and shown to all players (skin, weapon skin, bullet/swing style, trail, reload animation, utility effect). | Done |
+| SHP-06 | **My Items** shows a 3-row loadout (Player skin, Slot 1: Weapon, Slot 2: Utility) with an animated preview (the equipped sword swinging), filters (All / Player Skins / Weapons / Utility), a "hide locked" toggle, a collected counter, owned counts, locked items dimmed, each card's blurb, and an Equip button per owned item. | Done |
+| SHP-07 | One player skin and one weapon (a sword) are always equipped; the utility slot is optional and can be unequipped by clicking it again. Only owned items can be equipped; the default skin and sword are always owned. | Done |
+| SHP-08 | Equipped items are used in every raid and shown to all players (skin, sword look, utility effect). | Done |
 | SHP-09 | Skins are cosmetic only - no stat effects. Utility items are the exception (WPN-03): they have a small real effect, but which one is purely a player choice, not tied to a skin or weapon. | Done |
 
 Crates:
 
 | Crate | Price | Pool | Rarity weights |
 |-------|-------|------|----------------|
-| Starter Crate | 100 | Skins, guns, swords and utility items (38) | Common 64, Uncommon 27, Rare 8, Epic 1 |
+| Starter Crate | 100 | Skins, swords and utility items (24) | Common 64, Uncommon 27, Rare 8, Epic 1 |
 | Hero Crate | 250 | Player skins only (10) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Arsenal Crate | 250 | Weapons and charms - guns, swords and utility items (26) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
-| Cosmic Crate | 400 | Items tagged "cosmic" (7): Astronaut, Galaxy Walker, Stardust Wand, Void Pulse, Solar Flare, Sunbreaker, Voidbone Fang | Rare 60, Epic 32, Legendary 8 |
-| Legend Crate | 700 | Skins, guns, swords and utility items (26) | Rare 46, Epic 39, Legendary 15 |
+| Arsenal Crate | 250 | Swords and charms (13) | Uncommon 38, Rare 40, Epic 17, Legendary 5 |
+| Cosmic Crate | 400 | Items tagged "cosmic" (4): Astronaut, Galaxy Walker, Voidbone Fang, Dawnbreaker | Rare 60, Epic 32, Legendary 8 |
+| Legend Crate | 700 | Skins, swords and utility items (17) | Rare 46, Epic 39, Legendary 15 |
 
 ### 10.3 Items
 
 Rarities: Common, Uncommon, Rare, Epic, Legendary (rarer items are drawn with more animation and glow).
 
-| Rarity | Player skins | Gun skins | Swords |
-|--------|--------------|-----------|--------|
-| Common | Classic Cup (default), Sprout, Bubblegum, Bumblebee | Standard Blaster (default), Candy Blaster, Bubble Popper, Lime Zapper | Training Nail (default) |
-| Uncommon | Buccaneer, Frost Sprite, Shadow Ninja | Rocket Ray, Pixel Pistol, Petal Wand | Moss Blade |
-| Rare | Astronaut, Star Wizard, Robo-Bot | Frost Cannon, Ember Rifle, Stardust Wand | Frostbite Edge |
-| Epic | Inferno, Galaxy Walker | Void Pulse, Solar Flare | Voidbone Fang (cosmic) |
-| Legendary | Golden Champion, Prism Phantom | Sunbreaker, Prism Railgun | Dawnbreaker |
+| Rarity | Player skins | Swords |
+|--------|--------------|--------|
+| Common | Classic Cup (default), Sprout, Bubblegum, Bumblebee | Training Nail (default) |
+| Uncommon | Buccaneer, Frost Sprite, Shadow Ninja | Moss Blade |
+| Rare | Astronaut, Star Wizard, Robo-Bot | Frostbite Edge |
+| Epic | Inferno, Galaxy Walker | Voidbone Fang (cosmic) |
+| Legendary | Golden Champion, Prism Phantom | Dawnbreaker (cosmic) |
 
 Utility items (WPN-03) aren't cosmetic and are listed in that table instead of here.
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| ITM-01 | All skins, guns and swords are drawn with canvas paths and must look polished: outlines, gradients, and animation on higher rarities (flames, sparkles, rainbow, twinkling stars). The same drawing code renders the raid, shop previews and the loadout. | Done |
-| ITM-02 | Gun skins change the gun model (blaster, cannon, wand, ray, rail), the **bullet style** and the bullet trail. | Done |
-| ITM-03 | Tall hats/hair must not overlap the health bar or reload ring (bars are lifted per skin). | Done |
+| ITM-01 | All skins and swords are drawn with canvas paths and must look polished: outlines, gradients, and animation on higher rarities (flames, sparkles, rainbow, twinkling stars). The same drawing code renders the raid, shop previews and the loadout. | Done |
+| ITM-03 | Tall hats/hair must not overlap the health bar (bars are lifted per skin). | Done |
 | ITM-04 | Sword skins change the blade's colors and share one swing shape (out-and-back arc with a fading crescent slash trail) - see WPN-02. | Done |
 
 ## 11. Data model (Firebase)
@@ -289,8 +281,8 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | Firestore `publicSets/<id>` | Community question sets (`ownerId`, `name`, `questions`, ...). |
 | RTDB `lobbies/<code>` | `name`, `hostId`, `status`, `playerCount`, `createdAt`, `bossType`, `difficulty`, `raidStart`, `players`. |
 | RTDB `bossRaid/<code>/gameState` | Host-published boss, projectiles, hazards, slam effects, `gameOver`, `victory`. |
-| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, reload, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a gun or sword id), utility, `wardUsed`). |
-| RTDB `bossRaid/<code>/presence`, `shots`, `mathHits` | Heartbeats, relayed gun shots (melee hits resolve straight from synced player state - WPN-02 - no relay needed), math answers (math off). |
+| RTDB `bossRaid/<code>/players/<raidId>` | Per-player live state (position, velocity, `onGround`, health, `maxHealth`, shield, facing, `swing`/`swingTimer`/`swingDir`, skin, weapon (`gun` field - a sword id), utility, `wardUsed`). |
+| RTDB `bossRaid/<code>/presence`, `mathHits` | Heartbeats and math answers (math off). Melee hits resolve straight from synced player state (WPN-02), so there is no shot relay. |
 | `localStorage` `mathquest_raid_profile_v1` | `coins`, `owned` (id to count), `equipped` (skin, gun (weapon slot), utility), `stats`. |
 
 | ID | Requirement | Status |
@@ -301,15 +293,15 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 
 - **Sword hitbox accuracy is only frame-perfect for the host.** WPN-02's per-frame overlap check
   runs on the host, using every player's *synced* position/direction (updated roughly every 2
-  frames via `raidSendLocalState`) - the same latency tradeoff bullets already have. A non-host
+  frames via `raidSendLocalState`) - the same kind of latency tradeoff any synced state has. A non-host
   player's swing is judged against slightly-stale data, not their own live-local view.
 - **Realtime Database rules are not deployed.** `database.rules.json` requires auth for writes, but the deploy workflow only deploys hosting, so the live database is effectively open. Deploying the rules is a separate decision.
 - **Coins and items live in the browser** and can be edited by a determined player. Acceptable for cosmetics; move server-side if coins ever gain real value.
 - **One pre-existing self-test fails:** "Attack timer resets after attack" (`testBossAttack`). It is unrelated to current gameplay and shows up in every console.
 - Four legacy `bossRaid` nodes from an old version (`global` and three long ids) remain; current code never uses them.
-- `sprites/` in the working folder is untracked dev tooling and is never deployed. It holds the v1 boss sheet, the v2 boss, player-skin and gun sheets (only the boss sheet is used by the game, via `assets/boss-sheet.webp`), `build-sheets.js` / `build-game-sheet.js` to regenerate them and `verify-sheets.js` to check them.
+- `sprites/` in the working folder is untracked dev tooling and is never deployed. It holds the v1 boss sheet, the v2 boss, player-skin sheets (and the old gun sheets, no longer relevant) (only the boss sheet is used by the game, via `assets/boss-sheet.webp`), `build-sheets.js` / `build-game-sheet.js` to regenerate them and `verify-sheets.js` to check them.
 - **Sprite bosses are drawn bigger and more detailed than the old art but keep the old hitboxes** (120 x 80). Parts of the art outside the hitbox (Wyrm wings and body, Warden robe) cannot be hit. Telegraph glows that used to be drawn inside the old boss art (throat glow, raised chain, orb) are now only in the sheet frames; floor markers and hazards are unchanged.
-- The sheet's death frames are not shown on victory yet, and the player and gun sheets are not used by the game (skins and guns are still drawn with canvas paths).
+- The sheet's death frames are not shown on victory yet, and the player sheets are not used by the game (skins and swords are still drawn with canvas paths).
 - Lobby host (creator) and raid host (simulation owner) are different concepts and can differ.
 - In a hidden headless browser pane `requestAnimationFrame` does not tick, so game-loop tests must drive frames manually.
 
@@ -359,3 +351,4 @@ Utility items (WPN-03) aren't cosmetic and are listed in that table instead of h
 | 2026-10 | Made every slash smaller (WPN-10): the swing reach is now 100 px (62 px either side), diagonals 80 px, and the drawn slash radius 115 px. Split jump from aiming (RAI-10): Z is the only jump key; Up only aims the sword upward and never makes the player jump. |
 | 2026-10 | Movement retune (RAI-16, RAI-17, WPN-06): a much lower jump (tap ~100 px, hold ~150 px), slower running, a dash that goes a little farther (154 px) and keeps your height (no gravity while it lasts), and a double jump that hops less far than the first jump. Nimble Treads now genuinely speeds up running (it used to only raise a speed cap that running never reached). |
 | 2026-10 | Moved the five floating bosses down near the ground (BOS-44) so a small hop reaches them and a held jump lets you pogo them, and gave lobbed boss shots a proper rise-then-fall arc so a low boss does not fling them flat at body height. |
+| 2026-10 | **Removed all guns and everything related to them** (RAI-03, RAI-12, RAI-13, RAI-14, ITM-02 are gone, WPN-01 rewritten): no shooting, ammo, reloading, reload HUD/ring, bullets, non-host shot relay (`shots` node), the 14 gun skins and the three gun-only charms (Quick Hands, Extended Mag, Overclock Coil - 13 charms remain). The sword is the only weapon, a fresh save equips the Training Nail, and old saves drop their guns and fall back to it. Item total 49 to 32; crate pools are now Starter 24, Hero 10, Arsenal 13, Cosmic 4 (Dawnbreaker took over as the cosmic legendary), Legend 17. The Spectral Familiar keeps its own bolt, now drawn by a small dedicated orb. |

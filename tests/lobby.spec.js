@@ -140,7 +140,8 @@ test.describe('Boss and difficulty selection, waiting room (LOB-03 to LOB-06, LO
     await tut.locator('summary').click();
     await expect(tut).toHaveAttribute('open', '');
     const text = await tut.innerText();
-    ['Move', 'Jump', 'Shoot', 'Shield', 'Dash'].forEach((w) => expect(text).toContain(w));
+    ['Move', 'Jump', 'Attack', 'Shield', 'Dash'].forEach((w) => expect(text).toContain(w));
+    expect(text, 'the guns are gone: nothing about shooting').not.toMatch(/shoot|reload|ammo/i);
     expect(text).not.toMatch(/math/i);
     expect(text).not.toMatch(/weak|vulnerable|exposed/i);
   });
@@ -215,10 +216,10 @@ test.describe('Leaving and cleanup (LOB-09 to LOB-11)', () => {
     await expect.poll(() => page.evaluate(() => currentLobbyId)).toBeNull();
     const r = await page.evaluate(() => ({
       leaves: __fb.db.log.filter((l) => l.op === 'transaction' && l.path === 'lobbies/9001/playerCount').length,
-      presence: raidPresenceInterval, hostCheck: raidHostCheckInterval, shots: raidShotsRef, connected: raidConnectedRef,
+      presence: raidPresenceInterval, hostCheck: raidHostCheckInterval, connected: raidConnectedRef,
       loop: raidLoopRunning, initialized: raidInitialized,
       raidListeners: __fb.db.listeners.filter((l) => l.path.startsWith('bossRaid/9001')).length
     }));
-    expect(r).toEqual({ leaves: 1, presence: null, hostCheck: null, shots: null, connected: null, loop: false, initialized: false, raidListeners: 0 });
+    expect(r).toEqual({ leaves: 1, presence: null, hostCheck: null, connected: null, loop: false, initialized: false, raidListeners: 0 });
   });
 });
