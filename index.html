@@ -3694,6 +3694,7 @@ function resetRaidState() {
   raidG.playerProjectiles = [];
   raidG.slamAnimations = [];
   raidG.hazards = [];
+  raidResetTerrain(raidG.boss.type);
   raidG.minions = [];
   raidG.mathEvent = null;
   raidG.players = {};
@@ -3912,6 +3913,7 @@ const raidG = {
           transition: 0, transitionPhase: 1, exposed: 0, lastPhase: 1, lastAttack: '', comboPending: false, comboTimer: 0,
           hitFlash: 0 },
   projectiles: [],
+  terrain: [], // arena terrain the bosses build (platforms, pillars, floor zones) - TER-01
   playerProjectiles: [],
   slamAnimations: [],
   hazards: [],
@@ -4105,6 +4107,7 @@ function raidSendBossState() {
     playerProjectiles: raidG.playerProjectiles,
     slamAnimations: raidG.slamAnimations,
     hazards: raidG.hazards,
+    terrain: raidG.terrain,
     minions: raidG.minions,
     mathEvent: raidG.mathEvent,
     gameOver: raidG.gameOver,
@@ -4134,6 +4137,7 @@ function raidListenToGame() {
         raidG.playerProjectiles = data.playerProjectiles || [];
         raidG.slamAnimations = data.slamAnimations || [];
         raidG.hazards = data.hazards || [];
+        raidG.terrain = data.terrain || [];
         raidG.minions = data.minions || [];
         raidG.gameOver = data.gameOver || false;
         raidG.victory = data.victory || false;
@@ -4386,6 +4390,156 @@ const RAID_LOB_RISE = 70;
 
 function raidHazard(props) {
   raidG.hazards.push(Object.assign({ life: 60, timer: 0 }, props));
+}
+
+// ------------------------------------------------------------
+// Arena terrain (TER-01 to TER-04): the bosses reshape the arena as they fight. Host-authored and synced
+// with the boss state; every client runs the same physics from the synced list.
+//   platform - a one-way slab: land on it from above, jump up through it from below
+//   pillar   - a solid block from the floor: blocks walking, can be stood on, absorbs shockwaves
+//   zones    - lava, fire, thorns (hurt), mud, water (slow), updraft (lifts a held jump)
+// life = frames left (-1 = permanent), age = frames since it appeared (solid pieces rise for the first
+// RAID_TERRAIN_RISE frames and cannot be stood on until they have; zones are harmless while forming).
+// ------------------------------------------------------------
+const RAID_TERRAIN_RISE = 24;
+let raidTerrainSeq = 1;
+// So the floor never fills up: at most this many of each hurting/slowing zone stand at once - the oldest fade first.
+const RAID_TERRAIN_CAP = { lava: 4, fire: 4, thorns: 4, mud: 3, water: 3, updraft: 6 };
+function raidTerrainAdd(props) {
+  const t = Object.assign({ id: raidTerrainSeq++, age: 0, life: 300, theme: (raidG.boss && raidG.boss.type) || 'grinmaw' }, props);
+  const cap = RAID_TERRAIN_CAP[t.kind];
+  if (cap) {
+    const same = raidG.terrain.filter(o => o.kind === t.kind && o.life !== 0);
+    for (let i = same.length - cap + 1; i > 0; i--) {
+      const oldest = same.reduce((m, o) => (o.age > m.age ? o : m), same[0]);
+      raidG.terrain = raidG.terrain.filter(o => o !== oldest);
+      same.splice(same.indexOf(oldest), 1);
+    }
+  }
+  raidG.terrain.push(t);
+  return t;
+}
+function raidClearTerrain() { raidG.terrain = []; }
+// The permanent pieces of each boss's arena (none yet for most), as specs for raidTerrainAdd.
+function raidTerrainSeedFor(type) {
+  const P = (x, w, rise) => ({ kind: 'platform', x: x, w: w, top: raidGROUND_Y - rise, life: -1, theme: type });
+  if (type === 'wyrm') return [P(200, 150, 95), P(500, 160, 165), P(800, 150, 95)];
+  if (type === 'griffon') return [P(240, 150, 95), P(760, 150, 95)];
+  return [];
+}
+function raidSeedTerrain(type) { raidTerrainSeedFor(type).forEach(raidTerrainAdd); }
+// The arena starts over: everything the last fight built is gone and the new boss's permanent pieces are placed.
+function raidResetTerrain(type) { raidClearTerrain(); raidSeedTerrain(type); }
+
+const RAID_TERRAIN_SOLID = { platform: true, pillar: true };
+// The highest surface a player is standing on or falling onto: a platform or pillar top they were above
+// last frame and have reached this frame, otherwise the floor.
+function raidSupportTop(p, prevFeet) {
+  const feet = p.y + p.h, cx = raidPx(p);
+  let best = raidGROUND_Y;
+  for (let i = 0; i < raidG.terrain.length; i++) {
+    const t = raidG.terrain[i];
+    if (!RAID_TERRAIN_SOLID[t.kind] || t.age < RAID_TERRAIN_RISE) continue;
+    if (Math.abs(cx - t.x) >= t.w / 2 + 10) continue;
+    if (prevFeet <= t.top + 0.5 && feet >= t.top && t.top < best) best = t.top;
+  }
+  return best;
+}
+// A pillar is a wall: a player whose feet are below its top is pushed back out of it.
+function raidPushOutOfPillars(p) {
+  const feet = p.y + p.h;
+  for (let i = 0; i < raidG.terrain.length; i++) {
+    const t = raidG.terrain[i];
+    if (t.kind !== 'pillar' || t.age < RAID_TERRAIN_RISE || feet <= t.top + 4) continue;
+    const l = t.x - t.w / 2, r = t.x + t.w / 2;
+    if (p.x + p.w > l && p.x < r) { p.x = (p.x + p.w / 2 < t.x) ? l - p.w : r; p.vx = 0; }
+  }
+}
+// What the zones under a player do to them this frame: slow (x speed), lift (updraft).
+function raidTerrainEffects(p) {
+  let slow = 1, lift = 0;
+  const cx = raidPx(p), feet = p.y + (p.h || 48);
+  for (let i = 0; i < raidG.terrain.length; i++) {
+    const t = raidG.terrain[i];
+    if (Math.abs(cx - t.x) >= t.w / 2) continue;
+    if ((t.kind === 'mud' || t.kind === 'water') && feet >= raidGROUND_Y - 12) slow = Math.min(slow, t.kind === 'mud' ? 0.45 : 0.6);
+    else if (t.kind === 'updraft' && t.age >= RAID_TERRAIN_RISE / 2) lift = 1;
+  }
+  return { slow: slow, lift: lift };
+}
+// Does a pillar stand in the way of a shockwave at hz.x?
+function raidTerrainBlocksWave(hz) {
+  for (let i = 0; i < raidG.terrain.length; i++) {
+    const t = raidG.terrain[i];
+    if (t.kind === 'pillar' && t.age >= RAID_TERRAIN_RISE && Math.abs(hz.x - t.x) < t.w / 2 + Math.abs(hz.speed || 0)) return true;
+  }
+  return false;
+}
+// Host: age and expire the terrain, and hurt whoever is standing in lava, fire or thorns once they have formed.
+function raidUpdateTerrain() {
+  raidG.terrain.forEach(t => {
+    t.age++;
+    if (t.life > 0) t.life--;
+    if ((t.kind !== 'lava' && t.kind !== 'fire' && t.kind !== 'thorns') || t.age < RAID_TERRAIN_RISE) return;
+    Object.keys(raidG.players).forEach(id => {
+      const p = raidG.players[id];
+      if (!p || p.health === 0) return;
+      const feet = p.y + 48;
+      if (Math.abs(raidPx(p) - t.x) >= t.w / 2) return;
+      if (feet >= raidGROUND_Y - (t.kind === 'thorns' ? 36 : 6)) raidDamagePlayer(id, p, 1);
+    });
+  });
+  raidG.terrain = raidG.terrain.filter(t => t.life !== 0);
+}
+// A client between snapshots keeps the terrain ageing so pieces still rise and blink smoothly.
+function raidExtrapolateTerrain() {
+  if (raidIsHost) return;
+  raidG.terrain.forEach(t => { t.age++; if (t.life > 1) t.life--; });
+}
+
+// What a lobbed object does when it lands (TER-04): a burst that hurts anyone on the floor nearby, and the
+// terrain it leaves behind. The marker shown while it is in the air uses RAID_LAND_RADIUS.
+const RAID_LAND_RADIUS = { rubble: 80, ember: 60, bile: 50, pod: 40, boulder: 70, spirit: 50, feather: 60, pillar: 38, thornSpike: 52 };
+// Raise a stone pillar (cover and high ground); never more than six stand at once - the oldest crumble first.
+const RAID_MAX_PILLARS = 6;
+function raidAddPillar(x, life, theme) {
+  const standing = raidG.terrain.filter(t => t.kind === 'pillar' && t.life !== 0);
+  if (standing.length >= RAID_MAX_PILLARS) {
+    const oldest = standing.reduce((m, t) => (t.age > m.age ? t : m), standing[0]);
+    raidG.terrain = raidG.terrain.filter(t => t !== oldest);
+  }
+  return raidTerrainAdd({ kind: 'pillar', x: clampX(x, 70, 930), w: 80, top: raidGROUND_Y - 100, life: life, theme: theme || 'colossus' });
+}
+const RAID_LAND_FX = {
+  rubble: (x) => { raidHazard({ kind: 'burst', x: x, r: 80, life: 16 }); raidTerrainAdd({ kind: 'lava', x: x, w: 130, life: 420 }); },
+  ember: (x) => { raidHazard({ kind: 'burst', x: x, r: 60, life: 16 }); raidTerrainAdd({ kind: 'fire', x: x, w: 100, life: 300 }); },
+  bile: (x) => { raidHazard({ kind: 'burst', x: x, r: 50, life: 16 }); raidTerrainAdd({ kind: 'mud', x: x, w: 170, life: 540 }); },
+  pod: (x) => { raidHazard({ kind: 'thornSpike', x: x, life: RAID_HAZARD_LIFE.thornSpike }); raidTerrainAdd({ kind: 'thorns', x: x, w: 2 * RAID_THORN_HALF, life: 360 }); },
+  boulder: (x) => { raidHazard({ kind: 'burst', x: x, r: 70, life: 16 }); raidAddPillar(x, 600, 'colossus'); },
+  spirit: (x) => { raidHazard({ kind: 'burst', x: x, r: 50, life: 16 }); raidTerrainAdd({ kind: 'fire', x: x, w: 90, life: 300, theme: 'warden' }); },
+  feather: (x) => { raidHazard({ kind: 'burst', x: x, r: 60, life: 16 }); raidTerrainAdd({ kind: 'updraft', x: x, w: 170, life: 300 }); }
+};
+// A boss throws something (TER-04): a lobbed, parryable object that explodes where it lands and leaves terrain
+// (RAID_LAND_FX[kind]). It flies from (o.x, o.y) - the boss by default - to tx on a rise-then-fall arc, in T frames.
+const RAID_THROWN_R = { rubble: 15, ember: 12, bile: 15, pod: 12, boulder: 14, spirit: 11, feather: 12 };
+function raidThrow(b, kind, tx, o) {
+  o = o || {};
+  const hx = o.x !== undefined ? o.x : b.x, hy = o.y !== undefined ? o.y : b.y, T = o.T || 64, land = raidGROUND_Y - 14;
+  const g = raidLobGravity(land - hy, T, o.rise || RAID_LOB_RISE);
+  raidG.projectiles.push({
+    x: hx, y: hy, vx: (clampX(tx, 30, 970) - hx) / T, vy: (land - hy - g * T * (T + 1) / 2) / T, gravity: g,
+    r: RAID_THROWN_R[kind] || 12, life: T + 6, isWarning: false, owner: kind, isBossProjectile: true, kind: kind, onLand: kind
+  });
+}
+
+// Where a lobbed object will come down (for its marker): solves y + vy*t + g*t(t+1)/2 = landing height.
+// (frames are discrete: after n frames y = y0 + n*vy + g*n*(n+1)/2, as the game steps it)
+function raidProjectileLandingTime(pr) {
+  const d = (raidGROUND_Y - 14) - pr.y, g = pr.gravity || 0.0001, b = pr.vy + g / 2, disc = b * b + 2 * g * d;
+  return disc < 0 ? 0 : (-b + Math.sqrt(disc)) / g;
+}
+function raidProjectileLandingX(pr) {
+  return pr.x + (pr.vx || 0) * raidProjectileLandingTime(pr);
 }
 
 // Fight-flow state shared by every boss: phase-transition beat, "exposed" damage window
@@ -4841,6 +4995,9 @@ const BOSS_STUN_FRAMES = 120;
 // Warning timings (BOS-45). Every floor strike shows its marker for WARN frames, then strikes for
 // ACTIVE frames. Bramblehide's thorns used to give only 32 frames of low-contrast marker.
 const RAID_THORN_WARN = 60, RAID_THORN_ACTIVE = 28;
+// Each thorn clump is wide (half-width) and tall - a jump can still clear it (the apex is about 118 px) - and
+// a root attack raises a row of them with a gap between each (BOS-40).
+const RAID_THORN_HALF = 52, RAID_THORN_HEIGHT = 110, RAID_THORN_GAP = 170;
 const RAID_TREMOR_WARN = 44, RAID_TREMOR_ACTIVE = 20;
 const RAID_FEATHERFALL_WARN = 50, RAID_FEATHERFALL_ACTIVE = 14;
 // Hazard lifetimes for the kinds a landing shot erupts into (pillar: 32 marker + 28 strike).
@@ -4917,9 +5074,28 @@ function raidNearestPlayerDir(b) {
   return best && raidPx(best) < b.x ? -1 : 1;
 }
 
+// Walk the boss after the nearest player at up to speed px/frame (never beyond [lo, hi]) - bosses do not stand still
+// (BOS-47): it weaves back and forth across the player (about 170 px either side) instead of parking on them.
+function raidStalk(b, speed, lo, hi) {
+  let best = null, bestD = Infinity;
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p || p.health === 0) return;
+    const d = Math.abs(raidPx(p) - b.x);
+    if (d < bestD) { bestD = d; best = raidPx(p); }
+  });
+  if (best === null) return;
+  let target = best + Math.sin(raidG.frame * 0.011) * 170;
+  if (target < lo) target = lo + (lo - target); // bounce off the ends of its range rather than stopping against them
+  if (target > hi) target = hi - (target - hi);
+  target = clampX(target, lo, hi);
+  b.x += Math.max(-speed, Math.min(speed, target - b.x));
+}
+
 // While a boss is fading/submerged it can't be hit - shots pass straight through.
 function raidBossUntargetable(b) {
   const s = b.anim ? b.anim.state : 'idle';
+  if (b.type === 'grinmaw') return (s === 'withdraw' || s === 'hurl' || s === 'advance') && b.animScale < 0.85; // far in the background
   if (b.type === 'glutton') return s === 'sink' || s === 'swim' || s === 'rise';
   if (b.type === 'warden') return s === 'fade' || s === 'ghost' || s === 'materialize';
   return false;
@@ -4930,27 +5106,33 @@ function raidBossUntargetable(b) {
 // ------------------------------------------------------------
 
 function grinmawAttack(b) {
-  const options = ['candy', 'slam'];
+  const options = ['bombard', 'slam'];
   if (b.phase >= 2) options.push('minions');
   const pick = raidPickAttack(b, options);
-  if (pick === 'candy') b.anim = { state: 'spit', timer: 0 };
+  if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [20, 90, 160] : [20, 100] };
   else if (pick === 'slam') b.anim = { state: 'windup', timer: 0 };
   else b.anim = { state: 'summon', timer: 0 };
 }
 
-// Fired from the mouth at the end of the inhale.
-function grinmawCandyRain(b) {
-  Object.keys(raidG.players).forEach((id) => {
+// Bombardment (BOS-20): from the background Grinmaw hurls rubble at every player in waves. Each piece is a
+// big, parryable lob with a marker where it will land; it bursts there and leaves a pool of lava (TER-04).
+function grinmawHurlRubble(b, wave) {
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
+  ids.forEach(id => {
     const p = raidG.players[id];
-    if (!p) return;
-    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y + 30);
-    const dist = Math.hypot(dx, dy) || 1;
-    const spd = 1.7 + b.phase * 0.35;
-    raidG.projectiles.push({
-      x: b.x, y: b.y + 30,
-      vx: (dx / dist) * spd, vy: (dy / dist) * spd,
-      r: 12, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'candy'
-    });
+    raidThrow(b, 'rubble', raidPx(p) + (Math.random() - 0.5) * 80 + (p.vx || 0) * 10, { T: 64, y: b.y + (b.animOffsetY || 0) });
+  });
+  if (b.phase >= 2 && ids.length) raidThrow(b, 'rubble', 120 + Math.random() * 760, { T: 64, y: b.y + (b.animOffsetY || 0) }); // and one anywhere, so no corner is safe
+  raidG.slamAnimations.push({ x: b.x, y: b.y + 40, life: 8, phase: 'impact', timer: 0 });
+}
+
+// The slam breaks the floor (BOS-20): two lava cracks, one each side, with a stone slab rising over each
+// to hop onto. They last 6 seconds.
+function grinmawFloorBreak(b) {
+  [-1, 1].forEach(side => {
+    const x = clampX(b.x + side * (220 + Math.random() * 150), 90, 910);
+    raidTerrainAdd({ kind: 'lava', x: x, w: 130, life: 360 });
+    raidTerrainAdd({ kind: 'platform', x: x, w: 120, top: raidGROUND_Y - 100, life: 360 });
   });
 }
 
@@ -4960,6 +5142,7 @@ function grinmawShockwaves(b) {
     raidHazard({ kind: 'shockwave', x: b.x, dir: dir, speed: 2.4 + b.phase * 0.3, life: 300 });
   });
   raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+  grinmawFloorBreak(b);
 }
 
 // Imps are hurled out of Grinmaw's hands, land, then scurry off along the floor.
@@ -4978,15 +5161,36 @@ function grinmawUltimate(b) {
 
 // spit: lean back and inhale, then fire. summon: rear up and roar, then throw the imps.
 // windup -> slam -> dazed: rise up, crash down (shockwaves), then slump exhausted.
+const GRINMAW_POSITIONAL = ['withdraw', 'hurl', 'advance'];
+const GRINMAW_FAR_SCALE = 0.6; // how small he is drawn in the background
+
 function updateGrinmawAnimation(b) {
   const a = b.anim;
   a.timer++;
-  if (a.state === 'spit') {
-    const e = easeInOut(Math.min(a.timer / 26, 1));
-    b.animScale = 1 + 0.12 * e;
-    b.animOffsetY = -8 * e;
-    if (a.timer === 26) grinmawCandyRain(b);
-    if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
+  if (a.state === 'withdraw') {
+    // back into the background: smaller, hazier and higher, out of reach
+    const e = easeInOut(Math.min(a.timer / 40, 1));
+    b.x = lerp(a.homeX, 500, e);
+    b.animScale = lerp(1, GRINMAW_FAR_SCALE, e);
+    b.animAlpha = 1 - 0.2 * e;
+    b.animOffsetY = -70 * e;
+    if (a.timer >= 40) { a.state = 'hurl'; a.timer = 0; }
+  } else if (a.state === 'hurl') {
+    b.x = 500 + Math.sin(a.timer * 0.045) * 170; // paces the back of the hall as he throws
+    b.animScale = GRINMAW_FAR_SCALE;
+    b.animAlpha = 0.8;
+    const wave = a.waves.indexOf(a.timer);
+    b.animOffsetY = -70 - (a.waves.some(w => a.timer >= w && a.timer < w + 8) ? 10 : 0); // a heave with each throw
+    if (wave >= 0) grinmawHurlRubble(b, wave);
+    if (a.timer >= a.waves[a.waves.length - 1] + 50) { a.state = 'advance'; a.timer = 0; a.fromX = b.x; }
+  } else if (a.state === 'advance') {
+    // he comes forward, growing, to slam the floor
+    const e = easeInOut(Math.min(a.timer / 45, 1));
+    b.x = lerp(a.fromX, 500, e);
+    b.animScale = lerp(GRINMAW_FAR_SCALE, 1.08, e);
+    b.animAlpha = lerp(0.8, 1, e);
+    b.animOffsetY = lerp(-70, -32, e);
+    if (a.timer >= 45) { a.state = 'slam'; a.timer = 0; }
   } else if (a.state === 'summon') {
     const e = easeInOut(Math.min(a.timer / 30, 1));
     b.animScale = 1 + 0.15 * e;
@@ -5001,6 +5205,7 @@ function updateGrinmawAnimation(b) {
   } else if (a.state === 'slam') {
     const t = Math.min(a.timer / 5, 1);
     b.animOffsetY = -32 * (1 - t) + 10 * t;
+    b.animAlpha = 1;
     if (t >= 1) {
       grinmawShockwaves(b);
       a.state = 'dazed'; a.timer = 0;
@@ -5031,7 +5236,7 @@ function wardenAttack(b) {
   else wardenVoidOrb(b);
 }
 
-// A chain is flung from the Warden's hands to a marked spot on the floor.
+// A chain is flung from the Warden's hands to a marked spot on the floor, and leaves an iron post there.
 function wardenChainLash(b) {
   const count = b.phase >= 2 ? 2 : 1;
   for (let i = 0; i < count; i++) {
@@ -5051,10 +5256,11 @@ function wardenStartVanish(b) {
 }
 
 // A dark orb grows in the Warden's hands, is hurled to a spot mid-arena, hovers
-// (spikes growing = about to go off), then bursts into slow radial shots.
+// (spikes growing = about to go off), then bursts into four spirits that fall to the floor around the spot
+// beneath it, each leaving a patch of ghost-fire (TER-04).
 function wardenVoidOrb(b) {
   const pick = raidRandomPlayer();
-  const tx = clampX(pick ? raidPx(pick.p) : 500, 150, 850);
+  const tx = clampX(pick ? raidPx(pick.p) : 500, 250, 750);
   raidHazard({ kind: 'voidOrb', x: b.x, y: b.y, sx: b.x, sy: b.y, tx: tx, ty: raidGROUND_Y - 190, life: 200 });
   b.anim = { state: 'cast', timer: 0 };
 }
@@ -5133,51 +5339,41 @@ function updateWardenAnimation(b) {
 const WYRM_HEAD_OFFSETS = [-52.5, 0, 52.5];
 
 function wyrmAttack(b) {
-  const options = ['volley', 'fire'];
+  const options = ['bombs', 'sweep'];
   if (b.phase >= 2) options.push('dive');
   const pick = raidPickAttack(b, options);
-  if (pick === 'volley') wyrmTripleVolley(b);
-  else if (pick === 'fire') wyrmFireSpit(b);
+  if (pick === 'bombs') wyrmBombs(b);
+  else if (pick === 'sweep') wyrmSweep(b);
   else wyrmDiveBomb(b);
 }
 
-// Each head takes its turn to spit a slow fang at someone, after the body coils back.
-// Shots are scheduled by animation age (frames) so they stay in step with the animation.
-function wyrmTripleVolley(b) {
-  if (Object.keys(raidG.players).length === 0) return;
-  b.anim = { state: 'coil', timer: 0, age: 0, shotKind: 'fang', shots: [24, 44, 64] };
+// Fire bombs (BOS-22): after the body coils, the heads take turns spitting a bomb at a spot near someone. Each
+// is a big lob with a landing marker; it bursts and leaves burning ground (TER-04). Shots are scheduled by
+// animation age (frames) so they stay in step with the animation.
+function wyrmBombs(b) {
+  b.anim = { state: 'coil', timer: 0, age: 0, shots: b.phase >= 2 ? [26, 60, 94] : [26, 60] };
 }
-
-// Fireballs are spat from the head in an arc and land on a spot; a marker shows the
-// landing, then a pillar of flame erupts there. Replaces the old screen-wide sweep.
-function wyrmFireSpit(b) {
-  const shots = b.phase >= 2 ? [26, 60, 94] : [26, 60];
-  b.anim = { state: 'coil', timer: 0, age: 0, shotKind: 'fire', shots: shots };
-}
-
-function wyrmFireShot(b, kind, index) {
-  if (kind === 'fang') {
-    const pick = raidRandomPlayer();
-    if (!pick) return;
-    const hx = b.x + WYRM_HEAD_OFFSETS[index % 3], hy = b.y + 10;
-    const dx = raidPx(pick.p) - hx, dy = (pick.p.y + 24) - hy;
-    const dist = Math.hypot(dx, dy) || 1;
-    const spd = 1.9 + b.phase * 0.35;
-    raidG.projectiles.push({
-      x: hx, y: hy, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
-      r: 10, life: 200, isWarning: false, owner: pick.id, isBossProjectile: true, kind: 'fang'
-    });
-  } else {
-    const pick = raidRandomPlayer();
-    const tx = clampX((pick ? raidPx(pick.p) : 500) + (Math.random() - 0.5) * 180, 60, 940);
-    const hx = b.x, hy = b.y + 20;
-    const T = 60, g = raidLobGravity((raidGROUND_Y - 12) - hy, T, RAID_LOB_RISE);
-    raidG.projectiles.push({
-      x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 12) - hy - g * T * (T + 1) / 2) / T, gravity: g,
-      r: 11, life: T + 6, isWarning: false, owner: 'ember', isBossProjectile: true, kind: 'ember', onLand: 'pillar'
-    });
-  }
+function wyrmBombShot(b, index) {
+  const pick = raidRandomPlayer();
+  const tx = clampX((pick ? raidPx(pick.p) : 500) + (Math.random() - 0.5) * 140, 60, 940);
+  raidThrow(b, 'ember', tx, { x: b.x + WYRM_HEAD_OFFSETS[index % 3], y: b.y + 20, T: 60 });
   raidSendBossState();
+}
+
+// The sweep (BOS-22): the Wyrm flies to one edge of the map, then crosses the whole of it in a long diving
+// arc, dropping fire bombs - some ahead of it, some at the players - so the floor burns along its path.
+const WYRM_SWEEP_TOP = 120, WYRM_SWEEP_DIP = 150;
+function wyrmSweep(b) {
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  b.anim = { state: 'sweepAim', timer: 0, dir: dir, startX: dir > 0 ? 70 : 930, endX: dir > 0 ? 930 : 70, fromX: b.x, fromY: b.y };
+}
+function wyrmSweepDrop(b, a, index) {
+  let tx;
+  if (index % 2) { // at a player
+    const pick = raidRandomPlayer();
+    tx = (pick ? raidPx(pick.p) : b.x) + (Math.random() - 0.5) * 60;
+  } else tx = b.x + a.dir * 250; // ahead of itself, onto the floor it is about to cross
+  raidThrow(b, 'ember', tx, { y: b.y + 20, T: 44 });
 }
 
 // The Wyrm flies over its target, hovers while a shadow grows on the floor, then dives.
@@ -5195,10 +5391,13 @@ function wyrmUltimate(b) {
   });
 }
 
-const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb'];
+const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'];
 
+// Its patrol is a wide loop across the arena (it is never still): out to 380 px either side, rising and
+// falling by up to 45 px (always higher than its resting height, so it stays out of reach from the floor).
 function wyrmPathPos() {
-  return { x: 500 + Math.sin(raidG.frame * 0.01) * 260, y: BOSS_HOVER_Y.wyrm + Math.sin(raidG.frame * 0.03) * 18 };
+  const f = raidG.frame;
+  return { x: 500 + Math.sin(f * 0.011) * 380, y: BOSS_HOVER_Y.wyrm - (0.5 + 0.5 * Math.sin(f * 0.017)) * 45 };
 }
 
 function updateWyrmAnimation(b) {
@@ -5207,7 +5406,7 @@ function updateWyrmAnimation(b) {
   if (a.shots) {
     a.age++;
     const idx = a.shots.indexOf(a.age);
-    if (idx >= 0) wyrmFireShot(b, a.shotKind, idx);
+    if (idx >= 0) wyrmBombShot(b, idx);
   }
   if (a.state === 'coil') {
     const t = Math.min(a.timer / 16, 1);
@@ -5238,6 +5437,7 @@ function updateWyrmAnimation(b) {
         if (Math.abs(raidPx(p) - a.targetX) < 78 && !raidAirborne(p, 50)) raidDamagePlayer(id, p, 1);
       });
       raidG.slamAnimations.push({ x: a.targetX, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+      [-1, 1].forEach(sd => raidTerrainAdd({ kind: 'fire', x: clampX(a.targetX + sd * 120, 50, 950), w: 90, life: 300 })); // the crash sets the floor alight
       a.state = 'crash'; a.timer = 0;
       b.exposed = BOSS_STUN_FRAMES;
     }
@@ -5251,6 +5451,25 @@ function updateWyrmAnimation(b) {
     b.x = lerp(a.targetX, p.x, e);
     b.y = lerp(raidGROUND_Y - 75, p.y, e);
     if (a.timer >= 50) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetX = 0; b.animOffsetY = 0; }
+  } else if (a.state === 'sweepAim') {
+    const e = easeInOut(Math.min(a.timer / 50, 1));
+    b.animOffsetX = 0; b.animOffsetY = 0;
+    b.x = lerp(a.fromX, a.startX, e);
+    b.y = lerp(a.fromY, WYRM_SWEEP_TOP, e);
+    if (a.timer >= 50) { a.state = 'sweepPass'; a.timer = 0; }
+  } else if (a.state === 'sweepPass') {
+    const u = Math.min(a.timer / 110, 1);
+    b.x = lerp(a.startX, a.endX, u);
+    b.y = WYRM_SWEEP_TOP + Math.sin(u * Math.PI) * WYRM_SWEEP_DIP;
+    const every = b.phase >= 2 ? 12 : 16;
+    if (a.timer >= 10 && a.timer <= 100 && a.timer % every === 0) wyrmSweepDrop(b, a, Math.round(a.timer / every));
+    if (u >= 1) { a.state = 'sweepOut'; a.timer = 0; a.endY = b.y; }
+  } else if (a.state === 'sweepOut') {
+    const e = easeInOut(Math.min(a.timer / 45, 1));
+    const p = wyrmPathPos();
+    b.x = lerp(a.endX, p.x, e);
+    b.y = lerp(a.endY, p.y, e);
+    if (a.timer >= 45) { b.anim = { state: 'idle', timer: 0 }; }
   } else if (a.state === 'settle') {
     const t = Math.min(a.timer / 15, 1);
     b.animOffsetX = (b.animOffsetX || 0) * (1 - t);
@@ -5268,39 +5487,30 @@ function gluttonAttack(b) {
   // A new attack cancels any clamp-shut so the boss is never invulnerable through its own recovery.
   b.invulnerable = false; b.feastWarning = false; b.feastCooldown = Math.max(b.feastCooldown || 0, 200);
   const options = ['belch', 'chomp'];
-  if (b.phase >= 2) options.push('fan');
+  if (b.phase >= 2) options.push('flood');
   const pick = raidPickAttack(b, options);
   if (pick === 'chomp') gluttonStartChomp(b);
   else b.anim = { state: 'inflate', timer: 0, kind: pick };
 }
 
-// Lobs a slow bubble from the mouth toward each player's current spot.
+// Belch (BOS-23): a big glob of bile lobbed from the mouth at each player's spot (from phase 2, one more
+// somewhere random). It can be parried; where it lands it bursts and leaves a pool of slowing mud (TER-04).
 function gluttonBelch(b) {
-  Object.keys(raidG.players).forEach(id => {
-    const p = raidG.players[id];
-    if (!p) return;
-    gluttonLobBubble(b, clampX(raidPx(p), 40, 960), 85);
-  });
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
+  const targets = ids.map(id => raidPx(raidG.players[id]));
+  if (b.phase >= 2 || !targets.length) targets.push(120 + Math.random() * 760);
+  targets.forEach(tx => raidThrow(b, 'bile', tx, { y: b.y - 5, T: 85 }));
 }
 
-// Phase 2+: a spread of bubbles lobbed up and out that drift down across the arena with
-// gaps between them, so the answer is to pick a gap.
-function gluttonBubbleFan(b) {
-  for (let i = 0; i < 5; i++) {
-    gluttonLobBubble(b, clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960), 95);
-  }
-}
-
-// Solves the launch velocity so the bubble lands on the floor at tx after T frames.
-function gluttonLobBubble(b, tx, T) {
-  const hx = b.x, hy = b.y - 5;
-  const g = raidLobGravity((raidGROUND_Y - 20) - hy, T, RAID_LOB_RISE);
-  raidG.projectiles.push({
-    x: hx, y: hy,
-    vx: (tx - hx) / T,
-    vy: ((raidGROUND_Y - 20) - hy - g * T * (T + 1) / 2) / T,
-    gravity: g,
-    r: 14, life: T + 10, isWarning: false, owner: 'bubble', isBossProjectile: true, kind: 'bubble'
+// Flood (phase 2+, BOS-23): the swamp rises in three places - slowing water for ten seconds - and a lily pad
+// floats over two of them to hop up onto (TER-02). Nothing is thrown: it is a change of terrain.
+const GLUTTON_FLOOD_SLOTS = [100, 300, 500, 700, 900];
+function gluttonFlood(b) {
+  const slots = GLUTTON_FLOOD_SLOTS.slice();
+  for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const tmp = slots[i]; slots[i] = slots[j]; slots[j] = tmp; }
+  slots.slice(0, 3).forEach((x, i) => {
+    raidTerrainAdd({ kind: 'water', x: x, w: 180, life: 480 });
+    if (i < 2) raidTerrainAdd({ kind: 'platform', x: x, w: 110, top: raidGROUND_Y - 95, life: 480 });
   });
 }
 
@@ -5325,6 +5535,11 @@ function gluttonUltimate(b) {
 
 const GLUTTON_POSITIONAL = ['sink', 'swim', 'rise', 'bite', 'dazed', 'retreat'];
 
+// It wallows back and forth right across the swamp rather than hovering in the middle (BOS-47).
+function gluttonPathPos() {
+  return { x: 500 + Math.sin(raidG.frame * 0.0085) * 330, y: BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6 };
+}
+
 function updateGluttonAnimation(b) {
   const a = b.anim;
   const diveY = raidGROUND_Y - 90;
@@ -5333,7 +5548,7 @@ function updateGluttonAnimation(b) {
     const e = easeInOut(Math.min(a.timer / 24, 1));
     b.animScale = 1 + 0.25 * e;
     if (a.timer === 24) {
-      if (a.kind === 'fan') gluttonBubbleFan(b);
+      if (a.kind === 'flood') gluttonFlood(b);
       else gluttonBelch(b);
     }
     if (a.timer >= 24) { a.state = 'deflate'; a.timer = 0; }
@@ -5369,6 +5584,7 @@ function updateGluttonAnimation(b) {
         if (Math.abs(raidPx(p) - b.x) < 62 && !raidAirborne(p, 40)) raidDamagePlayer(id, p, 1);
       });
       raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+      raidTerrainAdd({ kind: 'mud', x: b.x, w: 150, life: 480 }); // the bite churns the floor into mud
     }
   } else if (a.state === 'bite') {
     const t = Math.min(a.timer / 12, 1);
@@ -5381,8 +5597,9 @@ function updateGluttonAnimation(b) {
     if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'retreat'; a.timer = 0; a.startX = b.x; a.startY = b.y; }
   } else if (a.state === 'retreat') {
     const e = easeInOut(Math.min(a.timer / 48, 1));
-    b.x = lerp(a.startX, a.homeX, e);
-    b.y = lerp(a.startY, a.homeY, e);
+    const home = gluttonPathPos();
+    b.x = lerp(a.startX, home.x, e);
+    b.y = lerp(a.startY, home.y, e);
     b.animScale = lerp(1.32, 1, e);
     b.animAlpha = 1;
     if (a.timer >= 48) { b.anim = { state: 'idle', timer: 0 }; b.animScale = 1; b.animAlpha = 1; }
@@ -5437,11 +5654,15 @@ function bramblehideAttack(b) {
 // the fireball-landing "pillar" hazard's marker/delayed-hit timing, but its own kind/visual
 // (root-brown spikes, not flame) since a thorn beast's spikes aren't fire (BOS-40).
 function bramblehideRootSpikes(b) {
+  // a thicket of three clumps (five from phase 2) centred on each player, with a gap between them to stand in
+  const n = b.phase >= 2 ? 5 : 3;
+  const xs = new Set();
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
     if (!p) return;
-    raidHazard({ kind: 'thornSpike', x: clampX(raidPx(p), 40, 960), life: RAID_HAZARD_LIFE.thornSpike });
+    for (let i = 0; i < n; i++) xs.add(clampX(raidPx(p) + (i - (n - 1) / 2) * RAID_THORN_GAP, 50, 950));
   });
+  [...xs].forEach(x => raidHazard({ kind: 'thornSpike', x: x, life: RAID_HAZARD_LIFE.thornSpike }));
 }
 
 // A genuine body-length dash: the boar itself crosses the arena toward whichever side the
@@ -5455,18 +5676,13 @@ function bramblehideCharge(b, dir, laneTarget) {
   b.anim = { state: 'charging', timer: 0, dir: dir, startX: b.x, targetX: tx };
 }
 
-// Phase 2+: seed-pods lobbed toward players, each erupting into a thorn spike (not a flame
-// pillar - BOS-40) on landing.
+// Phase 2+: seed-pods lobbed at each player (and one more somewhere random). Where a pod lands it marks a
+// thorn clump and leaves a patch of thorns on the floor that keeps hurting for a few seconds (TER-04).
 function bramblehideBrambleToss(b) {
   const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
   const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
-  targets.slice(0, 2).forEach(tx => {
-    const hx = b.x, hy = b.y - 10, T = 50, g = 0.12;
-    raidG.projectiles.push({
-      x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 12) - hy - g * T * (T + 1) / 2) / T, gravity: g,
-      r: 10, life: T + 6, isWarning: false, owner: 'pod', isBossProjectile: true, kind: 'pod', onLand: 'thornSpike'
-    });
-  });
+  targets.push(120 + Math.random() * 760);
+  targets.forEach(tx => raidThrow(b, 'pod', tx, { y: b.y - 10, T: 50 }));
 }
 
 function bramblehideUltimate(b) {
@@ -5503,6 +5719,10 @@ function updateBramblehideAnimation(b) {
     });
     if (t >= 1) {
       raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
+      // it skids into the undergrowth, which shoots up beside it as a thorn hedge (TER-02): solid cover and a
+      // platform - high ground from which to hit it while it is stunned
+      // (ahead of it, or behind it if it has run up against the wall)
+      raidAddPillar(b.x + a.dir * 150 > 930 || b.x + a.dir * 150 < 70 ? b.x - a.dir * 150 : b.x + a.dir * 150, 720, 'bramblehide');
       a.state = 'dazed'; a.timer = 0;
       b.exposed = BOSS_STUN_FRAMES;
     }
@@ -5539,30 +5759,25 @@ function updateBramblehideAnimation(b) {
 // ------------------------------------------------------------
 
 function colossusAttack(b) {
-  const options = ['slam', 'discharge', 'hurl'];
-  if (b.phase >= 2) options.push('pulse', 'march');
+  const options = ['slam', 'hurl', 'march'];
+  if (b.phase >= 2) options.push('pulse');
   const pick = raidPickAttack(b, options);
   if (pick === 'slam') b.anim = { state: 'slamWindup', timer: 0 };
-  else if (pick === 'discharge') b.anim = { state: 'chargeGlow', timer: 0 };
   else if (pick === 'hurl') b.anim = { state: 'hurlWindup', timer: 0 };
   else if (pick === 'march') b.anim = { state: 'marchWindup', timer: 0 };
   else b.anim = { state: 'pulseWindup', timer: 0 };
 }
 
 // Boulder hurl (BOS-41): the golem tears a boulder from its shoulder and lobs one at each player's
-// spot. Big (radius 14), so a swing can parry it or pogo off it (WPN-11); it bursts on the floor.
+// spot. Big (radius 14), so a swing can parry it or pogo off it (WPN-11); where it lands it bursts and a
+// stone pillar rises (TER-04).
 function colossusBoulderHurl(b) {
   const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
   const targets = ids.length ? ids.map(id => raidPx(raidG.players[id])) : [500];
   targets.forEach(px => {
-    const tx = clampX(px, 40, 960);
-    const hx = b.x, hy = b.y - 60, T = 70, landY = raidGROUND_Y - 14;
-    const g = raidLobGravity(landY - hy, T, RAID_LOB_RISE);
-    raidG.projectiles.push({
-      x: hx, y: hy, vx: (tx - hx) / T, vy: (landY - hy - g * T * (T + 1) / 2) / T, gravity: g,
-      r: 14, life: T + 6, isWarning: false, owner: 'boulder', isBossProjectile: true, kind: 'boulder'
-    });
+    raidThrow(b, 'boulder', px, { y: b.y - 60, T: 70 });
   });
+  if (b.phase >= 2) raidThrow(b, 'boulder', 120 + Math.random() * 760, { y: b.y - 60, T: 70 }); // and one more somewhere random
 }
 
 // Seismic march (phase 2+, BOS-41): three tremors step away from the golem toward the nearest
@@ -5582,21 +5797,11 @@ function colossusSeismicMarch(b) {
 function colossusEarthquakeStomp(b) {
   raidG.slamAnimations.push({ x: b.x, y: raidGROUND_Y - 20, life: 20, phase: 'impact', timer: 0 });
   raidHazard({ kind: 'quake', x: b.x, life: 40 });
-}
-
-// One aimed bolt per player, fired from the chest core.
-function colossusArcDischarge(b) {
-  Object.keys(raidG.players).forEach(id => {
-    const p = raidG.players[id];
-    if (!p) return;
-    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y - 10);
-    const dist = Math.hypot(dx, dy) || 1;
-    const spd = 2.1 + b.phase * 0.3;
-    raidG.projectiles.push({
-      x: b.x, y: b.y - 10, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
-      r: 9, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'bolt'
-    });
-  });
+  // ...and it shakes three stone pillars up out of the floor around the arena (TER-02): cover from its
+  // shockwaves and high ground to jump from. They stand for 12 seconds and never rise right on top of it.
+  const offsets = [-380, -200, 200, 380];
+  for (let i = offsets.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const tmp = offsets[i]; offsets[i] = offsets[j]; offsets[j] = tmp; }
+  offsets.slice(0, 3).forEach(o => raidAddPillar(b.x + o, 720, 'colossus'));
 }
 
 // Phase 2+: a ground shockwave rolling out in both directions - reuses Grinmaw's exactly.
@@ -5628,11 +5833,6 @@ function updateColossusAnimation(b) {
     const t = Math.min(a.timer / 8, 1);
     b.animOffsetY = -18 * (1 - t);
     if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
-  } else if (a.state === 'chargeGlow') {
-    const t = Math.min(a.timer / 28, 1);
-    b.animScale = 1 + 0.08 * easeInOut(t);
-    if (a.timer === 28) colossusArcDischarge(b);
-    if (a.timer >= 34) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'hurlWindup') {
     const t = Math.min(a.timer / 36, 1);
     b.animScale = 1 + 0.08 * easeInOut(t);
@@ -5709,22 +5909,14 @@ function griffonLookDown(b) {
   return 0;
 }
 
-// One aimed feather-shard per player, fired after a readable wind-up (BOS-02) - a wing-pull-back
-// telegraph, not an instant poke. Uses its own kind ('plume') distinct from Gale Storm's lobbed
-// 'feather' shots, since one is aimed (BOS-07's aimedKinds) and the other follows a gravity arc
-// (lobbedKinds) - same boss, two different delivery styles, so they can't share a kind name.
+// Feather toss (BOS-42): after a readable wing-pull-back wind-up (BOS-02) a big feather is lobbed at each player's
+// spot (from phase 2, one more somewhere random). It can be parried; where it lands it bursts and leaves a
+// column of rising air - an updraft that lifts a held jump (TER-04, TER-03).
 function griffonFeatherVolley(b) {
-  Object.keys(raidG.players).forEach(id => {
-    const p = raidG.players[id];
-    if (!p) return;
-    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y + 10);
-    const dist = Math.hypot(dx, dy) || 1;
-    const spd = 2.0 + b.phase * 0.3;
-    raidG.projectiles.push({
-      x: b.x, y: b.y + 10, vx: (dx / dist) * spd, vy: (dy / dist) * spd,
-      r: 9, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'plume'
-    });
-  });
+  const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
+  const targets = ids.map(id => raidPx(raidG.players[id]));
+  if (b.phase >= 2 || !targets.length) targets.push(120 + Math.random() * 760);
+  targets.forEach(tx => raidThrow(b, 'feather', tx, { y: b.y + 10, T: 60 }));
 }
 
 // A growing shadow marker, then a dive-crash there - reused almost verbatim from the Wyrm's,
@@ -5736,16 +5928,11 @@ function griffonWindDive(b) {
   b.anim = { state: 'swoop', timer: 0, targetX: tx, startX: b.x, startY: b.y, targetId: pick ? pick.id : '' };
 }
 
-// Phase 2+: a gapped spread of feather shots lobbed across the arena - reuses the Glutton's
-// bubble-fan formula.
+// Phase 2+ (BOS-42): five big feathers lobbed in a gapped spread across the arena, each leaving an updraft.
 function griffonGaleStorm(b) {
   for (let i = 0; i < 5; i++) {
     const tx = clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960);
-    const hx = b.x, hy = b.y + 10, T = 55, g = raidLobGravity((raidGROUND_Y - 30) - hy, T, RAID_LOB_RISE);
-    raidG.projectiles.push({
-      x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 30) - hy - g * T * (T + 1) / 2) / T, gravity: g,
-      r: 9, life: T + 10, isWarning: false, owner: 'feather', isBossProjectile: true, kind: 'feather'
-    });
+    raidThrow(b, 'feather', tx, { y: b.y + 10, T: 55 });
   }
 }
 
@@ -5758,8 +5945,11 @@ function griffonUltimate(b) {
 
 const GRIFFON_POSITIONAL = ['swoop', 'track', 'plunge', 'thud', 'soar', 'strafeAim', 'strafe', 'strafeReturn'];
 
+// It circles the whole arena - out to 380 px either side, rising and falling (never below its resting height,
+// so it stays out of reach from the floor).
 function griffonPathPos() {
-  return { x: 500 + Math.sin(raidG.frame * 0.011) * 240, y: BOSS_HOVER_Y.griffon + Math.sin(raidG.frame * 0.025) * 16 };
+  const f = raidG.frame;
+  return { x: 500 + Math.sin(f * 0.013) * 380, y: BOSS_HOVER_Y.griffon - (0.5 + 0.5 * Math.cos(f * 0.013)) * 45 };
 }
 
 function updateGriffonAnimation(b) {
@@ -5956,10 +6146,21 @@ function raidUpdateHazards() {
           hz.life = 0;
         }
       });
+    } else if (hz.kind === 'burst') {
+      // The blast of a lobbed object landing: hurts anyone on the floor within r for its first few frames.
+      if (hz.timer <= 6) {
+        Object.keys(raidG.players).forEach(id => {
+          const p = raidG.players[id];
+          if (!p) return;
+          if (Math.abs(raidPx(p) - hz.x) < hz.r && !raidAirborne(p, 40)) raidDamagePlayer(id, p, 1);
+        });
+      }
+      hz.life--;
     } else if (hz.kind === 'shockwave') {
       hz.x += hz.dir * hz.speed;
       hz.life--;
       if (hz.x < -30 || hz.x > 1030) hz.life = 0;
+      if (raidTerrainBlocksWave(hz)) { hz.life = 0; raidG.slamAnimations.push({ x: hz.x, y: raidGROUND_Y - 30, life: 10, phase: 'blocked', timer: 0 }); } // a pillar stops it
       Object.keys(raidG.players).forEach(id => {
         const p = raidG.players[id];
         if (!p || hz.life <= 0) return;
@@ -5968,6 +6169,7 @@ function raidUpdateHazards() {
     } else if (hz.kind === 'chainLash') {
       // t: 0-40 marker shows the target, 40-62 chain flies out, 62-80 it lands, 80+ it retracts.
       const t = hz.timer - hz.delay;
+      if (t === 62) raidAddPillar(hz.tx, 720, 'warden'); // the chain's anchor stays: an iron post (TER-02)
       if (t >= 62 && t < 80) {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
@@ -5990,14 +6192,7 @@ function raidUpdateHazards() {
         hz.x = hz.tx; hz.y = hz.ty;
       }
       if (t === 135) {
-        const offset = Math.random() * Math.PI;
-        for (let a = 0; a < 8; a++) {
-          const ang = offset + (a / 8) * Math.PI * 2;
-          raidG.projectiles.push({
-            x: hz.x, y: hz.y, vx: Math.cos(ang) * (2 + b.phase * 0.2), vy: Math.sin(ang) * (2 + b.phase * 0.2),
-            r: 10, life: 220, isWarning: false, isBossProjectile: true, owner: 'void', kind: 'void'
-          });
-        }
+        [-210, -70, 70, 210].forEach(dx => raidThrow(b, 'spirit', hz.tx + dx, { x: hz.x, y: hz.y, T: 56 }));
         hz.life = 1;
       }
       hz.life--;
@@ -6019,7 +6214,7 @@ function raidUpdateHazards() {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
-          if (Math.abs(raidPx(p) - hz.x) < 38 && p.y > raidGROUND_Y - 48 - 110) raidDamagePlayer(id, p, 1);
+          if (Math.abs(raidPx(p) - hz.x) < RAID_THORN_HALF && p.y > raidGROUND_Y - 48 - RAID_THORN_HEIGHT) raidDamagePlayer(id, p, 1);
         });
       }
       hz.life--;
@@ -6171,6 +6366,7 @@ function gauntletSpawnBoss(type, stage) {
   b.animScale = 1; b.animAlpha = 1; b.animOffsetX = 0; b.animOffsetY = 0;
   resetBossFlow(b);
   raidG.projectiles = []; raidG.playerProjectiles = []; raidG.slamAnimations = []; raidG.hazards = []; raidG.minions = [];
+  raidResetTerrain(type);
   raidSendBossState();
 }
 
@@ -6189,7 +6385,7 @@ function raidBossUpdate() {
   // (the *_POSITIONAL states), so non-travelling wind-ups don't freeze it in place.
   if (b.type === 'warden') {
     if (!WARDEN_POSITIONAL.includes(b.anim.state)) {
-      b.x += Math.sin(raidG.frame * 0.014) * 1.1;
+      raidStalk(b, 0.9, 150, 850); // it patrols after the nearest player instead of hanging in one spot
       b.y = BOSS_HOVER_Y.warden + Math.sin(raidG.frame * 0.02) * 24;
     }
     if (b.anim.state !== 'idle') updateWardenAnimation(b);
@@ -6205,20 +6401,22 @@ function raidBossUpdate() {
     }
   } else if (b.type === 'glutton') {
     if (!GLUTTON_POSITIONAL.includes(b.anim.state)) {
-      b.x = 500 + Math.sin(raidG.frame * 0.012) * 60;
-      b.y = BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6;
+      const path = gluttonPathPos();
+      b.x = path.x; b.y = path.y;
     }
     if (b.anim.state !== 'idle') updateGluttonAnimation(b);
   } else if (b.type === 'bramblehide') {
     // Ground-anchored (BOS-43): sits at floor height with only a small sway, no floating drift,
     // so a grounded player can melee or shoot it without needing to jump.
-    b.x = 500 + Math.sin(raidG.frame * 0.008) * 20;
+    b.x -= b.appliedOffX || 0; // undo last frame's lean so the offset never accumulates
+    if (b.anim.state === 'idle') raidStalk(b, 1.1, 120, 880); // it paces after the nearest player rather than standing still
     b.y = raidGROUND_Y - BOSS_HURT.bramblehide.bounds.y1 + Math.sin(raidG.frame * 0.03) * 3;
     if (b.anim.state !== 'idle') updateBramblehideAnimation(b);
-    b.x += b.animOffsetX || 0;
+    b.appliedOffX = b.animOffsetX || 0;
+    b.x += b.appliedOffX;
   } else if (b.type === 'colossus') {
     // Ground-anchored (BOS-43), same as Bramblehide.
-    b.x = 500 + Math.sin(raidG.frame * 0.006) * 14;
+    if (b.anim.state === 'idle') raidStalk(b, 1.0, 120, 880); // it does not stand still: it strides after the nearest player
     b.y = raidGROUND_Y - BOSS_HURT.colossus.bounds.y1 + Math.sin(raidG.frame * 0.025) * 2;
     if (b.anim.state !== 'idle') updateColossusAnimation(b);
     b.y += b.animOffsetY || 0;
@@ -6230,7 +6428,7 @@ function raidBossUpdate() {
     if (b.anim.state !== 'idle') updateGriffonAnimation(b);
     if (!GRIFFON_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
   } else {
-    b.x += Math.sin(raidG.frame * 0.018) * 0.8;
+    if (b.anim.state === 'idle') raidStalk(b, 1.0, 150, 850); // Grinmaw does not sit still: he strides after the nearest player
     b.y = BOSS_HOVER_Y.grinmaw + Math.sin(raidG.frame * 0.025) * 12;
     if (b.anim.state !== 'idle') updateGrinmawAnimation(b);
     b.y += b.animOffsetY || 0;
@@ -6257,6 +6455,7 @@ function raidBossUpdate() {
     b.attackTimer = 150;
     raidG.projectiles = [];
     raidG.hazards = [];
+    raidResetTerrain(b.type); // the arena the last phase built is wiped; the permanent pieces come back
     raidSendBossState();
   }
   const inTransition = b.transition > 0;
@@ -6297,6 +6496,7 @@ function raidBossUpdate() {
   }
 
   raidUpdateHazards();
+  raidUpdateTerrain();
   raidUpdateMinions(b);
 
   raidG.slamAnimations.forEach(anim => {
@@ -6321,9 +6521,14 @@ function raidBossUpdate() {
     // just pop since they carry no onLand at all.
     if (proj.gravity && proj.vy > 0 && proj.y >= raidGROUND_Y - 14) {
       if (proj.onLand) {
-        raidHazard({ kind: proj.onLand, x: proj.x, life: RAID_HAZARD_LIFE[proj.onLand] || 66 });
+        if (RAID_LAND_FX[proj.onLand]) {
+          RAID_LAND_FX[proj.onLand](proj.x); // a burst and the terrain it leaves (TER-04)
+          raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
+        } else {
+          raidHazard({ kind: proj.onLand, x: proj.x, life: RAID_HAZARD_LIFE[proj.onLand] || 66 });
+        }
       }
-      if (proj.kind === 'boulder') raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
+      if (proj.kind === 'boulder' && !proj.onLand) raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
       proj.life = 0;
     }
     if (!proj.isWarning && proj.isBossProjectile && proj.life > 0) {
@@ -6333,6 +6538,8 @@ function raidBossUpdate() {
         const hitboxRadius = 16;
         if (Math.hypot(proj.x - raidPx(p), proj.y - (p.y + 24)) < hitboxRadius + proj.r * 0.8) {
           raidDamagePlayer(id, p, 1);
+          // a thrown object that hits someone still bursts and leaves its terrain, on the floor beneath it (TER-04)
+          if (proj.life > 0 && proj.onLand && RAID_LAND_FX[proj.onLand]) RAID_LAND_FX[proj.onLand](clampX(proj.x, 30, 970));
           proj.life = 0;
         }
       });
@@ -6367,6 +6574,7 @@ function raidBossUpdate() {
     raidG.victory = true;
     raidG.slamAnimations = [];
     raidG.hazards = [];
+    raidClearTerrain();
     raidG.mathEvent = null;
     raidSendBossState();
     if (currentLobbyId) {
@@ -6398,6 +6606,7 @@ function raidBossUpdate() {
           raidG.playerProjectiles = [];
           raidG.slamAnimations = [];
           raidG.hazards = [];
+          raidResetTerrain(raidG.boss.type);
           raidG.mathEvent = null;
           raidLocal.maxHealth = raidMaxHealthForLoadout();
           raidLocal.health = raidLocal.maxHealth;
@@ -6763,7 +6972,8 @@ function raidUpdateLocal() {
   // Decremented up front so a squash/stretch pop set fresh later THIS frame (landing, jumping)
   // still reads as its full RAID_SQUASH_FRAMES value for the frame it starts on.
   if (p.squashTimer > 0) p.squashTimer--;
-  const accel = RAID_ACCEL * raidMaxSpeed() / 7; // Nimble Treads (move_speed) really speeds up running
+  const tfx = raidTerrainEffects(p); // mud and water slow, an updraft lifts (TER-03)
+  const accel = RAID_ACCEL * raidMaxSpeed() / 7 * tfx.slow; // Nimble Treads (move_speed) really speeds up running
   const friction = 0.85;
   // A dash is a committed burst: fixed velocity for the whole window, immune to the normal
   // speed cap below (the bug this fixes - vx=12 was clamped straight back to 7 one frame
@@ -6782,7 +6992,7 @@ function raidUpdateLocal() {
     if (p.input.right) p.vx += accel;
     p.vx *= friction;
     if (Math.abs(p.vx) < 0.1) p.vx = 0;
-    const maxSpeed = raidMaxSpeed();
+    const maxSpeed = raidMaxSpeed() * tfx.slow;
     if (Math.abs(p.vx) > maxSpeed) p.vx = Math.sign(p.vx) * maxSpeed;
   }
   p.trail.forEach(g => g.life--);
@@ -6792,6 +7002,7 @@ function raidUpdateLocal() {
   else if (p.vx < -0.5) p.facing = -1;
 
   p.x += p.vx;
+  raidPushOutOfPillars(p); // a pillar is a wall (TER-02)
 
   // Hollow Knight style variable-height jump: holding Z/Up sustains the rise (reduced gravity)
   // for up to RAID_JUMP_HOLD_FRAMES frames; letting go early - or hitting the timer or the
@@ -6810,12 +7021,14 @@ function raidUpdateLocal() {
   const dashing = p.dashTimer > 0;
   if (dashing) { gravity = 0; p.vy = 0; p.jumpBoosting = false; }
   else if (p.vy > 0) gravity *= raidFallGravityMult(); // Light Step: a gentler fall (WPN-14)
+  const prevFeet = p.y + p.h;
   p.vy += gravity;
   p.y += p.vy;
   const landVy = p.vy; // how hard it comes down, for the landing sound
   const wasOnGround = p.onGround; // RAI-21: edge-detect the landing transition, for squash-stretch
-  if (p.y >= raidGROUND_Y - p.h) { // >= so a grounded dash (no gravity pushing past the floor) still counts as grounded
-    p.y = raidGROUND_Y - p.h;
+  const support = raidSupportTop(p, prevFeet); // the floor, or a platform / pillar top (TER-02)
+  if (p.y + p.h >= support) { // >= so a grounded dash (no gravity pushing past the floor) still counts as grounded
+    p.y = support - p.h;
     p.vy = 0;
     p.onGround = true;
     p.jumpBoosting = false;
@@ -6846,6 +7059,7 @@ function raidUpdateLocal() {
     p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
   }
+  if (tfx.lift && p.input.jump && !p.onGround && !dashing && p.vy > -5.5) p.vy = Math.max(-5.5, p.vy - 0.32); // holding jump in an updraft keeps climbing once the jump is slowing (never slows a faster rise)
   p.wasJumpPressed = p.input.jump;
   p.x = Math.max(20, Math.min(980 - p.w, p.x));
 
@@ -7144,7 +7358,9 @@ const BOSS_SPRITE = {
 // submerging keep the idle art because the game already fades or sinks the boss).
 const BOSS_SPRITE_STATES = {
   grinmaw: {
-    spit: [[8, 'windup'], [26, 'telegraph'], [Infinity, 'attack']],
+    withdraw: [[Infinity, 'windup']],
+    hurl: [[10, 'attack'], [Infinity, 'telegraph']],
+    advance: [[Infinity, 'telegraph']],
     summon: [[30, 'telegraph'], [Infinity, 'special']],
     windup: [[20, 'windup'], [Infinity, 'telegraph']],
     slam: [[Infinity, 'attack']],
@@ -7167,6 +7383,9 @@ const BOSS_SPRITE_STATES = {
     lunge: [[Infinity, 'attack']],
     hold: [[Infinity, 'attack']],
     aim: [[Infinity, 'telegraph']],
+    sweepAim: [[Infinity, 'telegraph']],
+    sweepPass: [[Infinity, 'attack']],
+    sweepOut: [[Infinity, 'recover']],
     dive: [[Infinity, 'attack']],
     crash: [[Infinity, 'attack']],
     climb: [[Infinity, 'recover']],
@@ -7944,7 +8163,7 @@ function drawColossus(ctx, boss) {
   ctx.shadowBlur = 0;
 
   // Chest core - glows brighter during Arc Discharge's windup.
-  const coreGlow = b.anim && b.anim.state === 'chargeGlow' ? 1 + (b.anim.timer || 0) / 28 : 1;
+  const coreGlow = b.anim && (b.anim.state === 'pulseWindup' || b.anim.state === 'hurlWindup') ? 1 + (b.anim.timer || 0) / 34 : 1;
   ctx.shadowBlur = 20 * coreGlow;
   ctx.shadowColor = '#5ce1ff';
   ctx.fillStyle = '#bff3ff';
@@ -8168,6 +8387,7 @@ const MQ_HAZARD_SFX = {
   shockwave: { spawn: 'hz_shockwave' }, imp: { spawn: 'hz_imp' },
   chainLash: { spawn: 'hz_warn', strike: 'hz_chain' }, voidOrb: { spawn: 'hz_orb_charge', burst: 'hz_orb_burst' }, // (the burst sounds when the orb is gone)
   pillar: { spawn: 'hz_warn', strike: 'hz_pillar' }, thornSpike: { spawn: 'hz_warn', strike: 'hz_thorn_erupt' },
+  burst: { spawn: 'hz_pillar' }, // a lobbed object bursting where it lands
   quake: { spawn: 'hz_quake' }, tremor: { spawn: 'hz_warn', strike: 'hz_tremor' }, featherFall: { spawn: 'hz_warn', strike: 'hz_feather_strike' }
 };
 let raidSfx = null;
@@ -8260,6 +8480,112 @@ function raidSfxTick() {
   S.ready = true;
 }
 
+// ---- drawing the terrain (TER-04): everything here is deterministic in raidG.frame so it never flickers by chance ----
+const RAID_TERRAIN_THEMES = {
+  grinmaw: { stone: ['#7a5a52', '#4a3330'], glow: '#ff7a30' },
+  warden: { stone: ['#4a4a6a', '#25253a'], glow: '#9bf0ff' },
+  wyrm: { stone: ['#ffffff', '#c9dcec'], glow: '#bfefff' },
+  glutton: { stone: ['#5f8a3a', '#2f4a1c'], glow: '#9ee66c' },
+  bramblehide: { stone: ['#4a6a2a', '#243a12'], glow: '#c8e060' },
+  colossus: { stone: ['#8a8478', '#4f4a42'], glow: '#9ad8ff' },
+  griffon: { stone: ['#fff6e0', '#e8d6a8'], glow: '#fff0b0' }
+};
+function raidDrawTerrain(ctx) {
+  const F = raidG.frame || 0;
+  raidG.terrain.forEach(t => {
+    const th = RAID_TERRAIN_THEMES[t.theme] || RAID_TERRAIN_THEMES.grinmaw;
+    const rise = Math.min(1, t.age / RAID_TERRAIN_RISE), e = easeInOut(rise);
+    const blink = t.life > 0 && t.life < 60 && Math.floor(F / 4) % 2 === 0;
+    const alpha = (blink ? 0.35 : 1) * (t.kind === 'platform' || t.kind === 'pillar' ? 1 : 0.4 + 0.6 * rise);
+    const l = t.x - t.w / 2, r = t.x + t.w / 2, G = raidGROUND_Y;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.lineJoin = 'round';
+    if (t.kind === 'pillar') {
+      const top = G - (G - t.top) * e, h = G - top;
+      const g = ctx.createLinearGradient(l, 0, r, 0);
+      g.addColorStop(0, th.stone[0]); g.addColorStop(1, th.stone[1]);
+      ctx.fillStyle = g; ctx.strokeStyle = 'rgba(10,10,20,0.9)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.rect(l, top, t.w, h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(l + 3, top + 3, t.w - 6, 8); // lit cap
+      ctx.strokeStyle = 'rgba(10,10,20,0.45)'; ctx.lineWidth = 2;
+      for (let i = 1; i < 4; i++) { const cy = top + h * i / 4; ctx.beginPath(); ctx.moveTo(l + 4, cy); ctx.lineTo(r - 4, cy + (i % 2 ? 6 : -4)); ctx.stroke(); }
+      if (rise < 1) { ctx.fillStyle = 'rgba(190,170,140,0.5)'; for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(l + i * t.w / 4, G - 4, 8 + 6 * (1 - rise), 0, Math.PI * 2); ctx.fill(); } }
+    } else if (t.kind === 'platform') {
+      const y = t.top + 20 * (1 - e);
+      ctx.globalAlpha = alpha * (0.3 + 0.7 * e);
+      if (t.theme === 'wyrm' || t.theme === 'griffon') { // a cloud
+        ctx.fillStyle = th.stone[0]; ctx.strokeStyle = 'rgba(120,150,190,0.7)'; ctx.lineWidth = 2;
+        [[-0.28, 0.32], [0, 0.4], [0.28, 0.32]].forEach(c => { ctx.beginPath(); ctx.ellipse(t.x + c[0] * t.w, y + 6, t.w * c[1], 9, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+        ctx.fillRect(l + t.w * 0.12, y, t.w * 0.76, 8);
+      } else if (t.theme === 'glutton') { // a lily pad
+        ctx.fillStyle = th.stone[0]; ctx.strokeStyle = th.stone[1]; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(t.x, y + 6, t.w / 2, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(t.x, y + 6); ctx.lineTo(r - 8, y + 2); ctx.stroke();
+      } else { // a stone slab
+        const g = ctx.createLinearGradient(0, y, 0, y + 14);
+        g.addColorStop(0, th.stone[0]); g.addColorStop(1, th.stone[1]);
+        ctx.fillStyle = g; ctx.strokeStyle = 'rgba(10,10,20,0.9)'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.rect(l, y, t.w, 14); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(l + 3, y + 2, t.w - 6, 3);
+      }
+    } else if (t.kind === 'lava') {
+      const g = ctx.createLinearGradient(0, G - 8, 0, G + 6);
+      g.addColorStop(0, '#ffd060'); g.addColorStop(1, '#e03008');
+      ctx.fillStyle = g; ctx.shadowColor = '#ff6a20'; ctx.shadowBlur = 14;
+      ctx.fillRect(l, G - 7, t.w, 12);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255,230,140,0.9)';
+      for (let i = 0; i < Math.floor(t.w / 28); i++) { const bx = l + 14 + i * 28, by = G - 8 - Math.abs(Math.sin(F * 0.08 + i * 1.7)) * 10; ctx.beginPath(); ctx.arc(bx, by, 3, 0, Math.PI * 2); ctx.fill(); }
+      if (rise < 1) { ctx.strokeStyle = 'rgba(255,120,40,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(l, G); ctx.lineTo(t.x, G + 3); ctx.lineTo(r, G); ctx.stroke(); }
+    } else if (t.kind === 'fire') {
+      const ghost = t.theme === 'warden';
+      for (let i = 0; i < Math.max(3, Math.floor(t.w / 18)); i++) {
+        const fx = l + 10 + i * ((t.w - 20) / Math.max(2, Math.floor(t.w / 18) - 1)), fh = 22 + 16 * Math.abs(Math.sin(F * 0.15 + i * 2.1));
+        ctx.fillStyle = ghost ? 'rgba(120,230,255,0.9)' : 'rgba(255,150,40,0.9)';
+        ctx.beginPath(); ctx.moveTo(fx - 9, G); ctx.quadraticCurveTo(fx - 6, G - fh * 0.6, fx, G - fh); ctx.quadraticCurveTo(fx + 6, G - fh * 0.6, fx + 9, G); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = ghost ? 'rgba(230,255,255,0.95)' : 'rgba(255,230,120,0.95)';
+        ctx.beginPath(); ctx.moveTo(fx - 4, G); ctx.quadraticCurveTo(fx - 2, G - fh * 0.4, fx, G - fh * 0.6); ctx.quadraticCurveTo(fx + 2, G - fh * 0.4, fx + 4, G); ctx.closePath(); ctx.fill();
+      }
+    } else if (t.kind === 'mud') {
+      ctx.fillStyle = 'rgba(90,64,34,0.95)'; ctx.strokeStyle = 'rgba(50,34,16,0.95)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(t.x, G - 1, t.w / 2, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(150,120,70,0.9)';
+      for (let i = 0; i < Math.floor(t.w / 40); i++) { const ph = (F * 0.05 + i * 0.37) % 1; ctx.beginPath(); ctx.arc(l + 22 + i * 40, G - 2 - ph * 6, 2 + 3 * (1 - ph), 0, Math.PI * 2); ctx.fill(); }
+    } else if (t.kind === 'water') {
+      ctx.fillStyle = 'rgba(70,140,200,0.55)';
+      ctx.fillRect(l, G - 14, t.w, 14);
+      ctx.strokeStyle = 'rgba(200,235,255,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = l; x <= r; x += 8) { const y = G - 14 + Math.sin(F * 0.1 + x * 0.05) * 2; if (x === l) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+      ctx.stroke();
+    } else if (t.kind === 'thorns') {
+      ctx.fillStyle = '#2f4a14'; ctx.strokeStyle = '#142208'; ctx.lineWidth = 2;
+      for (let i = 0; i < Math.max(3, Math.floor(t.w / 16)); i++) {
+        const sx = l + 8 + i * ((t.w - 16) / Math.max(2, Math.floor(t.w / 16) - 1)), sh = 26 + (i % 3) * 8;
+        ctx.beginPath(); ctx.moveTo(sx - 7, G); ctx.lineTo(sx + (i % 2 ? 3 : -3), G - sh); ctx.lineTo(sx + 7, G); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    } else if (t.kind === 'updraft') {
+      ctx.strokeStyle = 'rgba(255,250,220,0.55)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      for (let i = 0; i < 6; i++) {
+        const sx = l + 14 + i * ((t.w - 28) / 5), ph = (F * 0.03 + i * 0.19) % 1;
+        const y1 = G - 10 - ph * 190, y0 = y1 + 40;
+        ctx.beginPath(); ctx.moveTo(sx, Math.min(y0, G - 6)); ctx.lineTo(sx + Math.sin(F * 0.1 + i) * 4, y1); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  });
+}
+// A marker on the floor where each lobbed object will land, tightening as it falls.
+function raidDrawLandingMarkers(ctx) {
+  raidG.projectiles.forEach(pr => {
+    if (pr.isWarning || !pr.gravity || !pr.onLand) return;
+    const rad = RAID_LAND_RADIUS[pr.onLand] || 40;
+    const prog = 1 - Math.min(1, raidProjectileLandingTime(pr) / 90);
+    raidDrawGroundWarning(ctx, raidProjectileLandingX(pr), rad, prog, '255,170,70');
+  });
+}
+
 function raidFxTick() {
   raidSfxTick();
   const b = raidG.boss;
@@ -8293,71 +8619,276 @@ function raidFxTick() {
   raidFx.bursts = raidFx.bursts.filter(bu => bu.life > 0);
 }
 
+// ------------------------------------------------------------
+// Arena backdrops (BKG-01): every boss fights somewhere of its own - a sky, scenery and a floor - drawn
+// procedurally. Pure functions of (boss type, frame, phase): no randomness, so a given frame always looks the
+// same. Later phases stir the scenery up (more embers, steam, wind, fog).
+// ------------------------------------------------------------
+function bkHash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function bkSky(ctx, stops) {
+  const g = ctx.createLinearGradient(0, 0, 0, raidGROUND_Y);
+  stops.forEach(s => g.addColorStop(s[0], s[1]));
+  ctx.fillStyle = g;
+  ctx.fillRect(-30, -30, 1060, raidGROUND_Y + 30);
+}
+function bkFloor(ctx, top, bottom, edge) {
+  const g = ctx.createLinearGradient(0, raidGROUND_Y, 0, 600);
+  g.addColorStop(0, top); g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(-30, raidGROUND_Y, 1060, 130);
+  ctx.fillStyle = edge;
+  ctx.fillRect(-30, raidGROUND_Y, 1060, 3);
+}
+function bkGlow(ctx, x, y, r, rgb, a) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, 'rgba(' + rgb + ',' + a + ')'); g.addColorStop(1, 'rgba(' + rgb + ',0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+function bkCloud(ctx, x, y, s) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, 45 * s, 16 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 30 * s, y + 6 * s, 30 * s, 12 * s, 0, 0, Math.PI * 2);
+  ctx.ellipse(x - 30 * s, y + 8 * s, 28 * s, 11 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+function bkGear(ctx, x, y, r, teeth, rot, fill, stroke) {
+  ctx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) {
+    const a = rot + (i / (teeth * 2)) * Math.PI * 2, rr = i % 2 ? r * 0.86 : r;
+    const a2 = a + (Math.PI / teeth) * 0.5;
+    ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    ctx.lineTo(x + Math.cos(a2) * rr, y + Math.sin(a2) * rr);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 3;
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, r * 0.22, 0, Math.PI * 2); ctx.fillStyle = stroke; ctx.fill();
+  ctx.strokeStyle = stroke; ctx.lineWidth = 5;
+  for (let i = 0; i < 4; i++) { const a = rot + i * Math.PI / 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * r * 0.78, y + Math.sin(a) * r * 0.78); ctx.stroke(); }
+}
+
+const RAID_BACKDROPS = {
+  // Grinmaw: a candy-red throne hall - arches, banners, torches and a stained-glass window behind the throne.
+  grinmaw(ctx, F, ph) {
+    bkSky(ctx, [[0, '#1c0508'], [1, '#5c1a1a']]);
+    bkGlow(ctx, 500, 190, 230, '255,170,90', 0.35);
+    ctx.fillStyle = 'rgba(255,214,120,0.25)'; ctx.strokeStyle = 'rgba(255,214,120,0.5)'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(500, 190, 92, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6 + F * 0.002; ctx.beginPath(); ctx.moveTo(500, 190); ctx.lineTo(500 + Math.cos(a) * 92, 190 + Math.sin(a) * 92); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    for (let x = 0; x < 1000; x += 250) { // arches
+      ctx.beginPath(); ctx.moveTo(x + 20, raidGROUND_Y); ctx.lineTo(x + 20, 190); ctx.arc(x + 125, 190, 105, Math.PI, 0); ctx.lineTo(x + 230, raidGROUND_Y); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = '#1a0507'; // the throne, far behind
+    ctx.fillRect(432, 300, 136, 200); ctx.fillRect(412, 270, 30, 230); ctx.fillRect(558, 270, 30, 230);
+    ctx.beginPath(); ctx.moveTo(432, 300); ctx.lineTo(500, 232); ctx.lineTo(568, 300); ctx.closePath(); ctx.fill();
+    [250, 750].forEach((x, i) => { // banners
+      const sw = Math.sin(F * 0.03 + i) * 5;
+      ctx.fillStyle = '#8a1a24'; ctx.beginPath(); ctx.moveTo(x - 34, 0); ctx.lineTo(x + 34, 0); ctx.lineTo(x + 34 + sw, 210); ctx.lineTo(x + sw, 240); ctx.lineTo(x - 34 + sw, 210); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x - 24, 40); ctx.lineTo(x - 8 + sw * 0.2, 70); ctx.lineTo(x + 8, 40); ctx.lineTo(x + 24 + sw * 0.4, 70); ctx.stroke();
+    });
+    [110, 890].forEach((x, i) => { // torches
+      ctx.fillStyle = '#2a1410'; ctx.fillRect(x - 5, 330, 10, 70);
+      const fh = 28 + Math.sin(F * 0.25 + i * 2) * 6 + (ph - 1) * 6;
+      bkGlow(ctx, x, 320, 90, '255,150,50', 0.35 + Math.sin(F * 0.2 + i) * 0.08);
+      ctx.fillStyle = '#ff9a2e'; ctx.beginPath(); ctx.moveTo(x - 12, 332); ctx.quadraticCurveTo(x - 8, 332 - fh * 0.6, x, 332 - fh); ctx.quadraticCurveTo(x + 8, 332 - fh * 0.6, x + 12, 332); ctx.fill();
+      ctx.fillStyle = '#ffe27a'; ctx.beginPath(); ctx.moveTo(x - 5, 332); ctx.quadraticCurveTo(x - 3, 332 - fh * 0.4, x, 332 - fh * 0.6); ctx.quadraticCurveTo(x + 3, 332 - fh * 0.4, x + 5, 332); ctx.fill();
+    });
+    ctx.fillStyle = 'rgba(255,180,80,0.5)';
+    for (let i = 0; i < 12 + ph * 6; i++) { // embers
+      const ex = (i * 91 + 30 + Math.sin(F * 0.02 + i) * 14) % 1000, ey = raidGROUND_Y - ((F * (1 + (i % 4) * 0.5) + i * 61) % (raidGROUND_Y + 40));
+      ctx.beginPath(); ctx.arc(ex, ey, 1.5 + (i % 2), 0, Math.PI * 2); ctx.fill();
+    }
+    bkFloor(ctx, '#34161c', '#16080b', '#ffcc44');
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 2; // flagstones in perspective
+    [525, 555, 598].forEach(y => { ctx.beginPath(); ctx.moveTo(-30, y); ctx.lineTo(1030, y); ctx.stroke(); });
+    for (let k = -9; k <= 9; k++) { ctx.beginPath(); ctx.moveTo(500 + k * 55, raidGROUND_Y); ctx.lineTo(500 + k * 120, 600); ctx.stroke(); }
+  },
+
+  // Warden: a chained dungeon - a rune-ringed iron gate, hanging chains, drifting mist and an iron-grate floor.
+  warden(ctx, F, ph) {
+    bkSky(ctx, [[0, '#05030c'], [1, '#221245']]);
+    bkGlow(ctx, 500, 230, 260, '120,80,255', 0.3);
+    ctx.strokeStyle = '#2d2558'; ctx.lineWidth = 20; ctx.beginPath(); ctx.arc(500, 230, 130, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 4; ctx.strokeStyle = '#1a1438'; ctx.beginPath(); ctx.arc(500, 230, 100, 0, Math.PI * 2); ctx.stroke();
+    for (let i = 0; i < 12; i++) { // runes pulse around the ring
+      const a = i * Math.PI / 6 + F * 0.004, on = 0.35 + 0.65 * Math.abs(Math.sin(F * 0.03 + i * 0.9));
+      ctx.fillStyle = 'rgba(92,225,230,' + on.toFixed(2) + ')'; ctx.fillRect(500 + Math.cos(a) * 130 - 5, 230 + Math.sin(a) * 130 - 5, 10, 10);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    [70, 930].forEach(x => { ctx.fillRect(x - 40, 0, 80, raidGROUND_Y); });
+    ctx.strokeStyle = 'rgba(120,110,170,0.7)'; ctx.lineWidth = 3;
+    for (let i = 0; i < 8; i++) { // chains hang from the ceiling and sway
+      const x = 60 + i * 125 + Math.sin(F * 0.02 + i) * 8, len = 120 + (i % 3) * 70;
+      for (let y = -6, k = 0; y < len; y += 16, k++) { ctx.beginPath(); ctx.ellipse(x + Math.sin(F * 0.02 + i + y * 0.01) * 3, y + 8, k % 2 ? 3 : 6, 8, 0, 0, Math.PI * 2); ctx.stroke(); }
+    }
+    for (let i = 0; i < 5; i++) { // mist
+      const mx = ((i * 260 + F * (0.25 + i * 0.07)) % 1300) - 150;
+      bkGlow(ctx, mx, 470, 190, '170,150,255', 0.08 + ph * 0.02);
+    }
+    bkFloor(ctx, '#23223a', '#0d0c1a', '#5ce1e6');
+    ctx.strokeStyle = 'rgba(10,10,20,0.8)'; ctx.lineWidth = 3;
+    for (let x = -30; x < 1030; x += 40) { ctx.beginPath(); ctx.moveTo(x, raidGROUND_Y + 8); ctx.lineTo(x, 600); ctx.stroke(); }
+    for (let y = raidGROUND_Y + 30; y < 600; y += 34) { ctx.beginPath(); ctx.moveTo(-30, y); ctx.lineTo(1030, y); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(92,225,230,' + (0.25 + 0.15 * Math.sin(F * 0.05)).toFixed(2) + ')'; ctx.fillRect(-30, raidGROUND_Y + 4, 1060, 3);
+  },
+
+  // Wyrm: a dusk sky above the clouds - a low sun, layered mountain ridges, floating rocks and drifting cloud banks.
+  wyrm(ctx, F, ph) {
+    bkSky(ctx, [[0, '#0b2230'], [0.55, '#1f6a80'], [1, '#e2a066']]);
+    bkGlow(ctx, 780, 400, 260, '255,200,120', 0.5);
+    ctx.fillStyle = '#ffe3a0'; ctx.beginPath(); ctx.arc(780, 400, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(30,70,95,0.55)'; // far ridge
+    ctx.beginPath(); ctx.moveTo(-30, raidGROUND_Y); [[0, 400], [120, 330], [250, 410], [380, 300], [520, 400], [640, 340], [800, 420], [920, 330], [1030, 410]].forEach(p => ctx.lineTo(p[0], p[1])); ctx.lineTo(1030, raidGROUND_Y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(20,45,70,0.7)'; // floating rocks
+    [[160, 170, 1], [560, 110, 0.7], [880, 200, 1.2]].forEach((r, i) => {
+      const y = r[1] + Math.sin(F * 0.015 + i * 2) * 6;
+      ctx.beginPath(); ctx.moveTo(r[0] - 60 * r[2], y); ctx.lineTo(r[0] + 60 * r[2], y); ctx.lineTo(r[0] + 20 * r[2], y + 46 * r[2]); ctx.lineTo(r[0] - 6 * r[2], y + 80 * r[2]); ctx.lineTo(r[0] - 36 * r[2], y + 40 * r[2]); ctx.closePath(); ctx.fill();
+    });
+    for (let layer = 0; layer < 3; layer++) { // cloud banks, three speeds
+      ctx.fillStyle = ['rgba(255,255,255,0.22)', 'rgba(255,240,230,0.32)', 'rgba(255,225,200,0.45)'][layer];
+      for (let i = 0; i < 5; i++) {
+        const sp = (0.2 + layer * 0.22) * (1 + (ph - 1) * 0.3);
+        const cx = ((i * 260 + layer * 90 - F * sp) % 1300 + 1300) % 1300 - 150;
+        bkCloud(ctx, cx, 70 + layer * 120 + (i * 37) % 70, 1 + layer * 0.45);
+      }
+    }
+    bkFloor(ctx, '#6f9fb4', '#2a5068', 'rgba(255,255,255,0.7)');
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (let i = 0; i < 9; i++) { const cx = ((i * 140 - F * 0.35) % 1260 + 1260) % 1260 - 100; bkCloud(ctx, cx, raidGROUND_Y + 14 + (i % 3) * 22, 1.2); }
+  },
+
+  // Glutton: a murky swamp - a pale moon through the fog, dead trees draped in moss, fireflies and reedy water.
+  glutton(ctx, F, ph) {
+    bkSky(ctx, [[0, '#0a1408'], [1, '#2f4d17']]);
+    bkGlow(ctx, 200, 120, 160, '230,255,200', 0.3);
+    ctx.fillStyle = 'rgba(235,255,215,0.75)'; ctx.beginPath(); ctx.arc(200, 120, 44, 0, Math.PI * 2); ctx.fill();
+    [[90, 0.9], [330, 0.6], [690, 0.7], [930, 1]].forEach((t, i) => { // dead trees
+      const x = t[0], s = t[1];
+      ctx.fillStyle = 'rgba(8,16,6,' + (0.55 + 0.3 * s).toFixed(2) + ')';
+      ctx.beginPath(); ctx.moveTo(x - 24 * s, raidGROUND_Y); ctx.quadraticCurveTo(x - 12 * s, 300, x - 8 * s, 150); ctx.lineTo(x + 8 * s, 150); ctx.quadraticCurveTo(x + 12 * s, 300, x + 24 * s, raidGROUND_Y); ctx.fill();
+      ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 9 * s;
+      ctx.beginPath(); ctx.moveTo(x, 190); ctx.lineTo(x - 70 * s, 130); ctx.moveTo(x, 220); ctx.lineTo(x + 80 * s, 150); ctx.stroke();
+      ctx.strokeStyle = 'rgba(100,150,70,0.6)'; ctx.lineWidth = 3; // moss
+      for (let k = 0; k < 5; k++) { const mx = x - 70 * s + k * 35 * s, sw = Math.sin(F * 0.03 + i + k) * 4; ctx.beginPath(); ctx.moveTo(mx, 150); ctx.quadraticCurveTo(mx + sw, 190, mx + sw * 1.5, 215 + (k % 2) * 30); ctx.stroke(); }
+    });
+    for (let i = 0; i < 4; i++) { // fog banks
+      const fx = ((i * 300 + F * (0.3 + 0.1 * i)) % 1400) - 200;
+      bkGlow(ctx, fx, 410 + i * 18, 230, '180,220,150', 0.1 + 0.03 * ph);
+    }
+    for (let i = 0; i < 14; i++) { // fireflies
+      const fx = (i * 137 + Math.sin(F * 0.02 + i * 3) * 40) % 1000, fy = 200 + (i * 53) % 250 + Math.sin(F * 0.03 + i) * 16;
+      const on = 0.4 + 0.6 * Math.abs(Math.sin(F * 0.04 + i));
+      bkGlow(ctx, fx, fy, 14, '200,255,120', on * 0.7);
+    }
+    bkFloor(ctx, '#27441a', '#0c1a09', '#9ee66c');
+    ctx.strokeStyle = 'rgba(158,230,108,0.25)'; ctx.lineWidth = 2; // ripples
+    for (let i = 0; i < 6; i++) { const k = ((F * 0.5 + i * 40) % 90) / 90; ctx.beginPath(); ctx.ellipse(80 + i * 170, raidGROUND_Y + 40 + (i % 3) * 22, 20 + k * 50, 5 + k * 10, 0, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.strokeStyle = '#173010'; ctx.lineWidth = 3; // reeds
+    for (let x = 10; x < 1000; x += 46) { const h = 26 + bkHash(x) * 28, sw = Math.sin(F * 0.04 + x) * 4; ctx.beginPath(); ctx.moveTo(x, raidGROUND_Y + 4); ctx.quadraticCurveTo(x + sw, raidGROUND_Y - h * 0.5, x + sw * 2, raidGROUND_Y - h); ctx.stroke(); }
+  },
+
+  // Bramblehide: a deep forest - giant trunks, a dark canopy, light shafts, hanging vines, drifting leaves and thorn bushes.
+  bramblehide(ctx, F, ph) {
+    bkSky(ctx, [[0, '#0c1504'], [1, '#3a5a16']]);
+    for (let i = 0; i < 4; i++) { // light shafts
+      const x = 180 + i * 230, a = 0.05 + 0.04 * Math.sin(F * 0.015 + i * 1.7);
+      ctx.fillStyle = 'rgba(255,240,150,' + a.toFixed(3) + ')';
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 70, 0); ctx.lineTo(x - 90, raidGROUND_Y); ctx.lineTo(x - 200, raidGROUND_Y); ctx.closePath(); ctx.fill();
+    }
+    [[60, 100], [230, 70], [790, 80], [945, 110]].forEach((t, i) => { // trunks
+      const x = t[0], w = t[1];
+      ctx.fillStyle = 'rgba(28,20,8,0.82)'; ctx.fillRect(x - w / 2, 0, w, raidGROUND_Y);
+      ctx.strokeStyle = 'rgba(8,6,2,0.6)'; ctx.lineWidth = 3;
+      for (let k = 1; k < 5; k++) { ctx.beginPath(); ctx.moveTo(x - w / 2 + k * w / 5, 0); ctx.quadraticCurveTo(x - w / 2 + k * w / 5 + 6, 250, x - w / 2 + k * w / 5 - 4, raidGROUND_Y); ctx.stroke(); }
+    });
+    ctx.fillStyle = 'rgba(8,24,4,0.9)'; // canopy
+    for (let x = -20; x < 1040; x += 70) { ctx.beginPath(); ctx.ellipse(x, 24 + (x * 7) % 40, 64, 52, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(60,110,30,0.8)'; ctx.lineWidth = 4;
+    for (let i = 0; i < 9; i++) { const x = 100 + i * 100, sw = Math.sin(F * 0.025 + i) * 6; ctx.beginPath(); ctx.moveTo(x, 40); ctx.quadraticCurveTo(x + sw, 120, x + sw * 1.4, 150 + (i * 31) % 90); ctx.stroke(); }
+    for (let i = 0; i < 10 + ph * 4; i++) { // falling leaves
+      const lx = (i * 97 + Math.sin(F * 0.03 + i) * 40) % 1000, ly = ((F * (0.6 + (i % 3) * 0.3) + i * 53) % (raidGROUND_Y + 30));
+      ctx.fillStyle = i % 2 ? 'rgba(255,157,46,0.7)' : 'rgba(150,200,60,0.7)';
+      ctx.beginPath(); ctx.ellipse(lx, ly, 5, 2.5, F * 0.05 + i, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(12,22,4,0.95)'; // thorn bushes along the back
+    [140, 380, 620, 860].forEach(x => { for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.moveTo(x + k * 18 - 9, raidGROUND_Y); ctx.lineTo(x + k * 18, raidGROUND_Y - 44 - (k % 2 ? 14 : 0)); ctx.lineTo(x + k * 18 + 9, raidGROUND_Y); ctx.fill(); } });
+    bkFloor(ctx, '#2b2410', '#110d05', '#ff9d2e');
+    ctx.strokeStyle = '#243a0c'; ctx.lineWidth = 2; // grass
+    for (let x = 4; x < 1000; x += 14) { const h = 8 + bkHash(x * 3) * 12, sw = Math.sin(F * 0.05 + x) * 2; ctx.beginPath(); ctx.moveTo(x, raidGROUND_Y + 2); ctx.lineTo(x + sw, raidGROUND_Y - h); ctx.stroke(); }
+    [200, 540, 820].forEach((x, i) => { bkGlow(ctx, x, raidGROUND_Y + 22, 26, '255,157,46', 0.4 + 0.2 * Math.sin(F * 0.05 + i)); });
+  },
+
+  // Colossus: an iron foundry - great turning gears, pipes, venting steam, a furnace glow and a riveted floor.
+  colossus(ctx, F, ph) {
+    bkSky(ctx, [[0, '#07090f'], [0.7, '#1d2536'], [1, '#4a2a1a']]);
+    bkGlow(ctx, 500, 470, 380, '255,120,40', 0.28);
+    const sp = 0.004 * (1 + (ph - 1) * 0.4);
+    bkGear(ctx, 170, 190, 130, 14, F * sp, '#161d2b', '#2c384e');
+    bkGear(ctx, 410, 110, 84, 10, -F * sp * 1.55 + 0.2, '#131a27', '#2c384e');
+    bkGear(ctx, 850, 220, 150, 16, -F * sp * 0.8, '#161d2b', '#2c384e');
+    bkGear(ctx, 640, 310, 60, 8, F * sp * 2.1, '#131a27', '#2c384e');
+    ctx.fillStyle = '#10151f'; ctx.strokeStyle = '#2c384e'; ctx.lineWidth = 3; // pipes
+    ctx.fillRect(-30, 340, 1060, 22); ctx.strokeRect(-30, 340, 1060, 22);
+    [100, 520, 900].forEach(x => { ctx.fillRect(x - 11, 340, 22, 160); ctx.strokeRect(x - 11, 340, 22, 160); });
+    [300, 700].forEach((x, i) => { // vents
+      for (let k = 0; k < 5; k++) {
+        const t = ((F * (1.2 + ph * 0.3) + k * 22 + i * 40) % 110) / 110;
+        ctx.fillStyle = 'rgba(190,200,215,' + (0.3 * (1 - t)).toFixed(2) + ')';
+        ctx.beginPath(); ctx.arc(x + Math.sin(F * 0.03 + k) * 10, 340 - t * 190, 8 + t * 24, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    ctx.fillStyle = 'rgba(255,170,70,0.8)';
+    for (let i = 0; i < 10 + ph * 4; i++) { const sx = (i * 113 + F * 0.4) % 1000, sy = raidGROUND_Y - ((F * (1.4 + (i % 3) * 0.5) + i * 71) % 220); ctx.fillRect(sx, sy, 2, 2); }
+    bkFloor(ctx, '#252d3d', '#0c1018', '#5ce1ff');
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 2;
+    for (let x = -30; x < 1030; x += 90) { ctx.beginPath(); ctx.moveTo(x, raidGROUND_Y); ctx.lineTo(x, 600); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(-30, 548); ctx.lineTo(1030, 548); ctx.stroke();
+    ctx.fillStyle = 'rgba(120,140,170,0.5)';
+    for (let x = 10; x < 1030; x += 90) { ctx.beginPath(); ctx.arc(x + 4, raidGROUND_Y + 10, 3, 0, Math.PI * 2); ctx.arc(x + 76, raidGROUND_Y + 10, 3, 0, Math.PI * 2); ctx.fill(); }
+    for (let i = 0; i < 10; i++) { ctx.fillStyle = 'rgba(92,225,255,' + (0.3 + 0.5 * Math.abs(Math.sin(F * 0.06 + i))).toFixed(2) + ')'; ctx.fillRect(40 + i * 100, raidGROUND_Y + 28, 18, 4); }
+  },
+
+  // Griffon: a sunset above the peaks - snow-capped ridges, wind-torn clouds, birds and streaks of rising wind.
+  griffon(ctx, F, ph) {
+    bkSky(ctx, [[0, '#08162a'], [0.5, '#25507a'], [1, '#f2a65e']]);
+    bkGlow(ctx, 200, 450, 280, '255,210,130', 0.5);
+    ctx.fillStyle = '#ffe9b0'; ctx.beginPath(); ctx.arc(200, 450, 40, 0, Math.PI * 2); ctx.fill();
+    const ridge = (pts, fill, cap) => {
+      ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(-30, raidGROUND_Y);
+      pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.lineTo(1030, raidGROUND_Y); ctx.closePath(); ctx.fill();
+      if (cap) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; pts.forEach(p => { if (p[1] < cap) { ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] - 22, p[1] + 34); ctx.lineTo(p[0] - 6, p[1] + 26); ctx.lineTo(p[0] + 6, p[1] + 38); ctx.lineTo(p[0] + 22, p[1] + 30); ctx.closePath(); ctx.fill(); } }); }
+    };
+    ridge([[0, 380], [110, 250], [230, 360], [360, 220], [500, 340], [650, 240], [790, 370], [900, 260], [1030, 380]], 'rgba(40,60,100,0.8)', 300);
+    ridge([[0, 440], [140, 360], [300, 450], [460, 380], [600, 455], [760, 370], [900, 450], [1030, 400]], 'rgba(22,34,64,0.95)', 0);
+    for (let layer = 0; layer < 2; layer++) {
+      ctx.fillStyle = layer ? 'rgba(255,230,210,0.35)' : 'rgba(255,255,255,0.22)';
+      for (let i = 0; i < 4; i++) { const cx = ((i * 330 + layer * 140 - F * (0.35 + layer * 0.3)) % 1400 + 1400) % 1400 - 200; bkCloud(ctx, cx, 90 + layer * 110 + (i * 41) % 60, 1.4 + layer * 0.5); }
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; // birds
+    for (let i = 0; i < 5; i++) { const bx = ((i * 230 + F * (1.2 + i * 0.1)) % 1200) - 100, by = 120 + (i * 61) % 180 + Math.sin(F * 0.05 + i) * 12, fl = Math.sin(F * 0.2 + i * 2) * 5; ctx.beginPath(); ctx.moveTo(bx - 10, by - fl); ctx.quadraticCurveTo(bx - 4, by - 6, bx, by); ctx.quadraticCurveTo(bx + 4, by - 6, bx + 10, by - fl); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 2; // wind
+    for (let i = 0; i < 6 + ph * 3; i++) { const wx = ((i * 190 + F * (3 + (i % 3))) % 1300) - 150, wy = 60 + (i * 67) % 400; ctx.beginPath(); ctx.moveTo(wx, wy); ctx.quadraticCurveTo(wx + 40, wy - 10, wx + 90, wy); ctx.stroke(); }
+    bkFloor(ctx, '#3a4a66', '#10182a', '#ffe27a');
+    ctx.fillStyle = 'rgba(8,12,24,0.7)'; // rocky ledge
+    for (let x = -10; x < 1030; x += 70) { ctx.beginPath(); ctx.moveTo(x, raidGROUND_Y + 3); ctx.lineTo(x + 20, raidGROUND_Y + 18 + bkHash(x) * 20); ctx.lineTo(x + 52, raidGROUND_Y + 3); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(255,226,122,0.25)'; ctx.lineWidth = 2;
+    for (let y = raidGROUND_Y + 40; y < 600; y += 28) { ctx.beginPath(); ctx.moveTo(-30, y); ctx.lineTo(1030, y); ctx.stroke(); }
+  }
+};
+function raidDrawBackdrop(ctx, type, F, phase) {
+  (RAID_BACKDROPS[type] || RAID_BACKDROPS.grinmaw)(ctx, F, phase || 1);
+}
+
 function raidDraw() {
   raidFxTick();
   const bossDef = BOSS_DEFS[raidG.boss.type] || BOSS_DEFS.grinmaw;
   const shakeAmt = raidFx.shake + (raidG.boss.transition > 0 ? 4 : 0);
   raidCtx.save();
   if (shakeAmt > 0) raidCtx.translate((Math.random() - 0.5) * shakeAmt, (Math.random() - 0.5) * shakeAmt);
-  const skyGrad = raidCtx.createLinearGradient(0, 0, 0, raidGROUND_Y);
-  skyGrad.addColorStop(0, bossDef.bg2);
-  skyGrad.addColorStop(1, bossDef.bg1);
-  raidCtx.fillStyle = skyGrad;
-  raidCtx.fillRect(-30, -30, 1060, 630 + 30);
-
-  const groundGrad = raidCtx.createLinearGradient(0, raidGROUND_Y, 0, 600);
-  groundGrad.addColorStop(0, '#2a2a4a');
-  groundGrad.addColorStop(1, '#1a1a2e');
-  raidCtx.fillStyle = groundGrad;
-  raidCtx.fillRect(-30, raidGROUND_Y, 1060, 130);
-  
-  raidCtx.fillStyle = bossDef.accent + '55';
-  for (let i = 0; i < 20; i++) {
-    raidCtx.fillRect(i*55 + (raidG.frame*0.5)%55, raidGROUND_Y+6, 30, 6);
-  }
-
-  // Ambient arena decoration - each boss gets its own atmosphere instead of shared generic stars.
-  if (raidG.boss.type === 'wyrm') {
-    raidCtx.fillStyle = 'rgba(255,255,255,0.35)';
-    for (let i = 0; i < 7; i++) {
-      const cx = ((i * 191 - raidG.frame * (0.3 + (i % 3) * 0.15)) % 1200 + 1200) % 1200 - 100;
-      const cy = 60 + (i * 53) % 260;
-      raidCtx.beginPath();
-      raidCtx.ellipse(cx, cy, 45, 16, 0, 0, Math.PI * 2);
-      raidCtx.ellipse(cx + 30, cy + 6, 30, 12, 0, 0, Math.PI * 2);
-      raidCtx.ellipse(cx - 30, cy + 8, 28, 11, 0, 0, Math.PI * 2);
-      raidCtx.fill();
-    }
-  } else if (raidG.boss.type === 'glutton') {
-    raidCtx.fillStyle = 'rgba(158,230,108,0.4)';
-    for (let i = 0; i < 16; i++) {
-      const bx = (i * 113) % 1000;
-      const by = raidGROUND_Y - ((raidG.frame * (1 + (i % 3) * 0.4) + i * 47) % raidGROUND_Y);
-      const r = 2 + (i % 3) * 1.5;
-      raidCtx.beginPath();
-      raidCtx.arc(bx, by, r, 0, Math.PI * 2);
-      raidCtx.fill();
-    }
-  } else if (raidG.boss.type === 'grinmaw') {
-    raidCtx.fillStyle = 'rgba(255,180,80,0.45)';
-    for (let i = 0; i < 18; i++) {
-      const ex = (i * 91 + 30) % 1000;
-      const ey = raidGROUND_Y - ((raidG.frame * (1.2 + (i % 4) * 0.5) + i * 61) % (raidGROUND_Y + 100));
-      raidCtx.beginPath();
-      raidCtx.arc(ex, ey, 1.5 + (i % 2), 0, Math.PI * 2);
-      raidCtx.fill();
-    }
-  } else {
-    raidCtx.fillStyle = 'rgba(200,164,255,0.3)';
-    for (let i = 0; i < 30; i++) {
-      const sx = (i * 137 + 50) % 1000;
-      const sy = (i * 97 + 20) % 400;
-      const size = (i % 3) + 1;
-      raidCtx.beginPath();
-      raidCtx.arc(sx, sy, size, 0, Math.PI * 2);
-      raidCtx.fill();
-    }
-  }
+  raidDrawBackdrop(raidCtx, raidG.boss.type, raidG.frame, raidG.boss.phase);
 
   raidG.slamAnimations.forEach(anim => {
    const progress = 1 - (anim.life / 40);
@@ -8466,8 +8997,16 @@ function raidDraw() {
     }
   });
 
+  raidDrawTerrain(raidCtx);
+  raidDrawLandingMarkers(raidCtx);
+
   raidG.hazards.forEach(hz => {
-    if (hz.kind === 'imp') {
+    if (hz.kind === 'burst') {
+      const prog = Math.min(1, (hz.timer || 0) / 12);
+      raidCtx.strokeStyle = `rgba(255,220,150,${0.9 * (1 - prog)})`; raidCtx.lineWidth = 5 - 3 * prog;
+      raidCtx.beginPath(); raidCtx.ellipse(hz.x, raidGROUND_Y - 6, hz.r * (0.3 + 0.7 * prog), 10 + 24 * prog, 0, 0, Math.PI * 2); raidCtx.stroke();
+      raidCtx.fillStyle = `rgba(255,200,120,${0.35 * (1 - prog)})`; raidCtx.fill();
+    } else if (hz.kind === 'imp') {
       raidCtx.shadowBlur = 10;
       raidCtx.shadowColor = '#ff6644';
       raidCtx.fillStyle = '#992244';
@@ -8591,29 +9130,31 @@ function raidDraw() {
       }
     } else if (hz.kind === 'thornSpike') {
       if (hz.timer < RAID_THORN_WARN) {
-        raidDrawGroundWarning(raidCtx, hz.x, 38, hz.timer / RAID_THORN_WARN, '190,220,70');
+        raidDrawGroundWarning(raidCtx, hz.x, RAID_THORN_HALF, hz.timer / RAID_THORN_WARN, '190,220,70');
         // the last stretch rumbles: root tips poke up through the marker just before the strike
         const peek = (hz.timer - (RAID_THORN_WARN - 16)) / 16;
         if (peek > 0) {
           raidCtx.fillStyle = '#3a4a14'; raidCtx.strokeStyle = '#182008'; raidCtx.lineWidth = 2;
-          for (let i = -2; i <= 2; i++) {
-            const sx = hz.x + i * 12, th = 4 + peek * 12 + Math.sin(hz.timer * 2.3 + i) * 2;
+          for (let i = -3; i <= 3; i++) {
+            const sx = hz.x + i * 14, th = 4 + peek * 16 + Math.sin(hz.timer * 2.3 + i) * 2;
             raidCtx.beginPath();
-            raidCtx.moveTo(sx - 4, raidGROUND_Y + 2); raidCtx.lineTo(sx, raidGROUND_Y + 2 - th); raidCtx.lineTo(sx + 4, raidGROUND_Y + 2);
+            raidCtx.moveTo(sx - 5, raidGROUND_Y + 2); raidCtx.lineTo(sx, raidGROUND_Y + 2 - th); raidCtx.lineTo(sx + 5, raidGROUND_Y + 2);
             raidCtx.closePath(); raidCtx.fill(); raidCtx.stroke();
           }
         }
       } else if (hz.timer < RAID_THORN_WARN + RAID_THORN_ACTIVE) {
-        const h = 68 + Math.sin(hz.timer * 1.1) * 4;
+        // a clump of seven long thorns, tallest in the middle, bursting up from the floor
+        const k = Math.min((hz.timer - RAID_THORN_WARN) / 6, 1);
+        const h = (RAID_THORN_HEIGHT + Math.sin(hz.timer * 1.1) * 4) * k;
         raidCtx.fillStyle = '#3a4a14';
         raidCtx.strokeStyle = '#182008';
         raidCtx.lineWidth = 2;
-        for (let i = -2; i <= 2; i++) {
-          const sx = hz.x + i * 12;
+        for (let i = -3; i <= 3; i++) {
+          const sx = hz.x + i * 14;
           raidCtx.beginPath();
-          raidCtx.moveTo(sx - 6, raidGROUND_Y);
-          raidCtx.lineTo(sx, raidGROUND_Y - h * (1 - Math.abs(i) * 0.18));
-          raidCtx.lineTo(sx + 6, raidGROUND_Y);
+          raidCtx.moveTo(sx - 8, raidGROUND_Y);
+          raidCtx.lineTo(sx + i * 1.5, raidGROUND_Y - h * (1 - Math.abs(i) * 0.14));
+          raidCtx.lineTo(sx + 8, raidGROUND_Y);
           raidCtx.closePath();
           raidCtx.fill(); raidCtx.stroke();
         }
@@ -8707,8 +9248,8 @@ function raidDraw() {
     raidCtx.fill();
   };
 
-  if (tb0.type === 'grinmaw' && ta.state === 'windup') {
-    const prog = Math.min(ta.timer / 60, 1);
+  if (tb0.type === 'grinmaw' && (ta.state === 'windup' || ta.state === 'advance')) {
+    const prog = Math.min(ta.timer / (ta.state === 'advance' ? 45 : 60), 1);
     for (let d = -1; d <= 1; d += 2) {
       for (let i = 0; i < 5; i++) {
         const cx = tb0.x + d * (70 + i * 70);
@@ -8734,6 +9275,21 @@ function raidDraw() {
       : ta.state === 'ghost' ? 0.3 + 0.4 * (ta.timer / 40)
       : 0.7 + 0.3 * (ta.timer / 45);
     ripple(ta.targetX, raidGROUND_Y + 2, prog, '190,150,255');
+  }
+  if (tb0.type === 'wyrm' && ta.state === 'sweepAim') {
+    // the planned flight path, dotted across the sky and brightening as the Wyrm gets into position
+    const k = Math.min(ta.timer / 50, 1);
+    raidCtx.save();
+    raidCtx.setLineDash([10, 10]);
+    raidCtx.strokeStyle = `rgba(255,160,80,${0.25 + 0.5 * k})`;
+    raidCtx.lineWidth = 4;
+    raidCtx.beginPath();
+    for (let u = 0; u <= 1.001; u += 0.04) {
+      const px = lerp(ta.startX, ta.endX, u), py = WYRM_SWEEP_TOP + Math.sin(u * Math.PI) * WYRM_SWEEP_DIP;
+      if (u === 0) raidCtx.moveTo(px, py); else raidCtx.lineTo(px, py);
+    }
+    raidCtx.stroke();
+    raidCtx.restore();
   }
   if (tb0.type === 'wyrm' && (ta.state === 'aim' || ta.state === 'dive')) {
     const prog = ta.state === 'aim' ? (ta.timer / 45) * 0.7 : 0.7 + 0.3 * (ta.timer / 26);
@@ -8855,7 +9411,10 @@ function raidDraw() {
         feather: ['#fff6d0', '#ffe27a', '#7a5a10'],
         plume: ['#fff6d0', '#ffe27a', '#7a5a10'],
         pod: ['#d9ffb0', '#9ee66c', '#2f5a12'],
-        boulder: ['#e4ded0', '#8f8878', '#3d382e']
+        boulder: ['#e4ded0', '#8f8878', '#3d382e'],
+        rubble: ['#f0c8a0', '#b0583a', '#401810'],
+        bile: ['#e8ffb0', '#7ab83a', '#2f4a12'],
+        spirit: ['#e8ffff', '#7ad8ff', '#20405a']
       }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
       if (raidIsParryable(p)) { // WPN-11: a pulsing white ring marks the shots you can parry
         raidCtx.save();
@@ -9165,6 +9724,7 @@ function raidDisplaySwingProgress(key, syncedTimer) {
 }
 function raidExtrapolateProjectiles() {
   if (raidIsHost) return;
+  raidExtrapolateTerrain();
   raidG.projectiles.forEach(proj => {
     if (proj.isWarning) return;
     if (proj.gravity) proj.vy += proj.gravity;
@@ -11790,16 +12350,16 @@ const MQ_SFX_DEFS = {
 // stun - the stun has its own sound - or a state that only moves the boss). Every state a boss can
 // enter must be listed here (a test checks), so a new move cannot ship without a sound decision.
 const MQ_BOSS_SFX = {
-  grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', spit: 'boss_inflate', summon: 'roar_grinmaw', dazed: null, settle: null },
+  grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', withdraw: 'growl_grinmaw', hurl: null, advance: 'boss_swoosh', summon: 'roar_grinmaw', dazed: null, settle: null },
   warden: { raise: 'growl_warden', cast: 'growl_warden', fade: 'boss_vanish', ghost: null, materialize: 'boss_appear', strike: 'boss_slam', return: null, dazed: null, settle: null },
-  wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, settle: null },
+  wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, sweepAim: 'growl_wyrm', sweepPass: 'boss_swoosh', sweepOut: null, settle: null },
   glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', inflate: 'growl_glutton', deflate: 'boss_deflate', retreat: null, dazed: null, settle: null },
   bramblehide: { rootWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', tossWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
-  colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', chargeGlow: 'growl_colossus', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },
+  colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },
   griffon: { volleyWindup: 'growl_griffon', stormWindup: 'growl_griffon', rainWindup: 'growl_griffon', swoop: 'boss_swoosh', track: null, plunge: 'boss_swoosh', thud: 'boss_slam', soar: null, strafeAim: 'growl_griffon', strafe: 'boss_swoosh', strafeReturn: null, settle: null }
 };
 // Boss projectile kind -> its launch sound.
-const MQ_SHOT_SFX = { candy: 'shot_candy', fang: 'shot_fang', ember: 'shot_ember', bubble: 'shot_bubble', pod: 'shot_pod', bolt: 'shot_bolt', plume: 'shot_plume', feather: 'shot_feather', void: 'shot_void', boulder: 'shot_boulder' };
+const MQ_SHOT_SFX = { rubble: 'shot_boulder', bile: 'shot_bubble', spirit: 'shot_void', candy: 'shot_candy', fang: 'shot_fang', ember: 'shot_ember', bubble: 'shot_bubble', pod: 'shot_pod', bolt: 'shot_bolt', plume: 'shot_plume', feather: 'shot_feather', void: 'shot_void', boulder: 'shot_boulder' };
 // Sword id -> its swing sound.
 const MQ_SWING_SFX = { sword_training: 'swing_training', sword_moss: 'swing_moss', sword_frost: 'swing_frost', sword_void: 'swing_void', sword_dawn: 'swing_dawn' };
 
