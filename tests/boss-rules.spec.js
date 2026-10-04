@@ -303,9 +303,9 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(r.small, 'the tiny dot shots (fangs, pods, plumes, small feathers, bolts) are gone').toEqual([]);
     expect(r.aimedSeen).toEqual(['grinmaw:candy', 'warden:void']);
     expect(r.aimedMax).toBeLessThanOrEqual(3.2);
-    expect(r.lobbedKinds).toEqual(['boulder', 'bubble', 'ember', 'rubble']);
+    expect(r.lobbedKinds).toEqual(['boulder', 'bubble', 'ember', 'quill', 'rubble']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['boulder:boulder', 'bubble:pops', 'ember:pillar', 'rubble:rubble']);
+    expect(r.lobbedLands).toEqual(['boulder:boulder', 'bubble:bubble', 'ember:pillar', 'quill:pops', 'rubble:rubble']);
   });
 
   test('BOS-08 phases at 60% and 30% HP: a 100-frame invulnerable beat that clears the arena and unlocks attacks', async ({ page }) => {
@@ -388,7 +388,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(only2('grinmaw')).toEqual(['summon']);
     expect(only2('warden')).toEqual(['cast']);
     expect(only2('wyrm')).toEqual(['aim']);
-    expect(only2('glutton')).toEqual(['inflate:fan']);
+    expect(only2('glutton')).toEqual(['inflate:fan', 'sink:twin']);
     expect(r.grinmaw.p1).toEqual(['spit', 'windup', 'withdraw']);
   });
 

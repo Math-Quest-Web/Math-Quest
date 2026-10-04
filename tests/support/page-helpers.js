@@ -28,6 +28,7 @@ window.T = {
     clearInterval(countdownInterval); countdownInterval = null;
     countdownActive = false; countdownOverlay.style.display = 'none';
     raidIsHost = true; raidHostChecked = true;
+    raidContactDamage = false; // touching a boss hurts (BOS-48); tests that are not about it put players on top of bosses all the time
     return id;
   },
 
@@ -71,6 +72,7 @@ window.T = {
     b.feastCooldown = 99999; b.comboPending = false; b.lastAttack = '';
     b.x = 500; b.y = BOSS_HOVER_Y[type] || 90; // a floating boss's idle height (BOS-44)
     raidG.hazards = []; raidG.projectiles = []; raidG.slamAnimations = []; raidG.playerProjectiles = [];
+    raidContactDamage = false;
     raidClearTerrain(); // a clean arena (no permanent pieces, no leftovers from the last test)
     raidG.mathEvent = null; raidG.gameOver = false; raidG.victory = false;
     raidLocal.health = 5;

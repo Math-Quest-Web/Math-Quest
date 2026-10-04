@@ -118,7 +118,7 @@ test.describe('Platforms and pillars (TER-02)', () => {
       tr = runPhys(500, raidGROUND_Y, 1, {}, 0);
       let maxRise = 0, passedThrough = false;
       raidLocal.input.jump = true;
-      for (let i = 0; i < 70; i++) { raidUpdateLocal(); raidLocal.input.jump = i < 14; maxRise = Math.max(maxRise, raidGROUND_Y - (raidLocal.y + 48)); if (raidLocal.y + 48 < top - 5) passedThrough = true; }
+      for (let i = 0; i < 140; i++) { raidUpdateLocal(); raidLocal.input.jump = i < 19; maxRise = Math.max(maxRise, raidGROUND_Y - (raidLocal.y + 48)); if (raidLocal.y + 48 < top - 5) passedThrough = true; }
       out.maxRise = maxRise; out.passedThrough = passedThrough; out.endedOn = Math.round(raidLocal.y + 48);
       // walking off the end drops to the floor
       runPhys(500 + 70, top, 1, {}, 0);
@@ -311,7 +311,7 @@ test.describe('Thrown objects and drawing (TER-04)', () => {
     expect(r.rubbleTerrain, 'and leaves nothing behind').toBe(0);
     expect(r.pillar, 'a boulder raises a pillar').not.toBeNull();
     expect(Math.abs(r.pillar.x - 700)).toBeLessThan(6);
-    expect(r.kinds).toEqual(['boulder', 'rubble']);
+    expect(r.kinds).toEqual(['boulder', 'bubble', 'rubble']);
   });
 
   test('TER-04 a burst hurts players standing in it on the floor, not ones in the air', async ({ page }) => {

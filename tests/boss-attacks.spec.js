@@ -49,12 +49,12 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     expect(r.scaleWhileInhaling, 'the boss visibly swells while inhaling').toBeGreaterThan(1.05);
   });
 
-  test('BOS-20 bombardment: Grinmaw retreats into the background (40), hurls rubble at every player from there in waves, then comes forward (45) and slams; he cannot be hit while far away', async ({ page }) => {
+  test('BOS-20 bombardment: Grinmaw withdraws into the background (40), lobs one slow piece of rubble per wave from there (waves 130 frames apart), then comes forward (45) and slams; he cannot be hit while far away', async ({ page }) => {
     await setup(page, 'grinmaw');
     const r = await page.evaluate(() => {
       T.prepBoss('grinmaw', 1); T.place(300);
       raidPlayerRef.child('p2').set(Object.assign({}, T.me(), { x: 700 - 18 })); // a second player, kept in the shared player list
-      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [20, 100] };
+      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [30, 160] };
       const out = { thrown: [], waves: [] };
       const seq = []; let cur = null, farHits = 0, nearScale = null, minScale = 9, untargetableWhileFar = true, lastCount = 0;
       for (let f = 0; f < 420; f++) {
@@ -79,19 +79,20 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     });
     expect(r.seq).toEqual(['withdraw', 'hurl', 'advance', 'slam']);
     near(r.lens[0], 40);
-    near(r.lens[1], 100 + 50);
+    near(r.lens[1], 160 + 50);
     near(r.lens[2], 45);
-    expect(r.waves.map((w) => w.frame), 'two waves, 80 frames apart (counted from the frame he starts throwing)').toEqual([21, 101]);
-    expect(r.waves.map((w) => w.n), 'one rubble per player each wave').toEqual([2, 2]);
+    expect(r.waves.map((w) => w.frame), 'two waves, 130 frames apart (counted from the frame he starts throwing)').toEqual([31, 161]);
+    expect(r.waves.map((w) => w.n), 'one piece of rubble per wave, however many players there are').toEqual([1, 1]);
     r.thrown.forEach((t) => {
       expect(t.onLand).toBe('rubble');
       expect(t.r, 'big enough to parry').toBeGreaterThanOrEqual(11);
       expect(t.up, 'thrown up and over').toBe(true);
-      expect(t.life, 'about a second in the air').toBeLessThanOrEqual(110);
+      expect(t.life, 'a slow lob: about a second and a half in the air').toBeLessThanOrEqual(110);
+      expect(t.life).toBeGreaterThanOrEqual(100);
       expect(t.fromBoss, 'from the boss').toBe(true);
     });
-    expect(r.thrown.filter((t) => Math.abs(t.landX - 300) < 90).length, 'half of each wave comes down near the first player').toBe(2);
-    expect(r.thrown.filter((t) => Math.abs(t.landX - 700) < 90).length).toBe(2);
+    expect(r.thrown.filter((t) => Math.abs(t.landX - 300) < 90).length, 'the waves take the players in turn: first one').toBe(1);
+    expect(r.thrown.filter((t) => Math.abs(t.landX - 700) < 90).length, 'then the other').toBe(1);
     expect(r.minScale, 'drawn small, as if far in the background').toBeLessThan(0.7);
     expect(r.untargetableWhileFar).toBe(true);
     expect(r.terrain, 'rubble bursts where it lands but changes nothing on the floor').toBe(0);
@@ -104,13 +105,13 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
       const wavesFor = (phase) => { T.prepBoss('grinmaw', phase); for (let i = 0; i < 200; i++) { T.prepBoss('grinmaw', phase); BOSS_ATTACK_FNS.grinmaw(raidG.boss); if (raidG.boss.anim.state === 'withdraw') return raidG.boss.anim.waves.slice(); } return null; };
       const out = { p1: wavesFor(1), p2: wavesFor(2) };
       T.prepBoss('grinmaw', 1); T.place(900);
-      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [20, 100] };
-      T.until(() => raidG.boss.anim.state === 'dazed', 500);
+      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [30, 160] };
+      T.until(() => raidG.boss.anim.state === 'dazed', 700);
       out.stunned = raidG.boss.exposed; out.shock = raidG.hazards.filter((h) => h.kind === 'shockwave').length;
       return out;
     });
-    expect(r.p1).toEqual([20, 100]);
-    expect(r.p2, 'a third wave from phase 2').toEqual([20, 90, 160]);
+    expect(r.p1).toEqual([30, 160]);
+    expect(r.p2, 'a third wave from phase 2').toEqual([30, 150, 270]);
     expect(r.stunned).toBeGreaterThanOrEqual(119);
     expect(r.shock).toBe(2);
   });
@@ -412,7 +413,9 @@ test.describe('The Glutton (BOS-23)', () => {
         T.step(1);
         if (!raidG.projectiles.length) { popped = f; break; }
       }
-      return { scale, frames, start, landX: Math.round(lastX), maxY: Math.round(maxY), popped };
+      const mud = raidG.terrain.filter((t) => t.kind === 'mud').map((t) => ({ x: Math.round(t.x), w: t.w, life: t.life }));
+      const slow = (dx) => { T.prepBoss('glutton', 1); raidTerrainAdd({ kind: 'mud', x: 500, w: 170, life: 300 }); T.place(500 + dx); return raidTerrainEffects(T.me()).slow; };
+      return { scale, frames, start, landX: Math.round(lastX), maxY: Math.round(maxY), popped, mud, slowIn: slow(0), slowBeside: slow(120) };
     });
     expect(r.frames).toBe(24);
     expect(r.scale, 'visibly swells before belching').toBeGreaterThan(1.15);
@@ -421,6 +424,11 @@ test.describe('The Glutton (BOS-23)', () => {
     expect(r.maxY, 'bubbles never fall through the floor').toBeLessThanOrEqual(500);
     expect(r.popped).toBeGreaterThan(70);
     expect(r.popped).toBeLessThan(100);
+    expect(r.mud.length, 'where the bubble lands it leaves a pool of mud').toBe(1);
+    expect(Math.abs(r.mud[0].x - 750)).toBeLessThan(15);
+    expect(r.mud[0].life, 'that stays for several seconds').toBeGreaterThan(400);
+    expect(r.slowIn, 'and slows anyone wading through it').toBeLessThan(0.6);
+    expect(r.slowBeside).toBe(1);
   });
 
   test('BOS-23 chomp: sinks and fades (48), swims as a shadow (52), rises on a marker (40), bites, is stunned, retreats', async ({ page }) => {
@@ -463,7 +471,7 @@ test.describe('The Glutton (BOS-23)', () => {
     expect(r.near, 'staying on the marker gets bitten').toBe(4);
     expect(r.aside, 'stepping 100px aside avoids the bite').toBe(5);
     expect(r.jump, 'jumping the bite works too').toBe(5);
-    expect(r.biteMud, 'the bite changes nothing on the floor').toBe(0);
+    expect(r.biteMud, 'the bite churns the floor into mud where it lands').toBe(1);
   });
 
   test('BOS-23 bubble fan (phase 2+): five bubbles land across the arena with gaps to stand in', async ({ page }) => {
@@ -479,6 +487,46 @@ test.describe('The Glutton (BOS-23)', () => {
     expect(r.count).toBe(5);
     expect(r.within).toBe(true);
     expect(r.minGap, 'room to stand between bubbles').toBeGreaterThan(100);
+  });
+
+  test('BOS-23 the bite churns the floor into mud, and the bubble fan leaves at most three pools at a time', async ({ page }) => {
+    await setup(page, 'glutton');
+    const r = await page.evaluate(() => {
+      T.prepBoss('glutton', 1); T.place(960); gluttonStartChomp(raidG.boss); raidG.boss.anim.targetX = 300;
+      T.step(160);
+      const bite = raidG.terrain.filter((t) => t.kind === 'mud' && Math.abs(t.x - 300) < 10).length;
+      T.prepBoss('glutton', 2); T.place(500, 60);
+      raidG.boss.anim = { state: 'inflate', timer: 0, kind: 'fan' };
+      T.step(24 + 120);
+      return { bite, fan: raidG.terrain.filter((t) => t.kind === 'mud').length, other: raidG.terrain.filter((t) => t.kind !== 'mud').length };
+    });
+    expect(r.bite, 'one pool where it bit').toBe(1);
+    expect(r.fan, 'five bubbles, but never more than three pools').toBe(3);
+    expect(r.other).toBe(0);
+  });
+
+  test('BOS-23 twin chomp (phase 2+): two bites in a row at two different spots, stunned only after the second', async ({ page }) => {
+    await setup(page, 'glutton');
+    const r = await page.evaluate(() => {
+      T.prepBoss('glutton', 2); T.place(300);
+      raidPlayerRef.child('p2').set(Object.assign({}, T.me(), { x: 760 - 18 }));
+      gluttonStartChomp(raidG.boss, 1);
+      const bites = []; let lastState = '';
+      for (let f = 0; f < 700; f++) {
+        T.place(960, 60); raidPlayerRef.child('p2').update({ x: 960 - 18, y: 60 });
+        T.step(1);
+        const st = raidG.boss.anim.state;
+        if (st === 'bite' && lastState !== 'bite') bites.push(Math.round(raidG.boss.x));
+        lastState = st;
+        if (st === 'idle') break;
+      }
+      const picks = (phase) => { T.seed(2); const set = new Set(); for (let i = 0; i < 300; i++) { T.prepBoss('glutton', phase); BOSS_ATTACK_FNS.glutton(raidG.boss); set.add(raidG.boss.anim.state + ':' + (raidG.boss.anim.kind || '') + ':' + (raidG.boss.anim.extra || 0)); } return [...set].sort(); };
+      return { bites, p1: picks(1), p2: picks(2) };
+    });
+    expect(r.bites.length, 'two bites').toBe(2);
+    expect(Math.abs(r.bites[1] - r.bites[0]), 'in different places').toBeGreaterThan(60);
+    expect(r.p1).toEqual(['inflate:belch:0', 'sink::0']);
+    expect(r.p2, 'phase 2 adds the bubble fan and the twin chomp').toEqual(['inflate:belch:0', 'inflate:fan:0', 'sink::0', 'sink::1']);
   });
 
   test('BOS-23 feast: periodically clamps shut and is invulnerable for 80 frames after a warning; any attack ends it', async ({ page }) => {
@@ -645,8 +693,42 @@ test.describe('Bramblehide the Ravenous (BOS-40)', () => {
     expect(r.first).toBeGreaterThanOrEqual(58 - 4);
     expect(r.third - r.first, 'staggered').toBeGreaterThanOrEqual(26);
     expect(r.terrain).toBe(0);
-    expect(r.attacks1).toEqual(['chargeWindup', 'rootWindup']);
-    expect(r.attacks2).toEqual(['chargeWindup', 'rootWindup', 'waveWindup']);
+    expect(r.attacks1).toEqual(['chargeWindup', 'quillWindup', 'rootWindup']);
+    expect(r.attacks2).toEqual(['chargeWindup', 'quillWindup', 'rootWindup', 'waveWindup']);
+  });
+
+  test('BOS-40 quills: a 34-frame puff-up, then he shoots spikes out of his own back in a fan toward the nearest player (5, or 7 from phase 2); big, parryable lobs that leave nothing behind', async ({ page }) => {
+    await setup(page, 'bramblehide');
+    const r = await page.evaluate(() => {
+      const run = (phase) => {
+        T.prepBoss('bramblehide', phase); T.place(900, 60); raidG.boss.x = 300; T.watch();
+        raidG.boss.anim = { state: 'quillWindup', timer: 0 };
+        const frames = T.until(() => T.spawns.length > 0, 80);
+        const q = T.spawns.map((p) => Object.assign({}, p));
+        const lands = q.map((p) => Math.round(raidProjectileLandingX(p))).sort((a, b) => a - b);
+        const gaps = lands.slice(1).map((x, i) => x - lands[i]);
+        return { frames, count: q.length, kinds: [...new Set(q.map((p) => p.kind))], onLand: [...new Set(q.map((p) => p.onLand || ''))], parry: q.every((p) => raidIsParryable(p)), up: q.every((p) => p.vy < 0), fromBack: q.every((p) => Math.abs(p.x - 300) < 90 && p.y < raidG.boss.y), minGap: Math.min(...gaps), lands, maxLife: Math.max(...q.map((p) => p.life)) };
+      };
+      const out = { p1: run(1), p2: run(2) };
+      T.prepBoss('bramblehide', 1); T.place(960, 60); raidG.boss.x = 300; raidG.boss.anim = { state: 'quillWindup', timer: 0 }; T.step(220);
+      out.terrain = raidG.terrain.length; out.hazards = raidG.hazards.length;
+      return out;
+    });
+    for (const k of ['p1', 'p2']) {
+      expect(r[k].frames).toBe(34);
+      expect(r[k].kinds).toEqual(['quill']);
+      expect(r[k].onLand, 'they just land').toEqual(['']);
+      expect(r[k].parry, 'big enough to parry').toBe(true);
+      expect(r[k].up, 'shot up and out').toBe(true);
+      expect(r[k].fromBack, 'from his own back').toBe(true);
+      expect(r[k].minGap, 'a fan with gaps to stand in').toBeGreaterThanOrEqual(100);
+      expect(r[k].maxLife).toBeLessThanOrEqual(110);
+      expect(r[k].lands.reduce((a, b) => a + b, 0) / r[k].lands.length, 'the fan opens toward the nearest player (to his right)').toBeGreaterThan(450);
+    }
+    expect(r.p1.count).toBe(5);
+    expect(r.p2.count).toBe(7);
+    expect(r.terrain).toBe(0);
+    expect(r.hazards).toBe(0);
   });
 
 });
@@ -1010,7 +1092,7 @@ test.describe('Ground-anchored bosses (BOS-43)', () => {
 test.describe('Bosses hover near the ground (BOS-44)', () => {
   // For every boss: can a swing from a player whose body centre is at a given height, standing right under the
   // boss, touch the boss's drawn body at any point of the swing? (The real slash against the real silhouette.)
-  const reach = (page, type, playerCentreY, dirs, frames = 1) => page.evaluate(async ([t, y, ds, n]) => {
+  const reach = (page, type, playerCentreY, dirs, frames = 1, dxs = [0]) => page.evaluate(async ([t, y, ds, n, offs]) => {
     await T.setupRaid(t);
     T.prepBoss(t, 1); // idle only, no attacks
     T.step(2); // let the boss settle into its idle position
@@ -1018,13 +1100,13 @@ test.describe('Bosses hover near the ground (BOS-44)', () => {
     for (let f = 0; f < n && !hit; f++) {
       if (f) T.step(7); // sample the idle bob / path across about 3 more seconds
       const b = raidG.boss;
-      for (const d of ds) {
-        const p = { x: b.x - 18, y: y - 24, facing: 1, swingDir: d, utility: '' }; // y is the player's centre
+      for (const d of ds) for (const dx of offs) {
+        const p = { x: b.x - 18 + dx, y: y - 24, facing: 1, swingDir: d, utility: '' }; // y is the player's centre
         if (raidSwingHitsBoss(p, b)) hit = true;
       }
     }
     return hit;
-  }, [type, playerCentreY, dirs, frames]);
+  }, [type, playerCentreY, dirs, frames, dxs]);
   // body-centre height: standing / at the top of a tap jump (about 120 px) / at the top of a full held jump (about 170 px)
   const STAND = 500 - 24, HOP = 500 - 24 - 120, FULL = 500 - 24 - 170;
   const FLOATERS = ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon'];
@@ -1035,12 +1117,15 @@ test.describe('Bosses hover near the ground (BOS-44)', () => {
       expect(await reach(page, boss, HOP, ALL_DIRS), 'a swing from a tap-height jump reaches it').toBe(true);
     });
     test('BOS-44 ' + boss + ' can be pogoed from the top of a held jump', async ({ page }) => {
-      expect(await reach(page, boss, FULL, ['down'], 40), 'a down swing from a full jump reaches it at some point of its patrol').toBe(true);
+      expect(await reach(page, boss, FULL, ['down'], 40, [-60, -30, 0, 30, 60]), 'a down swing from a full jump, a step either side of it, reaches it at some point of its patrol').toBe(true);
     });
   }
+  // The long slash (WPN-10) lets an upward swing from directly beneath a floater catch its lowest part, but nothing
+  // else reaches it from the floor: not a swing along the floor, not a downward one.
+  const LOW_DIRS = ['side', 'down', 'left', 'right', 'downleft', 'downright'];
   for (const boss of FLOATERS) {
-    test('BOS-44 ' + boss + ' still floats - no swing, in any direction, hits it from the ground, at any point of its idle bob', async ({ page }) => {
-      expect(await reach(page, boss, STAND, ALL_DIRS, 60)).toBe(false);
+    test('BOS-44 ' + boss + ' still floats - no swing along or down from the ground hits it, at any point of its idle bob, even standing right under it', async ({ page }) => {
+      expect(await reach(page, boss, STAND, LOW_DIRS, 60, [-60, -30, 0, 30, 60])).toBe(false);
     });
   }
 });

@@ -3891,11 +3891,14 @@ let countdownInterval = null;
 // Movement/jump tuning (RAI-17). A tap of the jump key rises ~100px (RAID_JUMP_VY under normal
 // gravity); holding it applies reduced gravity for up to RAID_JUMP_HOLD_FRAMES frames instead,
 // reaching roughly 150px. The jump is deliberately low - the bosses hover near the ground (BOS-44).
-const RAID_GRAVITY = 0.25;
-const RAID_JUMP_VY = -7.7;
+// The jump reaches the same height as it always did (about 120 px, 170 held) but more slowly: every speed is
+// scaled by RAID_JUMP_SLOW and every acceleration by its square, so the rise AND the fall take 1 / 0.75 as long.
+const RAID_JUMP_SLOW = 0.75;
+const RAID_GRAVITY = 0.25 * RAID_JUMP_SLOW * RAID_JUMP_SLOW;
+const RAID_JUMP_VY = -7.7 * RAID_JUMP_SLOW;
 const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.85; // Second Wind (WPN-06): a little smaller than the first jump, never held
-const RAID_JUMP_HOLD_GRAVITY = 0.1;
-const RAID_JUMP_HOLD_FRAMES = 12;
+const RAID_JUMP_HOLD_GRAVITY = 0.1 * RAID_JUMP_SLOW * RAID_JUMP_SLOW;
+const RAID_JUMP_HOLD_FRAMES = Math.round(12 / RAID_JUMP_SLOW);
 
 // Dash tuning (RAI-16): a committed burst - see raidUpdateLocal, which is what RAI-16's fix
 // keeps from being immediately undone by the normal running speed cap.
@@ -4343,6 +4346,32 @@ function startCountdown(callback) {
 // Shared helpers (host-authoritative boss.hp / player damage)
 // ------------------------------------------------------------
 
+// The player's body is small (RAI-05): a circle of this radius for shots, and a box this wide and tall (half
+// extents, about the centre x + 18, y + 24) for touching a boss (BOS-48).
+const RAID_HIT_R = 9, RAID_BODY_HALF_W = 9, RAID_BODY_HALF_H = 18;
+let raidContactDamage = true; // touching a boss hurts (BOS-48); the test harness switches it off by default
+function raidBodyTouchesBoss(p, b) {
+  const cx = raidPx(p), cy = p.y + 24;
+  if (!raidBossBoundsHit(b, cx - RAID_BODY_HALF_W, cy - RAID_BODY_HALF_H, cx + RAID_BODY_HALF_W, cy + RAID_BODY_HALF_H)) return false;
+  const rects = raidBossRects(b);
+  for (let i = 0; i < rects.length; i++) {
+    const q = rects[i];
+    if (cx + RAID_BODY_HALF_W >= q[0] && cx - RAID_BODY_HALF_W <= q[2] && cy + RAID_BODY_HALF_H >= q[1] && cy - RAID_BODY_HALF_H <= q[3]) return true;
+  }
+  return false;
+}
+// Host: anyone whose body overlaps the boss's drawn silhouette loses a heart (the usual invincibility stops a pile-up).
+// A boss that cannot be hit (faded, submerged, far in the background) cannot be touched either, and nothing hurts
+// during the invulnerable beat between phases.
+function raidBossContact(b) {
+  if (!raidContactDamage || b.transition > 0 || raidBossUntargetable(b)) return;
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p || (p.health !== undefined && p.health <= 0)) return;
+    if (raidBodyTouchesBoss(p, b)) raidDamagePlayer(id, p, 1);
+  });
+}
+
 function raidDamagePlayer(id, p, amount) {
   if (!p || p.shield || p.invincible > 0) return;
   if ((p.health === undefined ? 5 : p.health) <= 0) return; // already down (RAI-26)
@@ -4511,19 +4540,20 @@ function raidAddPillar(x, life, theme) {
   return raidTerrainAdd({ kind: 'pillar', x: clampX(x, 70, 930), w: 80, top: raidGROUND_Y - 100, life: life, theme: theme || 'colossus' });
 }
 const RAID_LAND_FX = {
+  bubble: (x) => { raidTerrainAdd({ kind: 'mud', x: clampX(x, 60, 940), w: 170, life: 540, theme: 'glutton' }); }, // the Glutton's bubbles pop into mud (slows you)
   rubble: (x) => { raidHazard({ kind: 'burst', x: x, r: 80, life: 16 }); }, // Grinmaw's rubble just bursts
   boulder: (x) => { raidHazard({ kind: 'burst', x: x, r: 70, life: 16 }); raidAddPillar(x, 600, 'colossus'); } // the Colossus's raises a pillar
 };
 // A boss throws something (TER-04): a lobbed, parryable object that explodes where it lands and leaves terrain
 // (RAID_LAND_FX[kind]). It flies from (o.x, o.y) - the boss by default - to tx on a rise-then-fall arc, in T frames.
-const RAID_THROWN_R = { rubble: 15, boulder: 14 };
+const RAID_THROWN_R = { rubble: 15, boulder: 14, quill: 12 };
 function raidThrow(b, kind, tx, o) {
   o = o || {};
   const hx = o.x !== undefined ? o.x : b.x, hy = o.y !== undefined ? o.y : b.y, T = o.T || 64, land = raidGROUND_Y - 14;
   const g = raidLobGravity(land - hy, T, o.rise || RAID_LOB_RISE);
   raidG.projectiles.push({
     x: hx, y: hy, vx: (clampX(tx, 30, 970) - hx) / T, vy: (land - hy - g * T * (T + 1) / 2) / T, gravity: g,
-    r: RAID_THROWN_R[kind] || 12, life: T + 6, isWarning: false, owner: kind, isBossProjectile: true, kind: kind, onLand: kind
+    r: RAID_THROWN_R[kind] || 12, life: T + 6, isWarning: false, owner: kind, isBossProjectile: true, kind: kind, onLand: o.noLand ? '' : kind
   });
 }
 
@@ -4861,9 +4891,9 @@ const BOSS_HURT = {
   ] }
 };
 // Floating bosses idle with the BOTTOM of their body this high (BOS-44), so the player has to jump
-// to reach them: the highest a swing from the floor ever reaches is about y 364, and the idle bob
-// adds up to ~18, so the bottom of the body idles at 336 (never lower than ~354).
-const BOSS_FLOAT_BOTTOM_Y = 336;
+// to reach them: the highest a swing from the floor ever reaches is about y 312, and the idle bob
+// adds up to ~18, so the bottom of the body idles at 348 (never lower than ~366). The long slash (WPN-10) makes the lowest part of a floater reachable from the floor by an upward swing from directly beneath it.
+const BOSS_FLOAT_BOTTOM_Y = 348;
 const BOSS_HOVER_Y = {};
 ['grinmaw', 'warden', 'wyrm', 'glutton', 'griffon'].forEach(t => { BOSS_HOVER_Y[t] = BOSS_FLOAT_BOTTOM_Y - BOSS_HURT[t].bounds.y1; });
 
@@ -5070,7 +5100,7 @@ function raidNearestPlayerDir(b) {
 }
 
 // Walk the boss after the nearest player at up to speed px/frame (never beyond [lo, hi]) - bosses do not stand still
-// (BOS-47): it weaves back and forth across the player (about 170 px either side) instead of parking on them.
+// (BOS-47): it paces back and forth a stride away from the player instead of parking on them.
 function raidStalk(b, speed, lo, hi) {
   let best = null, bestD = Infinity;
   Object.keys(raidG.players).forEach(id => {
@@ -5080,9 +5110,10 @@ function raidStalk(b, speed, lo, hi) {
     if (d < bestD) { bestD = d; best = raidPx(p); }
   });
   if (best === null) return;
-  let target = best + Math.sin(raidG.frame * 0.011) * 170;
-  if (target < lo) target = lo + (lo - target); // bounce off the ends of its range rather than stopping against them
-  if (target > hi) target = hi - (target - hi);
+  // It keeps a stride away on its own side of the player (touching a boss hurts, BOS-48), drifting 140-300 px off.
+  let side = Math.sign(b.x - best) || 1;
+  let target = best + side * (220 + Math.sin(raidG.frame * 0.011) * 80);
+  if (target < lo || target > hi) { side = -side; target = best + side * (220 + Math.sin(raidG.frame * 0.011) * 80); }
   target = clampX(target, lo, hi);
   b.x += Math.max(-speed, Math.min(speed, target - b.x));
 }
@@ -5105,7 +5136,7 @@ function grinmawAttack(b) {
   if (b.phase >= 2) options.push('minions');
   const pick = raidPickAttack(b, options);
   if (pick === 'spit') b.anim = { state: 'spit', timer: 0 };
-  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [20, 90, 160] : [20, 100] };
+  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [30, 150, 270] : [30, 160] };
   else if (pick === 'slam') b.anim = { state: 'windup', timer: 0 };
   else b.anim = { state: 'summon', timer: 0 };
 }
@@ -5126,15 +5157,15 @@ function grinmawCandyRain(b) {
   });
 }
 
-// Bombardment (BOS-20): from the background Grinmaw hurls rubble at every player in waves. Each piece is a
+// Bombardment (BOS-20): from the background Grinmaw lobs a slow piece of rubble every couple of seconds. Each piece is a
 // big, parryable lob with a marker where it will land; it bursts there and leaves a pool of lava (TER-04).
 function grinmawHurlRubble(b, wave) {
+  // one slow piece per wave, at the players in turn (so a crowd does not get a barrage)
   const ids = Object.keys(raidG.players).filter(id => raidG.players[id] && raidG.players[id].health !== 0);
-  ids.forEach(id => {
-    const p = raidG.players[id];
-    raidThrow(b, 'rubble', raidPx(p) + (Math.random() - 0.5) * 80 + (p.vx || 0) * 10, { T: 64, y: b.y + (b.animOffsetY || 0) });
-  });
-  if (b.phase >= 2 && ids.length) raidThrow(b, 'rubble', 120 + Math.random() * 760, { T: 64, y: b.y + (b.animOffsetY || 0) }); // and one anywhere, so no corner is safe
+  if (ids.length) {
+    const p = raidG.players[ids[wave % ids.length]];
+    raidThrow(b, 'rubble', raidPx(p) + (Math.random() - 0.5) * 80 + (p.vx || 0) * 10, { T: 100, y: b.y + (b.animOffsetY || 0) });
+  }
   raidG.slamAnimations.push({ x: b.x, y: b.y + 40, life: 8, phase: 'impact', timer: 0 });
 }
 
@@ -5497,9 +5528,10 @@ function gluttonAttack(b) {
   // A new attack cancels any clamp-shut so the boss is never invulnerable through its own recovery.
   b.invulnerable = false; b.feastWarning = false; b.feastCooldown = Math.max(b.feastCooldown || 0, 200);
   const options = ['belch', 'chomp'];
-  if (b.phase >= 2) options.push('fan');
+  if (b.phase >= 2) options.push('fan', 'twin');
   const pick = raidPickAttack(b, options);
   if (pick === 'chomp') gluttonStartChomp(b);
+  else if (pick === 'twin') gluttonStartChomp(b, 1);
   else b.anim = { state: 'inflate', timer: 0, kind: pick };
 }
 
@@ -5529,7 +5561,7 @@ function gluttonLobBubble(b, tx, T) {
     vx: (tx - hx) / T,
     vy: ((raidGROUND_Y - 20) - hy - g * T * (T + 1) / 2) / T,
     gravity: g,
-    r: 14, life: T + 10, isWarning: false, owner: 'bubble', isBossProjectile: true, kind: 'bubble'
+    r: 14, life: T + 10, isWarning: false, owner: 'bubble', isBossProjectile: true, kind: 'bubble', onLand: 'bubble'
   });
 }
 
@@ -5545,13 +5577,15 @@ function gluttonBiteNow(b) {
 
 // The Glutton slowly sinks and fades into the swamp, swims (a faint shadow) to a marked
 // spot, slowly surfaces there, bites, and is left dazed before retreating.
-function gluttonStartChomp(b) {
+// extra > 0 is the twin chomp (phase 2+): a second bite somewhere else straight after the first.
+function gluttonStartChomp(b, extra) {
   const pick = raidRandomPlayer();
   b.anim = {
     state: 'sink',
     timer: 0,
     homeX: b.x, homeY: b.y,
-    targetX: clampX(pick ? raidPx(pick.p) : b.x, 70, 930)
+    targetX: clampX(pick ? raidPx(pick.p) : b.x, 70, 930),
+    extra: extra || 0
   };
 }
 
@@ -5605,12 +5639,18 @@ function updateGluttonAnimation(b) {
     b.y = lerp(diveY, raidGROUND_Y - 55, e);
     b.animScale = 0.45 + 1.05 * e;
     b.animAlpha = 0.2 + 0.8 * e;
-    if (a.timer >= 40) { a.state = 'bite'; a.timer = 0; gluttonBiteNow(b); }
+    if (a.timer >= 40) { a.state = 'bite'; a.timer = 0; gluttonBiteNow(b); raidTerrainAdd({ kind: 'mud', x: b.x, w: 150, life: 480, theme: 'glutton' }); } // the bite churns the floor into mud
   } else if (a.state === 'bite') {
     const t = Math.min(a.timer / 12, 1);
     b.animScale = 1.5 - 0.1 * t;
     b.animAlpha = 1;
-    if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
+    if (t >= 1 && a.extra > 0) {
+      // the twin chomp: straight back under, and up again somewhere else
+      const pick = raidRandomPlayer();
+      let tx = clampX(pick ? raidPx(pick.p) : 500, 70, 930);
+      if (Math.abs(tx - b.x) < 120) tx = b.x < 500 ? b.x + 300 : b.x - 300;
+      a.extra--; a.state = 'sink'; a.timer = 0; a.homeX = b.x; a.homeY = b.y; a.targetX = tx;
+    } else if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
   } else if (a.state === 'dazed') {
     b.animScale = 1.4 - 0.08 * Math.min(a.timer / BOSS_STUN_FRAMES, 1);
     b.animAlpha = 1;
@@ -5658,10 +5698,11 @@ function gluttonMaybeFeast(b) {
 // ------------------------------------------------------------
 
 function bramblehideAttack(b) {
-  const options = ['spikes', 'charge'];
+  const options = ['spikes', 'charge', 'quills'];
   if (b.phase >= 2) options.push('wave');
   const pick = raidPickAttack(b, options);
   if (pick === 'spikes') b.anim = { state: 'rootWindup', timer: 0 };
+  else if (pick === 'quills') b.anim = { state: 'quillWindup', timer: 0 };
   else if (pick === 'charge') {
     const dir = raidNearestPlayerDir(b);
     // the lane is fixed from the very start of the windup so it can be marked on the floor
@@ -5694,6 +5735,16 @@ function bramblehideCharge(b, dir, laneTarget) {
   raidChargeHitState = {};
   const tx = typeof laneTarget === 'number' ? laneTarget : clampX(b.x + dir * 420, 70, 930);
   b.anim = { state: 'charging', timer: 0, dir: dir, startX: b.x, targetX: tx };
+}
+
+// Quills (BOS-40): the boar puffs up and shoots spikes out of its own back - a fan of 5 (7 from phase 2) that arc up
+// and land 120 px apart, opening toward the nearest player. Big enough to parry; they leave nothing behind.
+function bramblehideQuills(b) {
+  const n = b.phase >= 2 ? 7 : 5, dir = raidNearestPlayerDir(b);
+  for (let i = 0; i < n; i++) {
+    const tx = b.x + dir * 240 + (i - (n - 1) / 2) * 120;
+    raidThrow(b, 'quill', tx, { x: b.x + (i - (n - 1) / 2) * 24, y: b.y - 40, T: 56, noLand: true });
+  }
 }
 
 // Thorn wave (phase 2+): after a rear-up, five thorn clumps are marked in a line from the boar toward the nearest
@@ -5745,6 +5796,12 @@ function updateBramblehideAnimation(b) {
       a.state = 'dazed'; a.timer = 0;
       b.exposed = BOSS_STUN_FRAMES;
     }
+  } else if (a.state === 'quillWindup') {
+    const t = Math.min(a.timer / 34, 1);
+    b.animScale = 1 + 0.12 * easeInOut(t);
+    b.animOffsetX = Math.sin(a.timer * 1.3) * 2.5 * t; // it bristles and shakes
+    if (a.timer === 34) { b.animOffsetX = 0; bramblehideQuills(b); }
+    if (a.timer >= 40) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'waveWindup') {
     const t = Math.min(a.timer / 30, 1);
     b.animScale = 1 + 0.1 * easeInOut(t);
@@ -6493,6 +6550,7 @@ function raidBossUpdate() {
 
   raidUpdateHazards();
   raidUpdateTerrain();
+  raidBossContact(b);
   raidUpdateMinions(b);
 
   raidG.slamAnimations.forEach(anim => {
@@ -6519,7 +6577,7 @@ function raidBossUpdate() {
       if (proj.onLand) {
         if (RAID_LAND_FX[proj.onLand]) {
           RAID_LAND_FX[proj.onLand](proj.x); // a burst and the terrain it leaves (TER-04)
-          raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
+          if (proj.kind !== 'bubble') raidG.slamAnimations.push({ x: proj.x, y: raidGROUND_Y - 20, life: 16, phase: 'impact', timer: 0 });
         } else {
           raidHazard({ kind: proj.onLand, x: proj.x, life: RAID_HAZARD_LIFE[proj.onLand] || 66 });
         }
@@ -6531,7 +6589,7 @@ function raidBossUpdate() {
       Object.keys(raidG.players).forEach(id => {
         const p = raidG.players[id];
         if (!p) return;
-        const hitboxRadius = 16;
+        const hitboxRadius = RAID_HIT_R;
         if (Math.hypot(proj.x - raidPx(p), proj.y - (p.y + 24)) < hitboxRadius + proj.r * 0.8) {
           raidDamagePlayer(id, p, 1);
           // a thrown object that hits someone still bursts and leaves its terrain, on the floor beneath it (TER-04)
@@ -6660,7 +6718,7 @@ const RAID_SWORD_DIR_VECTORS = {
   downleft: [-0.7071, 0.7071], downright: [0.7071, 0.7071]
 };
 const RAID_SWORD_SLASH_SQUASH = 0.55; // the slash arc is squashed across its direction, bringing its two ends closer together
-const RAID_SWORD_SLASH_R = 115; // radius of the big white crescent drawn with a swing (WPN-10); it is also the hit area (WPN-15)
+const RAID_SWORD_SLASH_R = 172; // radius of the big white crescent drawn with a swing (WPN-10); it is also the hit area (WPN-15)
 const RAID_SWORD_SWEEP_HALF = 0.9; // matches the existing up/down branches' own sweep half-width
 
 // Absolute swing direction from whichever movement keys are held at the instant the attack starts
@@ -6720,7 +6778,7 @@ function raidSlashLocal(dir, facing, swing, scale) {
   if (Math.sin(frameAng + aStart) - Math.sin(frameAng + aEnd) > 0.01) { const tmp = aStart; aStart = aEnd; aEnd = tmp; }
   // thickness along the arc (u: 0 = top end, 1 = bottom end): fat near the top, narrowing through
   // the farthest point and tapering to nothing at the bottom
-  const widthAt = (u) => 0.5 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6);
+  const widthAt = (u) => 0.8 * Math.pow(1 - u, 1.4) * Math.pow(Math.sin(Math.PI * u), 0.6); // thick enough that the long slash still covers the ground near the hand
   const steps = 28, outer = [], inner = [];
   for (let i = 0; i <= steps; i++) {
     const u = tail + (head - tail) * (i / steps);
@@ -6859,7 +6917,7 @@ let raidChargeHitState = {};
 // player". Module-level rather than a raidLocal field, for consistency with the two guards above,
 // even though raidLocal itself is never wholesale-replaced by a snapshot the way raidG.players is.
 let raidPogoState = { lastSwingTimer: 0, bounced: false };
-const RAID_POGO_VY = -10; // a full nail bounce - a little higher than a jump, about 200 px under normal gravity
+const RAID_POGO_VY = -10 * RAID_JUMP_SLOW; // a full nail bounce - a little higher than a jump, about 200 px under normal gravity
 
 // Hollow Knight's nail-bounce (WPN-08): a downward air-swing connecting with the boss bounces the
 // player upward. Purely local/client-side - reads raidLocal and raidG.boss (already synced to
@@ -8577,7 +8635,8 @@ function raidDrawTerrain(ctx) {
 function raidDrawLandingMarkers(ctx) {
   raidG.projectiles.forEach(pr => {
     if (pr.isWarning || !pr.gravity || !pr.onLand) return;
-    const rad = RAID_LAND_RADIUS[pr.onLand] || 40;
+    const rad = RAID_LAND_RADIUS[pr.onLand];
+    if (!rad) return; // (a bubble just pops into mud: no danger to mark)
     const prog = 1 - Math.min(1, raidProjectileLandingTime(pr) / 90);
     raidDrawGroundWarning(ctx, raidProjectileLandingX(pr), rad, prog, '255,170,70');
   });
@@ -9417,6 +9476,20 @@ function raidDraw() {
         bile: ['#e8ffb0', '#7ab83a', '#2f4a12'],
         spirit: ['#e8ffff', '#7ad8ff', '#20405a']
       }[p.kind] || ['#ff8844', '#ff4400', '#882200'];
+      if (p.kind === 'quill') { // a long thorn, pointing the way it flies, with the parry ring around it
+        raidCtx.save();
+        raidCtx.strokeStyle = `rgba(255,255,255,${0.55 + 0.35 * Math.sin(raidG.frame * 0.25)})`;
+        raidCtx.lineWidth = 2.5;
+        raidCtx.beginPath(); raidCtx.arc(p.x, p.y, p.r + 6, 0, Math.PI * 2); raidCtx.stroke();
+        raidCtx.translate(p.x, p.y); raidCtx.rotate(Math.atan2(p.vy, p.vx));
+        raidCtx.shadowBlur = 12; raidCtx.shadowColor = '#c8e060';
+        raidCtx.fillStyle = '#e4d8a0'; raidCtx.strokeStyle = '#3a2a10'; raidCtx.lineWidth = 2;
+        raidCtx.beginPath(); raidCtx.moveTo(24, 0); raidCtx.lineTo(-14, -6); raidCtx.lineTo(-10, 0); raidCtx.lineTo(-14, 6); raidCtx.closePath();
+        raidCtx.fill(); raidCtx.stroke();
+        raidCtx.restore();
+        raidCtx.shadowBlur = 0;
+        return;
+      }
       if (raidIsParryable(p)) { // WPN-11: a pulsing white ring marks the shots you can parry
         raidCtx.save();
         raidCtx.shadowBlur = 0;
@@ -12355,12 +12428,12 @@ const MQ_BOSS_SFX = {
   warden: { raise: 'growl_warden', cast: 'growl_warden', fade: 'boss_vanish', ghost: null, materialize: 'boss_appear', strike: 'boss_slam', return: null, dazed: null, settle: null },
   wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, sweepAim: 'growl_wyrm', sweepPass: 'boss_swoosh', sweepOut: null, settle: null },
   glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', inflate: 'growl_glutton', deflate: 'boss_deflate', retreat: null, dazed: null, settle: null },
-  bramblehide: { rootWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', waveWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
+  bramblehide: { rootWindup: 'growl_bramblehide', quillWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', waveWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
   colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },
   griffon: { rainWindup: 'growl_griffon', swoop: 'boss_swoosh', track: null, plunge: 'boss_swoosh', thud: 'boss_slam', soar: null, strafeAim: 'growl_griffon', strafe: 'boss_swoosh', strafeReturn: null, settle: null }
 };
 // Boss projectile kind -> its launch sound.
-const MQ_SHOT_SFX = { rubble: 'shot_boulder', bile: 'shot_bubble', spirit: 'shot_void', candy: 'shot_candy', fang: 'shot_fang', ember: 'shot_ember', bubble: 'shot_bubble', pod: 'shot_pod', bolt: 'shot_bolt', plume: 'shot_plume', feather: 'shot_feather', void: 'shot_void', boulder: 'shot_boulder' };
+const MQ_SHOT_SFX = { quill: 'shot_pod', rubble: 'shot_boulder', bile: 'shot_bubble', spirit: 'shot_void', candy: 'shot_candy', fang: 'shot_fang', ember: 'shot_ember', bubble: 'shot_bubble', pod: 'shot_pod', bolt: 'shot_bolt', plume: 'shot_plume', feather: 'shot_feather', void: 'shot_void', boulder: 'shot_boulder' };
 // Sword id -> its swing sound.
 const MQ_SWING_SFX = { sword_training: 'swing_training', sword_moss: 'swing_moss', sword_frost: 'swing_frost', sword_void: 'swing_void', sword_dawn: 'swing_dawn' };
 

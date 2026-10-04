@@ -383,7 +383,11 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
       };
     });
-    expect(r.constants).toEqual({ grav: 0.25, vy: -7.7, holdGrav: 0.1, holdFrames: 12 });
+    // the same height as before (0.25 / -7.7 / 0.1 / 12 frames), reached 25% more slowly
+    expect(r.constants.grav).toBeCloseTo(0.25 * 0.5625, 6);
+    expect(r.constants.vy).toBeCloseTo(-7.7 * 0.75, 6);
+    expect(r.constants.holdGrav).toBeCloseTo(0.1 * 0.5625, 6);
+    expect(r.constants.holdFrames).toBe(16);
     expect(r.tap).toBeGreaterThan(85);
     expect(r.tap).toBeLessThan(125);
     expect(r.fullHold, 'holding the whole way up still rises beyond a tap').toBeGreaterThan(r.tap + 30);
@@ -1017,14 +1021,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.previewTrailSpot = alphaAt(0.45, undefined, 40, -11, 'sword_training');
       return out;
     });
-    expect(r.reachFromBody, 'it reaches about 125 px out from the body, as drawn').toBeGreaterThan(100);
-    expect(r.reachFromBody).toBeLessThan(140);
+    expect(r.reachFromBody, 'it reaches about 190 px out from the body, as drawn').toBeGreaterThan(165);
+    expect(r.reachFromBody).toBeLessThan(215);
     expect(r.sameAsRight).toBe(true);
     expect(Math.abs(r.reachUp - r.reachSide), 'up and down are the side slash turned a quarter: the same reach').toBeLessThan(10);
     expect(Math.abs(r.reachDown - r.reachSide)).toBeLessThan(10);
     expect(Math.abs(r.reachLeft - r.reachSide), 'and so is left').toBeLessThan(2);
-    expect(r.R, 'the crescent radius is the scaled slash radius').toBeGreaterThan(90);
-    expect(r.R).toBeLessThan(150);
+    expect(r.R, 'the crescent radius is the scaled slash radius').toBeGreaterThan(130);
+    expect(r.R).toBeLessThan(220);
     expect(r.height, 'the arc is compressed across its direction: shorter than it is far-reaching').toBeLessThan(r.R * 1.2);
     expect(r.squash).toBeLessThan(0.7);
     expect(r.behindHand, 'the slash does not wrap round behind the hand').toBeLessThan(2);
@@ -1241,7 +1245,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.stunBoth).toBe(15);
     expect(r.pogoSpring, 'Pogo Spring: +30% bounce').toBeCloseTo(r.pogoBase * 1.3, 5);
     expect(r.fallLight, 'Light Step: a falling player has dropped less far after 20 frames').toBeLessThan(r.fallBase);
-    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25, 5);
+    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25 * 0.75 * 0.75, 5);
     expect(r.dashStride, 'Long Stride: +30% dash length').toBe(Math.round(r.dashBase * 1.3));
     expect(r.hurtBase).toBe(30);
     expect(r.hurtHide, 'Thick Skin: +50% invincibility after a hit').toBe(45);

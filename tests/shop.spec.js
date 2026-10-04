@@ -410,7 +410,7 @@ test.describe('Charm loadout (WPN-13)', () => {
     expect(r.synced).toBe(r.local);
     expect(r.dash, 'Swift Boots').toBe(135);
     expect(r.hearts, 'Vital Core').toBe(6);
-    expect(r.hold, 'Feather Cloak').toBe(Math.round(12 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 12
+    expect(r.hold, 'Feather Cloak').toBe(Math.round(16 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 16
   });
 });
 
