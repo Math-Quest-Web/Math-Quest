@@ -280,7 +280,7 @@ test.describe('Floor zones (TER-03)', () => {
 });
 
 test.describe('Thrown objects and drawing (TER-04)', () => {
-  test('TER-04 a lobbed object lands in a burst and leaves terrain, and a marker shows where it will land', async ({ page }) => {
+  test('TER-04 a lobbed object lands in a burst (a boulder also raises a pillar), and a marker shows where it will land', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       T.prepBoss('grinmaw', 1); raidClearTerrain();
@@ -296,16 +296,22 @@ test.describe('Thrown objects and drawing (TER-04)', () => {
       raidG.projectiles = [pr];
       out.predicted = Math.round(raidProjectileLandingX(pr));
       T.place(900); // out of the way
+      let burst = false;
+      for (let i = 0; i < 70; i++) { T.step(1); if (raidG.hazards.some((h) => h.kind === 'burst')) burst = true; }
+      out.burst = burst; out.rubbleTerrain = raidG.terrain.length;
+      // a boulder raises a pillar where it lands
+      raidG.projectiles = [lob('boulder', 700)];
       for (let i = 0; i < 70; i++) { T.step(1); }
-      const lava = raidG.terrain.find((t) => t.kind === 'lava');
-      out.lava = lava ? { x: Math.round(lava.x), w: lava.w, life: lava.life > 100 } : null;
-      out.burst = raidG.hazards.some((h) => h.kind === 'burst') || true;
+      const pillar = raidG.terrain.find((t) => t.kind === 'pillar');
+      out.pillar = pillar ? { x: Math.round(pillar.x), theme: pillar.theme } : null;
       return out;
     });
     expect(r.predicted).toBe(300);
-    expect(r.lava, 'rubble leaves a lava patch where it lands').not.toBeNull();
-    expect(Math.abs(r.lava.x - 300)).toBeLessThan(6);
-    expect(r.kinds).toEqual(expect.arrayContaining(['bile', 'boulder', 'ember', 'feather', 'pod', 'rubble', 'spirit']));
+    expect(r.burst, 'rubble bursts where it lands').toBe(true);
+    expect(r.rubbleTerrain, 'and leaves nothing behind').toBe(0);
+    expect(r.pillar, 'a boulder raises a pillar').not.toBeNull();
+    expect(Math.abs(r.pillar.x - 700)).toBeLessThan(6);
+    expect(r.kinds).toEqual(['boulder', 'rubble']);
   });
 
   test('TER-04 a burst hurts players standing in it on the floor, not ones in the air', async ({ page }) => {

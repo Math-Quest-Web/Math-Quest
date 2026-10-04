@@ -14,10 +14,10 @@ test.describe('Boss design rules (spec 9.1)', () => {
         const sim = T.simulate(boss, 3, 3600);
         const orbs = sim.hazards.filter((h) => h.kind === 'voidOrb');
         const far = sim.spawns.filter((p) => {
-          if (p.kind === 'spirit') return false; // falls from an orb, checked below
+          if (p.kind === 'void') return false; // bursts out of an orb, checked below
           return Math.hypot(p.x - p._bx, p.y - p._by) > 140;
         }).map((p) => ({ kind: p.kind, dx: Math.round(p.x - p._bx), dy: Math.round(p.y - p._by) }));
-        const voidShots = sim.spawns.filter((p) => p.kind === 'spirit').length;
+        const voidShots = sim.spawns.filter((p) => p.kind === 'void').length;
         const orbsNearBoss = orbs.filter((o) => Math.hypot(o.x - o._bx, o.y - o._by) < 60).length;
         const hazardKinds = [...new Set(sim.hazards.map((h) => h.kind))].sort();
         const embers = sim.spawns.filter((p) => p.kind === 'ember').length;
@@ -49,10 +49,10 @@ test.describe('Boss design rules (spec 9.1)', () => {
       }
       if (b !== 'griffon') expect(r[b].hazardKinds, b + ' has no feather drops').not.toContain('featherFall');
     }
-    // every spirit falls from an orb that was conjured at the Warden's hands (four to an orb)
+    // every void burst belongs to an orb that was conjured at the Warden's hands
     expect(r.warden.orbs).toBeGreaterThan(0);
     expect(r.warden.orbsNearBoss).toBe(r.warden.orbs);
-    expect(r.warden.voidShots).toBe(r.warden.orbs * 4);
+    expect(r.warden.voidShots).toBe(r.warden.orbs * 8);
     // only the Wyrm spits fireballs, so nothing else - including the new bosses - ever makes flame
     // pillars any more (Bramblehide/Colossus's ground eruptions are their own thornSpike/quake kinds)
     expect(r.grinmaw.pillars + r.warden.pillars + r.glutton.pillars + r.griffon.pillars + r.bramblehide.pillars + r.colossus.pillars).toBe(0);
@@ -279,18 +279,19 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(r.comboDiffers).toBe(1);
   });
 
-  test('BOS-07 bosses throw nothing in a straight line: every projectile is a lob that rises, falls to a marked landing spot, and leaves something behind', async ({ page }) => {
+  test('BOS-07 the Wardens void shots are slow (<= 3 px/frame); the only thrown objects are the rubble of Grinmaw and the boulders of the Colossus - big lobs that rise, fall to a marked landing spot and burst', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
-      const out = { straight: 0, lobbed: [] };
+      const out = { aimedMax: 0, aimedKinds: new Set(), lobbed: [], others: [] };
       for (const boss of BOSS_ORDER) {
         T.seed(9);
         const sim = T.simulate(boss, 3, 3600);
         sim.spawns.forEach((p) => {
-          if (!p.gravity) out.straight++;
+          if (!p.gravity) { out.aimedMax = Math.max(out.aimedMax, Math.hypot(p.vx || 0, p.vy || 0)); out.aimedKinds.add(boss + ':' + p.kind); }
           else out.lobbed.push({ kind: p.kind, life: p.life, lands: p.onLand || 'nothing', up: p.vy < 0, big: p.r >= RAID_PARRY_MIN_R });
         });
       }
+      out.aimedKinds = [...out.aimedKinds].sort();
       out.lobbedKinds = [...new Set(out.lobbed.map((l) => l.kind))].sort();
       out.lobbedMaxLife = Math.max(...out.lobbed.map((l) => l.life));
       out.lobbedLands = [...new Set(out.lobbed.map((l) => l.kind + ':' + l.lands))].sort();
@@ -299,10 +300,11 @@ test.describe('Boss design rules (spec 9.1)', () => {
       delete out.lobbed;
       return out;
     });
-    expect(r.straight, 'no aimed shots any more').toBe(0);
-    expect(r.lobbedKinds).toEqual(['bile', 'boulder', 'ember', 'feather', 'pod', 'rubble', 'spirit']);
+    expect(r.aimedKinds, 'only the Wardens orb bursts fire straight shots').toEqual(['warden:void']);
+    expect(r.aimedMax).toBeLessThanOrEqual(3.2);
+    expect(r.lobbedKinds).toEqual(['boulder', 'rubble']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['bile:bile', 'boulder:boulder', 'ember:ember', 'feather:feather', 'pod:pod', 'rubble:rubble', 'spirit:spirit']);
+    expect(r.lobbedLands).toEqual(['boulder:boulder', 'rubble:rubble']);
     expect(r.allUp, 'every one is thrown up and over').toBe(true);
     expect(r.allBig, 'and big enough to parry').toBe(true);
   });
@@ -375,7 +377,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
           T.prepBoss(boss, phase);
           const b = raidG.boss;
           BOSS_ATTACK_FNS[boss](b);
-          seen.add(b.anim.state + (b.anim.kind ? ':' + b.anim.kind : ''));
+          seen.add(b.anim.state + (b.anim.kind ? ':' + b.anim.kind : '') + (b.anim.extra ? ':twin' : ''));
         }
         return [...seen].sort();
       };
@@ -387,7 +389,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(only2('grinmaw')).toEqual(['summon']);
     expect(only2('warden')).toEqual(['cast']);
     expect(only2('wyrm')).toEqual(['aim']);
-    expect(only2('glutton')).toEqual(['inflate:flood']);
+    expect(only2('glutton')).toEqual(['sink:twin']);
     expect(r.grinmaw.p1).toEqual(['windup', 'withdraw']);
   });
 
@@ -437,7 +439,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(exclusive('grinmaw', ['windup', 'slam', 'withdraw', 'hurl', 'advance', 'summon'])).toBe(true);
     expect(exclusive('warden', ['ghost', 'materialize', 'raise', 'cast', 'strike', 'fade', 'return'])).toBe(true);
     expect(exclusive('wyrm', ['aim', 'dive', 'coil', 'lunge', 'hold', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'])).toBe(true);
-    expect(exclusive('glutton', ['sink', 'swim', 'rise', 'bite', 'inflate', 'deflate', 'retreat'])).toBe(true);
+    expect(exclusive('glutton', ['sink', 'swim', 'rise', 'bite', 'descend', 'inhale', 'retreat'])).toBe(true);
     expect(r.synced).toEqual({ state: 'swim', scale: 0.45, alpha: 0.2 });
   });
 

@@ -163,7 +163,7 @@ window.T = {
       raidG.hazards.forEach((h) => {
         if (h.kind === 'chainLash') { const t = h.timer - h.delay; if (t >= 15 && t < 82) dangers.push({ x: h.tx, r: 75 }); }
         if (h.kind === 'pillar' && h.timer >= 15 && h.timer < 62) dangers.push({ x: h.x, r: 75 });
-        if (h.kind === 'thornSpike' && h.timer >= 15 && h.timer < RAID_THORN_WARN + RAID_THORN_ACTIVE + 2) dangers.push({ x: h.x, r: RAID_THORN_HALF + 15 });
+        if (h.kind === 'thornSpike' && h.timer >= 15 && h.timer - (h.delay || 0) < RAID_THORN_WARN + RAID_THORN_ACTIVE + 2) dangers.push({ x: h.x, r: RAID_THORN_HALF + 15 });
         if (h.kind === 'tremor') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE + 2) dangers.push({ x: h.x, r: 80 }); }
         if (h.kind === 'featherFall') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2) dangers.push({ x: h.x, r: 65 }); }
       });
@@ -175,6 +175,8 @@ window.T = {
         if (['fade', 'ghost', 'materialize'].includes(a.state) && b.type === 'warden') dangers.push({ x: a.targetX, r: 100 });
         if (['aim', 'dive', 'crash'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: a.targetX, r: 110 });
         if (['sink', 'swim', 'rise'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.targetX, r: 100 });
+        if (['descend', 'inhale'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.homeX, r: 130 });
+        if (['sweepAim', 'sweepPass'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: 500, r: WYRM_SWEEP_LOW_HALF + 20 });
         if (['swoop', 'track', 'plunge', 'thud'].includes(a.state) && b.type === 'griffon') dangers.push({ x: a.targetX, r: 110 });
       }
       raidG.projectiles.forEach((p) => {
