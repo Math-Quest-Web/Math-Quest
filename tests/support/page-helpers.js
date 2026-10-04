@@ -71,6 +71,7 @@ window.T = {
     b.feastCooldown = 99999; b.comboPending = false; b.lastAttack = '';
     b.x = 500; b.y = BOSS_HOVER_Y[type] || 90; // a floating boss's idle height (BOS-44)
     raidG.hazards = []; raidG.projectiles = []; raidG.slamAnimations = []; raidG.playerProjectiles = [];
+    raidClearTerrain(); // a clean arena (no permanent pieces, no leftovers from the last test)
     raidG.mathEvent = null; raidG.gameOver = false; raidG.victory = false;
     raidLocal.health = 5;
     raidPlayerRef.child(raidMyId).update({ health: 5, invincible: 0 });
@@ -121,20 +122,26 @@ window.T = {
     raidG.boss.attackTimer = 30;
     T.recordAttacks();
     T.watch();
-    const states = new Set(), damage = [];
+    const states = new Set(), damage = [], terrainDamage = [];
+    // Standing in leftover terrain (lava, fire, thorns) hurts too, but that is the arena, not a new attack: count it apart.
+    const realUpdateTerrain = raidUpdateTerrain; let terrainHurt = false;
+    raidUpdateTerrain = function () { const h0 = T.me().health; realUpdateTerrain(); if (T.me().health < h0) terrainHurt = true; };
     for (let f = 0; f < frames; f++) {
       T.place(playerX, undefined, { invincible: 0 });
       const before = T.me().health;
+      terrainHurt = false;
       T.step(1);
       states.add(raidG.boss.anim.state);
       const after = T.me().health;
-      if (after < before) {
+      if (after < before && terrainHurt) terrainDamage.push({ frame: raidG.frame });
+      else if (after < before) {
         const last = T.attackLog.length ? T.attackLog[T.attackLog.length - 1].frame : 0;
         damage.push({ frame: raidG.frame, sinceAttackStart: raidG.frame - last, state: raidG.boss.anim.state });
       }
       if (after <= 2) { raidPlayerRef.child(raidMyId).update({ health: 5 }); raidG.gameOver = false; }
     }
-    return { states: [...states], spawns: T.spawns, hazards: T.hazardSpawns, attacks: T.attackLog, damage: damage };
+    raidUpdateTerrain = realUpdateTerrain;
+    return { states: [...states], spawns: T.spawns, hazards: T.hazardSpawns, attacks: T.attackLog, damage: damage, terrainDamage: terrainDamage };
   },
 
   // Step frames until pred() is true; returns how many frames it took (or -1).
@@ -156,14 +163,20 @@ window.T = {
       raidG.hazards.forEach((h) => {
         if (h.kind === 'chainLash') { const t = h.timer - h.delay; if (t >= 15 && t < 82) dangers.push({ x: h.tx, r: 75 }); }
         if (h.kind === 'pillar' && h.timer >= 15 && h.timer < 62) dangers.push({ x: h.x, r: 75 });
-        if (h.kind === 'thornSpike' && h.timer >= 15 && h.timer < RAID_THORN_WARN + RAID_THORN_ACTIVE + 2) dangers.push({ x: h.x, r: 75 });
+        if (h.kind === 'thornSpike' && h.timer >= 15 && h.timer - (h.delay || 0) < RAID_THORN_WARN + RAID_THORN_ACTIVE + 2) dangers.push({ x: h.x, r: RAID_THORN_HALF + 15 });
         if (h.kind === 'tremor') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE + 2) dangers.push({ x: h.x, r: 80 }); }
         if (h.kind === 'featherFall') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2) dangers.push({ x: h.x, r: 65 }); }
+      });
+      // a sensible player does not stand in lava, ghost-fire or thorns once they have formed
+      raidG.terrain.forEach((t) => {
+        if ((t.kind === 'lava' || t.kind === 'fire' || t.kind === 'thorns') && t.life !== 0) dangers.push({ x: t.x, r: t.w / 2 + 15 });
       });
       if (a.timer >= 15) {
         if (['fade', 'ghost', 'materialize'].includes(a.state) && b.type === 'warden') dangers.push({ x: a.targetX, r: 100 });
         if (['aim', 'dive', 'crash'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: a.targetX, r: 110 });
         if (['sink', 'swim', 'rise'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.targetX, r: 100 });
+        if (['descend', 'inhale'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.homeX, r: 130 });
+        if (['sweepAim', 'sweepPass'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: 500, r: WYRM_SWEEP_LOW_HALF + 20 });
         if (['swoop', 'track', 'plunge', 'thud'].includes(a.state) && b.type === 'griffon') dangers.push({ x: a.targetX, r: 110 });
       }
       raidG.projectiles.forEach((p) => {
@@ -175,7 +188,7 @@ window.T = {
           const disc = vy * vy + 2 * g * d;
           if (disc < 0) return;
           const t = (-vy + Math.sqrt(disc)) / g; // frames until it reaches the floor
-          if (t < 50) dangers.push({ x: p.x + (p.vx || 0) * t, r: 70 });
+          if (t < 50) dangers.push({ x: p.x + (p.vx || 0) * t, r: Math.max(70, (RAID_LAND_RADIUS[p.onLand] || 0) + 30) });
         } else if (p.y > raidGROUND_Y - 260) {
           dangers.push({ x: p.x + (p.vx || 0) * 12, r: 60 });
         }
@@ -183,6 +196,10 @@ window.T = {
       let wantJump = false;
       raidG.hazards.forEach((h) => {
         if ((h.kind === 'shockwave' || h.kind === 'imp' || h.kind === 'quake') && Math.abs(x - h.x) < 55) wantJump = true;
+      });
+      // standing in lava, ghost-fire or thorns: hop out (a jump clears them)
+      raidG.terrain.forEach((t) => {
+        if ((t.kind === 'lava' || t.kind === 'fire' || t.kind === 'thorns') && Math.abs(x - t.x) < t.w / 2) wantJump = true;
       });
       // Bramblehide's dash sweeps most of the arena in 18 frames - far too fast to outrun, so the
       // dodge is a jump (like a shockwave), reacting to the boar's own live x as it closes in.

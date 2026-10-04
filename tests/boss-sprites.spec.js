@@ -67,10 +67,12 @@ test.describe('State to frame mapping (BOS-31, BOS-32)', () => {
   });
 
   test('BOS-32 attack timelines: windup, then telegraph, then attack, then recover', async ({ page }) => {
-    const spit = (timer) => frameFor(page, { type: 'grinmaw', anim: { state: 'spit', timer } });
-    expect(await spit(3)).toBe('windup');
-    expect(await spit(20)).toBe('telegraph');
-    expect(await spit(30)).toBe('attack');
+    const withdraw = (timer) => frameFor(page, { type: 'grinmaw', anim: { state: 'withdraw', timer } });
+    const hurl = (timer) => frameFor(page, { type: 'grinmaw', anim: { state: 'hurl', timer } });
+    expect(await withdraw(3)).toBe('windup');
+    expect(await hurl(5), 'the heave of a throw').toBe('attack');
+    expect(await hurl(30), 'then it winds up for the next').toBe('telegraph');
+    expect(await frameFor(page, { type: 'grinmaw', anim: { state: 'advance', timer: 20 } })).toBe('telegraph');
     expect(await frameFor(page, { type: 'grinmaw', anim: { state: 'settle', timer: 4 } })).toBe('recover');
     expect(await frameFor(page, { type: 'grinmaw', anim: { state: 'summon', timer: 40 } })).toBe('special');
     expect(await frameFor(page, { type: 'wyrm', anim: { state: 'coil', timer: 30 } })).toBe('telegraph');
