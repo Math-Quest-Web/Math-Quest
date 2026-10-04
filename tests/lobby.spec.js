@@ -168,6 +168,16 @@ test.describe('Leaving and cleanup (LOB-09 to LOB-11)', () => {
     expect(r).toEqual({ lobby: null, raid: null });
   });
 
+  test('LOB-09 your own Leave deleting the lobby does not alert you that someone else ended it', async ({ page }) => {
+    // listenToLobby (attached for the duration of a raid) watches the lobby record and alerts
+    // "the lobby host has ended the session" when it disappears - meant for a client left behind
+    // when someone else disbands the lobby, not for the client whose own Leave just deleted it.
+    await page.evaluate(() => T.setupRaid('grinmaw'));
+    await page.evaluate(() => leaveLobby());
+    await expect.poll(() => page.evaluate(() => currentLobbyId)).toBeNull();
+    expect(page.dialogs).toEqual([]);
+  });
+
   test('LOB-09 empty lobbies are removed together with their raid data by the periodic sweep', async ({ page }) => {
     await page.evaluate(async () => {
       await startFirebase();
