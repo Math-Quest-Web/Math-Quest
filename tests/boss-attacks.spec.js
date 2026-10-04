@@ -28,6 +28,27 @@ async function setup(page, boss) {
 }
 
 test.describe('Grinmaw the Enthroned (BOS-20)', () => {
+  test('BOS-20 candy spit: inhales for 26 frames, then fires one slow shot per player from the mouth', async ({ page }) => {
+    await setup(page, 'grinmaw');
+    const r = await page.evaluate(() => {
+      T.prepBoss('grinmaw', 1); T.place(300);
+      raidG.boss.anim = { state: 'spit', timer: 0 };
+      const frames = T.until(() => raidG.projectiles.length > 0, 100);
+      const p = raidG.projectiles[0];
+      const count = raidG.projectiles.length;
+      const fromMouth = Math.hypot(p.x - raidG.boss.x, p.y - (raidG.boss.y + 30)) < 25;
+      const scaleWhileInhaling = (() => { T.prepBoss('grinmaw', 1); raidG.boss.anim = { state: 'spit', timer: 0 }; T.step(20); return raidG.boss.animScale; })();
+      return { frames, count, kind: p.kind, speed: Math.hypot(p.vx, p.vy), fromMouth, toward: p.vx < 0, scaleWhileInhaling };
+    });
+    expect(r.frames).toBe(26);
+    expect(r.count).toBe(1);
+    expect(r.kind).toBe('candy');
+    expect(r.speed).toBeCloseTo(1.7 + 0.35, 1);
+    expect(r.fromMouth).toBe(true);
+    expect(r.toward).toBe(true);
+    expect(r.scaleWhileInhaling, 'the boss visibly swells while inhaling').toBeGreaterThan(1.05);
+  });
+
   test('BOS-20 bombardment: Grinmaw retreats into the background (40), hurls rubble at every player from there in waves, then comes forward (45) and slams; he cannot be hit while far away', async ({ page }) => {
     await setup(page, 'grinmaw');
     const r = await page.evaluate(() => {
@@ -251,35 +272,48 @@ test.describe('The Chained Warden (BOS-21)', () => {
 });
 
 test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
-  test('BOS-22 flame jets: the body coils, then the heads take turns marking a spot near a player (2, or 3 from phase 2) where a jet of flame erupts; nothing is thrown', async ({ page }) => {
+  test('BOS-22 fire spit: arcing fireballs (2, or 3 from phase 2) land on a spot and erupt into a flame pillar', async ({ page }) => {
     await setup(page, 'wyrm');
     const r = await page.evaluate(() => {
       const out = {};
-      T.prepBoss('wyrm', 1); T.place(500, 60); // parked up high so no jet can touch the player
-      wyrmJets(raidG.boss);
-      T.watch();
-      const frames = []; let seen = 0;
-      for (let f = 1; f <= 200; f++) { T.step(1); if (T.hazardSpawns.length > seen) { frames.push(f); seen = T.hazardSpawns.length; } }
-      out.frames = frames;
-      out.kinds = [...new Set(T.hazardSpawns.map((h) => h.kind))];
-      out.projectiles = T.spawns.length;
-      out.near = T.hazardSpawns.every((h) => Math.abs(h.x - 500) <= 80);
-      out.terrain = raidG.terrain.length;
-      T.prepBoss('wyrm', 2); T.place(500, 60); wyrmJets(raidG.boss); T.watch(); T.step(200);
-      out.phase2 = T.hazardSpawns.length;
-      // a jet is a marked strike: 32 frames of marker, then it hurts only standing players within 38 px
-      const hit = (dx) => { T.prepBoss('wyrm', 1); raidLocal.health = 5; raidHazard({ kind: 'pillar', x: 500, life: 66 }); for (let i = 0; i < 70; i++) { T.place(500 + dx, undefined, { health: T.me().health, invincible: 0 }); T.step(1); } return T.me().health; };
-      out.on = hit(0); out.beside = hit(120);
+      for (const phase of [1, 2]) {
+        T.prepBoss('wyrm', phase); T.place(500, 60); // player parked up high so no fireball is stopped mid-flight
+        wyrmFireSpit(raidG.boss);
+        T.watch();
+        T.step(170);
+        out['embers' + phase] = T.spawns.filter((p) => p.kind === 'ember').length;
+        out['pillars' + phase] = T.hazardSpawns.filter((h) => h.kind === 'pillar').length;
+      }
+      const ember = T.spawns.find((p) => p.kind === 'ember');
+      out.ember = { gravity: ember.gravity, onLand: ember.onLand, life: ember.life, vy: ember.vy, rise: ember.vy < 0 ? (ember.vy * ember.vy) / (2 * ember.gravity) : 0, wanted: RAID_LOB_RISE };
+      // the pillar: marker 32 frames, erupts 32-59; only hurts nearby, low players
+      const pillar = (dx, airborne) => {
+        T.prepBoss('wyrm', 1); raidLocal.health = 5;
+        raidHazard({ kind: 'pillar', x: 500, life: 66 });
+        for (let f = 1; f <= 70; f++) {
+          T.place(500 + dx, airborne ? raidGROUND_Y - 48 - 140 : undefined, { health: raidLocal.health, invincible: 0 });
+          T.step(1);
+          if (T.me().health < 5) return f;
+        }
+        return -1;
+      };
+      out.hitStanding = pillar(0, false); out.hitNear = pillar(30, false); out.hitAside = pillar(80, false); out.hitHigh = pillar(0, true);
       return out;
     });
-    expect(r.frames, 'one jet per head turn').toEqual([26, 60]);
-    expect(r.kinds).toEqual(['pillar']);
-    expect(r.projectiles, 'no projectiles').toBe(0);
-    expect(r.near, 'each jet is marked near a player').toBe(true);
-    expect(r.terrain, 'and changes nothing on the floor').toBe(0);
-    expect(r.phase2).toBe(3);
-    expect(r.on).toBeLessThan(5);
-    expect(r.beside).toBe(5);
+    expect(r.embers1).toBe(2);
+    expect(r.embers2).toBe(3);
+    expect(r.pillars1).toBe(2);
+    expect(r.pillars2).toBe(3);
+    expect(r.ember.onLand).toBe('pillar');
+    expect(r.ember.life).toBe(66);
+    expect(r.ember.gravity, 'the fireball is lobbed up and over, not flung flat').toBeGreaterThan(0.1);
+    expect(r.ember.vy, 'it launches upward').toBeLessThan(0);
+    expect(Math.abs(r.ember.rise - r.ember.wanted), 'and peaks about RAID_LOB_RISE above the launch point').toBeLessThan(8);
+    expect(r.hitStanding).toBeGreaterThanOrEqual(31);
+    expect(r.hitStanding).toBeLessThanOrEqual(34);
+    expect(r.hitNear).toBeGreaterThanOrEqual(31);
+    expect(r.hitAside, 'stepping 80px aside avoids the flames').toBe(-1);
+    expect(r.hitHigh, 'a high jump clears the flames').toBe(-1);
   });
 
   test('BOS-22 sweep: flies to one edge (50), then swoops across the whole map in a diving arc (110) that is dangerous where it comes low, and returns (45)', async ({ page }) => {
@@ -361,6 +395,34 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
 
 test.describe('The Glutton (BOS-23)', () => {
 
+  test('BOS-23 belch: inflates for 24 frames, then lobs a slow bubble at each player that lands and pops on the floor', async ({ page }) => {
+    await setup(page, 'glutton');
+    const r = await page.evaluate(() => {
+      T.prepBoss('glutton', 1); T.place(750);
+      raidG.boss.anim = { state: 'inflate', timer: 0, kind: 'belch' };
+      const scale = (() => { T.step(20); return raidG.boss.animScale; })();
+      T.prepBoss('glutton', 1); T.place(750);
+      raidG.boss.anim = { state: 'inflate', timer: 0, kind: 'belch' };
+      const frames = T.until(() => raidG.projectiles.length > 0, 100);
+      const start = raidG.projectiles.map((p) => ({ kind: p.kind, fromMouth: Math.abs(p.x - raidG.boss.x) < 15 }));
+      let lastX = 0, maxY = 0, popped = -1;
+      for (let f = 1; f <= 200; f++) {
+        const b = raidG.projectiles[0];
+        if (b) { lastX = b.x; maxY = Math.max(maxY, b.y); }
+        T.step(1);
+        if (!raidG.projectiles.length) { popped = f; break; }
+      }
+      return { scale, frames, start, landX: Math.round(lastX), maxY: Math.round(maxY), popped };
+    });
+    expect(r.frames).toBe(24);
+    expect(r.scale, 'visibly swells before belching').toBeGreaterThan(1.15);
+    expect(r.start).toEqual([{ kind: 'bubble', fromMouth: true }]);
+    expect(Math.abs(r.landX - 750)).toBeLessThan(15);
+    expect(r.maxY, 'bubbles never fall through the floor').toBeLessThanOrEqual(500);
+    expect(r.popped).toBeGreaterThan(70);
+    expect(r.popped).toBeLessThan(100);
+  });
+
   test('BOS-23 chomp: sinks and fades (48), swims as a shadow (52), rises on a marker (40), bites, is stunned, retreats', async ({ page }) => {
     await setup(page, 'glutton');
     const r = await page.evaluate(() => {
@@ -404,57 +466,19 @@ test.describe('The Glutton (BOS-23)', () => {
     expect(r.biteMud, 'the bite changes nothing on the floor').toBe(0);
   });
 
-  test('BOS-23 gulp: it drops to the floor (40), inhales (70) and drags everyone toward it, then clamps shut (bite) and is stunned; running away, a dash or a jump at the clamp beats it', async ({ page }) => {
+  test('BOS-23 bubble fan (phase 2+): five bubbles land across the arena with gaps to stand in', async ({ page }) => {
     await setup(page, 'glutton');
     const r = await page.evaluate(() => {
-      T.prepBoss('glutton', 1); T.place(900);
-      gluttonGulp(raidG.boss);
-      const seq = runs(500, () => raidG.boss.anim.state === 'idle');
-      const bossX = (() => { T.prepBoss('glutton', 1); T.place(900); raidG.boss.x = 400; gluttonGulp(raidG.boss); T.until(() => raidG.boss.anim.state === 'inhale', 100); return Math.round(raidG.boss.x); })();
-      // the pull itself: a player standing 250 px away drifts toward the boss during the inhale
-      const pull = (() => {
-        T.prepBoss('glutton', 1); T.place(750); raidG.boss.x = 500; gluttonGulp(raidG.boss);
-        T.until(() => raidG.boss.anim.state === 'inhale', 100);
-        const x0 = raidPx(raidLocal); for (let i = 0; i < 30; i++) { T.step(1, { local: true }); }
-        return Math.round(x0 - raidPx(raidLocal));
-      })();
-      const lone = (() => { T.prepBoss('glutton', 1); T.place(750); raidG.boss.x = 500; gluttonGulp(raidG.boss); T.until(() => raidG.boss.anim.state === 'dazed', 400); return T.me().health; })();
-      return { seq, bossX, pull, lone, terrain: raidG.terrain.length };
+      T.prepBoss('glutton', 2); T.place(500);
+      raidG.boss.anim = { state: 'inflate', timer: 0, kind: 'fan' };
+      T.until(() => raidG.projectiles.length > 0, 100);
+      const lands = raidG.projectiles.map((p) => Math.round(p.x + p.vx * (p.life - 10))).sort((a, b) => a - b);
+      const gaps = lands.slice(1).map((x, i) => x - lands[i]);
+      return { count: raidG.projectiles.length, lands, minGap: Math.min(...gaps), within: lands.every((x) => x >= 0 && x <= 1000) };
     });
-    expect(r.seq.map((s) => s[0])).toEqual(['descend', 'inhale', 'bite', 'dazed', 'retreat', 'idle']);
-    const len = Object.fromEntries(r.seq.map((s) => [s[0], s[1]]));
-    near(len.descend, 40);
-    near(len.inhale, 70);
-    near(len.bite, 12);
-    expect(len.dazed).toBeGreaterThanOrEqual(119);
-    expect(r.bossX, 'it drops straight down where it is').toBe(400);
-    expect(r.pull, 'the inhale drags a player toward it').toBeGreaterThan(40);
-    expect(r.terrain).toBe(0);
-  });
-
-  test('BOS-23 twin chomp (phase 2+): two bites in a row at two different spots, stunned only after the second', async ({ page }) => {
-    await setup(page, 'glutton');
-    const r = await page.evaluate(() => {
-      T.prepBoss('glutton', 2); T.place(300);
-      raidPlayerRef.child('p2').set(Object.assign({}, T.me(), { x: 760 - 18 }));
-      gluttonStartChomp(raidG.boss, 1);
-      const bites = []; let lastState = '';
-      for (let f = 0; f < 700; f++) {
-        T.place(960, 60); raidPlayerRef.child('p2').update({ x: 960 - 18, y: 60 });
-        T.step(1);
-        const st = raidG.boss.anim.state;
-        if (st === 'bite' && lastState !== 'bite') bites.push(Math.round(raidG.boss.x));
-        lastState = st;
-        if (st === 'idle') break;
-      }
-      const seen = (() => { T.seed(2); const set = new Set(); for (let i = 0; i < 300; i++) { T.prepBoss('glutton', 2); BOSS_ATTACK_FNS.glutton(raidG.boss); set.add(raidG.boss.anim.state + ':' + (raidG.boss.anim.extra || 0)); } return [...set].sort(); })();
-      const seen1 = (() => { T.seed(2); const set = new Set(); for (let i = 0; i < 300; i++) { T.prepBoss('glutton', 1); BOSS_ATTACK_FNS.glutton(raidG.boss); set.add(raidG.boss.anim.state + ':' + (raidG.boss.anim.extra || 0)); } return [...set].sort(); })();
-      return { bites, seen, seen1 };
-    });
-    expect(r.bites.length, 'two bites').toBe(2);
-    expect(Math.abs(r.bites[1] - r.bites[0]), 'in different places').toBeGreaterThan(60);
-    expect(r.seen1, 'phase 1: a single chomp or a gulp').toEqual(['descend:0', 'sink:0']);
-    expect(r.seen, 'phase 2 adds the twin chomp').toEqual(['descend:0', 'sink:0', 'sink:1']);
+    expect(r.count).toBe(5);
+    expect(r.within).toBe(true);
+    expect(r.minGap, 'room to stand between bubbles').toBeGreaterThan(100);
   });
 
   test('BOS-23 feast: periodically clamps shut and is invulnerable for 80 frames after a warning; any attack ends it', async ({ page }) => {

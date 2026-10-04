@@ -4499,7 +4499,7 @@ function raidExtrapolateTerrain() {
 
 // What a lobbed object does when it lands (TER-04): a burst that hurts anyone on the floor nearby, and the
 // terrain it leaves behind. The marker shown while it is in the air uses RAID_LAND_RADIUS.
-const RAID_LAND_RADIUS = { rubble: 80, boulder: 70 };
+const RAID_LAND_RADIUS = { rubble: 80, boulder: 70, pillar: 38 };
 // Raise a stone pillar (cover and high ground); never more than six stand at once - the oldest crumble first.
 const RAID_MAX_PILLARS = 6;
 function raidAddPillar(x, life, theme) {
@@ -5101,12 +5101,29 @@ function raidBossUntargetable(b) {
 // ------------------------------------------------------------
 
 function grinmawAttack(b) {
-  const options = ['bombard', 'slam'];
+  const options = ['spit', 'bombard', 'slam'];
   if (b.phase >= 2) options.push('minions');
   const pick = raidPickAttack(b, options);
-  if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [20, 90, 160] : [20, 100] };
+  if (pick === 'spit') b.anim = { state: 'spit', timer: 0 };
+  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [20, 90, 160] : [20, 100] };
   else if (pick === 'slam') b.anim = { state: 'windup', timer: 0 };
   else b.anim = { state: 'summon', timer: 0 };
+}
+
+// Candy spit (BOS-20): fired from the mouth at the end of the inhale - one slow candy per player.
+function grinmawCandyRain(b) {
+  Object.keys(raidG.players).forEach((id) => {
+    const p = raidG.players[id];
+    if (!p) return;
+    const dx = raidPx(p) - b.x, dy = (p.y + 24) - (b.y + 30);
+    const dist = Math.hypot(dx, dy) || 1;
+    const spd = 1.7 + b.phase * 0.35;
+    raidG.projectiles.push({
+      x: b.x, y: b.y + 30,
+      vx: (dx / dist) * spd, vy: (dy / dist) * spd,
+      r: 12, life: 200, isWarning: false, owner: id, isBossProjectile: true, kind: 'candy'
+    });
+  });
 }
 
 // Bombardment (BOS-20): from the background Grinmaw hurls rubble at every player in waves. Each piece is a
@@ -5150,7 +5167,13 @@ const GRINMAW_FAR_SCALE = 0.6; // how small he is drawn in the background
 function updateGrinmawAnimation(b) {
   const a = b.anim;
   a.timer++;
-  if (a.state === 'withdraw') {
+  if (a.state === 'spit') {
+    const e = easeInOut(Math.min(a.timer / 26, 1));
+    b.animScale = 1 + 0.12 * e;
+    b.animOffsetY = -8 * e;
+    if (a.timer === 26) grinmawCandyRain(b);
+    if (a.timer >= 32) { a.state = 'settle'; a.timer = 0; }
+  } else if (a.state === 'withdraw') {
     // back into the background: smaller, hazier and higher, out of reach
     const e = easeInOut(Math.min(a.timer / 40, 1));
     b.x = lerp(a.homeX, 500, e);
@@ -5321,23 +5344,31 @@ function updateWardenAnimation(b) {
 const WYRM_HEAD_OFFSETS = [-52.5, 0, 52.5];
 
 function wyrmAttack(b) {
-  const options = ['jets', 'sweep'];
+  const options = ['fire', 'sweep'];
   if (b.phase >= 2) options.push('dive');
   const pick = raidPickAttack(b, options);
-  if (pick === 'jets') wyrmJets(b);
+  if (pick === 'fire') wyrmFireSpit(b);
   else if (pick === 'sweep') wyrmSweep(b);
   else wyrmDiveBomb(b);
 }
 
-// Flame jets (BOS-22): the body coils, then the heads take turns marking a spot near someone; after the usual
-// floor marker a jet of flame erupts there. Nothing is thrown. Shots are scheduled by animation age (frames).
-function wyrmJets(b) {
-  b.anim = { state: 'coil', timer: 0, age: 0, shots: b.phase >= 2 ? [26, 60, 94] : [26, 60] };
+// Fire spit (BOS-22): fireballs are spat from the head in an arc and land on a spot; a marker shows the landing,
+// then a pillar of flame erupts there. Shots are scheduled by animation age (frames).
+function wyrmFireSpit(b) {
+  const shots = b.phase >= 2 ? [26, 60, 94] : [26, 60];
+  b.anim = { state: 'coil', timer: 0, age: 0, shots: shots };
 }
-function wyrmJetShot(b, index) {
+
+function wyrmFireShot(b) {
   const pick = raidRandomPlayer();
-  const tx = clampX((pick ? raidPx(pick.p) : 500) + (Math.random() - 0.5) * 140, 60, 940);
-  raidHazard({ kind: 'pillar', x: tx, life: 66 });
+  const tx = clampX((pick ? raidPx(pick.p) : 500) + (Math.random() - 0.5) * 180, 60, 940);
+  const hx = b.x, hy = b.y + 20;
+  const T = 60, g = raidLobGravity((raidGROUND_Y - 12) - hy, T, RAID_LOB_RISE);
+  raidG.projectiles.push({
+    x: hx, y: hy, vx: (tx - hx) / T, vy: ((raidGROUND_Y - 12) - hy - g * T * (T + 1) / 2) / T, gravity: g,
+    r: 11, life: T + 6, isWarning: false, owner: 'ember', isBossProjectile: true, kind: 'ember', onLand: 'pillar'
+  });
+  raidSendBossState();
 }
 
 // The sweep (BOS-22): the Wyrm flies to one edge of the map, then swoops across the whole of it in a long diving
@@ -5381,7 +5412,7 @@ function updateWyrmAnimation(b) {
   if (a.shots) {
     a.age++;
     const idx = a.shots.indexOf(a.age);
-    if (idx >= 0) wyrmJetShot(b, idx);
+    if (idx >= 0) wyrmFireShot(b);
   }
   if (a.state === 'coil') {
     const t = Math.min(a.timer / 16, 1);
@@ -5465,20 +5496,43 @@ function gluttonAttack(b) {
   if (b.anim && b.anim.state !== 'idle') return;
   // A new attack cancels any clamp-shut so the boss is never invulnerable through its own recovery.
   b.invulnerable = false; b.feastWarning = false; b.feastCooldown = Math.max(b.feastCooldown || 0, 200);
-  const options = ['chomp', 'gulp'];
-  if (b.phase >= 2) options.push('twin');
+  const options = ['belch', 'chomp'];
+  if (b.phase >= 2) options.push('fan');
   const pick = raidPickAttack(b, options);
   if (pick === 'chomp') gluttonStartChomp(b);
-  else if (pick === 'twin') gluttonStartChomp(b, 1);
-  else gluttonGulp(b);
+  else b.anim = { state: 'inflate', timer: 0, kind: pick };
 }
 
-// Gulp (BOS-23): the Glutton drops to the floor where it is, then inhales - everyone is dragged toward its mouth
-// (a pull on the player, RAID_GULP_PULL px/frame, run or dash away) - and clamps shut. Nothing is thrown.
-const RAID_GULP_PULL = 2.5;
-function gluttonGulp(b) {
-  b.anim = { state: 'descend', timer: 0, homeX: b.x, homeY: b.y };
+// Belch (BOS-23): lobs a slow bubble from the mouth toward each player's current spot.
+function gluttonBelch(b) {
+  Object.keys(raidG.players).forEach(id => {
+    const p = raidG.players[id];
+    if (!p) return;
+    gluttonLobBubble(b, clampX(raidPx(p), 40, 960), 85);
+  });
 }
+
+// Phase 2+: a spread of bubbles lobbed up and out that drift down across the arena with
+// gaps between them, so the answer is to pick a gap.
+function gluttonBubbleFan(b) {
+  for (let i = 0; i < 5; i++) {
+    gluttonLobBubble(b, clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960), 95);
+  }
+}
+
+// Solves the launch velocity so the bubble lands on the floor at tx after T frames.
+function gluttonLobBubble(b, tx, T) {
+  const hx = b.x, hy = b.y - 5;
+  const g = raidLobGravity((raidGROUND_Y - 20) - hy, T, RAID_LOB_RISE);
+  raidG.projectiles.push({
+    x: hx, y: hy,
+    vx: (tx - hx) / T,
+    vy: ((raidGROUND_Y - 20) - hy - g * T * (T + 1) / 2) / T,
+    gravity: g,
+    r: 14, life: T + 10, isWarning: false, owner: 'bubble', isBossProjectile: true, kind: 'bubble'
+  });
+}
+
 // The bite: hurts grounded players within 62 px of the mouth.
 function gluttonBiteNow(b) {
   Object.keys(raidG.players).forEach(id => {
@@ -5491,15 +5545,13 @@ function gluttonBiteNow(b) {
 
 // The Glutton slowly sinks and fades into the swamp, swims (a faint shadow) to a marked
 // spot, slowly surfaces there, bites, and is left dazed before retreating.
-// extra > 0 is the twin chomp (phase 2+): a second bite somewhere else straight after the first.
-function gluttonStartChomp(b, extra) {
+function gluttonStartChomp(b) {
   const pick = raidRandomPlayer();
   b.anim = {
     state: 'sink',
     timer: 0,
     homeX: b.x, homeY: b.y,
-    targetX: clampX(pick ? raidPx(pick.p) : b.x, 70, 930),
-    extra: extra || 0
+    targetX: clampX(pick ? raidPx(pick.p) : b.x, 70, 930)
   };
 }
 
@@ -5510,7 +5562,7 @@ function gluttonUltimate(b) {
   });
 }
 
-const GLUTTON_POSITIONAL = ['sink', 'swim', 'rise', 'bite', 'dazed', 'retreat', 'descend', 'inhale'];
+const GLUTTON_POSITIONAL = ['sink', 'swim', 'rise', 'bite', 'dazed', 'retreat'];
 
 // It wallows back and forth right across the swamp rather than hovering in the middle (BOS-47).
 function gluttonPathPos() {
@@ -5521,18 +5573,18 @@ function updateGluttonAnimation(b) {
   const a = b.anim;
   const diveY = raidGROUND_Y - 90;
   a.timer++;
-  if (a.state === 'descend') {
-    const e = easeInOut(Math.min(a.timer / 40, 1));
-    b.x = a.homeX;
-    b.y = lerp(a.homeY, raidGROUND_Y - 55, e);
-    b.animScale = 1 + 0.5 * e;
-    b.animAlpha = 1;
-    if (a.timer >= 40) { a.state = 'inhale'; a.timer = 0; }
-  } else if (a.state === 'inhale') {
-    b.x = a.homeX; b.y = raidGROUND_Y - 55;
-    b.animScale = 1.5 + 0.08 * Math.sin(a.timer * 0.6); // the mouth heaves as it draws breath
-    b.animAlpha = 1;
-    if (a.timer >= 70) { a.state = 'bite'; a.timer = 0; gluttonBiteNow(b); }
+  if (a.state === 'inflate') {
+    const e = easeInOut(Math.min(a.timer / 24, 1));
+    b.animScale = 1 + 0.25 * e;
+    if (a.timer === 24) {
+      if (a.kind === 'fan') gluttonBubbleFan(b);
+      else gluttonBelch(b);
+    }
+    if (a.timer >= 24) { a.state = 'deflate'; a.timer = 0; }
+  } else if (a.state === 'deflate') {
+    const t = Math.min(a.timer / 12, 1);
+    b.animScale = 1.25 - 0.25 * t;
+    if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animScale = 1; }
   } else if (a.state === 'sink') {
     const e = easeInOut(Math.min(a.timer / 48, 1));
     b.x = a.homeX;
@@ -5558,13 +5610,7 @@ function updateGluttonAnimation(b) {
     const t = Math.min(a.timer / 12, 1);
     b.animScale = 1.5 - 0.1 * t;
     b.animAlpha = 1;
-    if (t >= 1 && a.extra > 0) {
-      // the twin chomp: straight back under, and up again somewhere else
-      const pick = raidRandomPlayer();
-      let tx = clampX(pick ? raidPx(pick.p) : 500, 70, 930);
-      if (Math.abs(tx - b.x) < 120) tx = b.x < 500 ? b.x + 300 : b.x - 300;
-      a.extra--; a.state = 'sink'; a.timer = 0; a.homeX = b.x; a.homeY = b.y; a.targetX = tx;
-    } else if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
+    if (t >= 1) { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
   } else if (a.state === 'dazed') {
     b.animScale = 1.4 - 0.08 * Math.min(a.timer / BOSS_STUN_FRAMES, 1);
     b.animAlpha = 1;
@@ -6952,12 +6998,6 @@ function raidUpdateLocal() {
   else if (p.vx < -0.5) p.facing = -1;
 
   p.x += p.vx;
-  // the Glutton's inhale drags everyone toward its mouth (BOS-23)
-  const gb = raidG.boss;
-  if (gb && gb.type === 'glutton' && gb.anim && gb.anim.state === 'inhale') {
-    const d = gb.x - raidPx(p);
-    if (Math.abs(d) > 24) p.x += Math.sign(d) * RAID_GULP_PULL;
-  }
   raidPushOutOfPillars(p); // a pillar is a wall (TER-02)
 
   // Hollow Knight style variable-height jump: holding Z/Up sustains the rise (reduced gravity)
@@ -7314,6 +7354,7 @@ const BOSS_SPRITE = {
 // submerging keep the idle art because the game already fades or sinks the boss).
 const BOSS_SPRITE_STATES = {
   grinmaw: {
+    spit: [[8, 'windup'], [26, 'telegraph'], [Infinity, 'attack']],
     withdraw: [[Infinity, 'windup']],
     hurl: [[10, 'attack'], [Infinity, 'telegraph']],
     advance: [[Infinity, 'telegraph']],
@@ -7348,8 +7389,8 @@ const BOSS_SPRITE_STATES = {
     settle: [[Infinity, 'recover']]
   },
   glutton: {
-    descend: [[Infinity, 'windup']],
-    inhale: [[Infinity, 'telegraph']],
+    inflate: [[10, 'windup'], [Infinity, 'telegraph']],
+    deflate: [[Infinity, 'attack']],
     sink: [[Infinity, 'idle']],
     swim: [[Infinity, 'idle']],
     rise: [[Infinity, 'telegraph']],
@@ -12310,10 +12351,10 @@ const MQ_SFX_DEFS = {
 // stun - the stun has its own sound - or a state that only moves the boss). Every state a boss can
 // enter must be listed here (a test checks), so a new move cannot ship without a sound decision.
 const MQ_BOSS_SFX = {
-  grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', withdraw: 'growl_grinmaw', hurl: null, advance: 'boss_swoosh', summon: 'roar_grinmaw', dazed: null, settle: null },
+  grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', spit: 'boss_inflate', withdraw: 'growl_grinmaw', hurl: null, advance: 'boss_swoosh', summon: 'roar_grinmaw', dazed: null, settle: null },
   warden: { raise: 'growl_warden', cast: 'growl_warden', fade: 'boss_vanish', ghost: null, materialize: 'boss_appear', strike: 'boss_slam', return: null, dazed: null, settle: null },
   wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, sweepAim: 'growl_wyrm', sweepPass: 'boss_swoosh', sweepOut: null, settle: null },
-  glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', descend: 'growl_glutton', inhale: 'boss_inflate', retreat: null, dazed: null, settle: null },
+  glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', inflate: 'growl_glutton', deflate: 'boss_deflate', retreat: null, dazed: null, settle: null },
   bramblehide: { rootWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', waveWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
   colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },
   griffon: { rainWindup: 'growl_griffon', swoop: 'boss_swoosh', track: null, plunge: 'boss_swoosh', thud: 'boss_slam', soar: null, strafeAim: 'growl_griffon', strafe: 'boss_swoosh', strafeReturn: null, settle: null }

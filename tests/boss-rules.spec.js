@@ -279,34 +279,33 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(r.comboDiffers).toBe(1);
   });
 
-  test('BOS-07 the Wardens void shots are slow (<= 3 px/frame); the only thrown objects are the rubble of Grinmaw and the boulders of the Colossus - big lobs that rise, fall to a marked landing spot and burst', async ({ page }) => {
+  test('BOS-07 no tiny dot shots any more: aimed shots (candy, void) are slow, and the lobbed ones (fireballs, bubbles, rubble, boulders) are big, follow a short visible arc and are parryable', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
-      const out = { aimedMax: 0, aimedKinds: new Set(), lobbed: [], others: [] };
+      const out = { aimedMax: 0, aimedSeen: new Set(), small: [], lobbed: [] };
       for (const boss of BOSS_ORDER) {
         T.seed(9);
         const sim = T.simulate(boss, 3, 3600);
         sim.spawns.forEach((p) => {
-          if (!p.gravity) { out.aimedMax = Math.max(out.aimedMax, Math.hypot(p.vx || 0, p.vy || 0)); out.aimedKinds.add(boss + ':' + p.kind); }
-          else out.lobbed.push({ kind: p.kind, life: p.life, lands: p.onLand || 'nothing', up: p.vy < 0, big: p.r >= RAID_PARRY_MIN_R });
+          if (p.r < RAID_PARRY_MIN_R && p.kind !== 'void') out.small.push(boss + ':' + p.kind);
+          if (!p.gravity) { out.aimedMax = Math.max(out.aimedMax, Math.hypot(p.vx || 0, p.vy || 0)); out.aimedSeen.add(boss + ':' + p.kind); }
+          else out.lobbed.push({ kind: p.kind, life: p.life, lands: p.onLand || 'pops' });
         });
       }
-      out.aimedKinds = [...out.aimedKinds].sort();
+      out.aimedSeen = [...out.aimedSeen].sort();
       out.lobbedKinds = [...new Set(out.lobbed.map((l) => l.kind))].sort();
       out.lobbedMaxLife = Math.max(...out.lobbed.map((l) => l.life));
       out.lobbedLands = [...new Set(out.lobbed.map((l) => l.kind + ':' + l.lands))].sort();
-      out.allUp = out.lobbed.every((l) => l.up);
-      out.allBig = out.lobbed.every((l) => l.big);
+      out.small = [...new Set(out.small)];
       delete out.lobbed;
       return out;
     });
-    expect(r.aimedKinds, 'only the Wardens orb bursts fire straight shots').toEqual(['warden:void']);
+    expect(r.small, 'the tiny dot shots (fangs, pods, plumes, small feathers, bolts) are gone').toEqual([]);
+    expect(r.aimedSeen).toEqual(['grinmaw:candy', 'warden:void']);
     expect(r.aimedMax).toBeLessThanOrEqual(3.2);
-    expect(r.lobbedKinds).toEqual(['boulder', 'rubble']);
+    expect(r.lobbedKinds).toEqual(['boulder', 'bubble', 'ember', 'rubble']);
     expect(r.lobbedMaxLife, 'a lob is airborne for at most ~1.6 s').toBeLessThanOrEqual(110);
-    expect(r.lobbedLands).toEqual(['boulder:boulder', 'rubble:rubble']);
-    expect(r.allUp, 'every one is thrown up and over').toBe(true);
-    expect(r.allBig, 'and big enough to parry').toBe(true);
+    expect(r.lobbedLands).toEqual(['boulder:boulder', 'bubble:pops', 'ember:pillar', 'rubble:rubble']);
   });
 
   test('BOS-08 phases at 60% and 30% HP: a 100-frame invulnerable beat that clears the arena and unlocks attacks', async ({ page }) => {
@@ -389,8 +388,8 @@ test.describe('Boss design rules (spec 9.1)', () => {
     expect(only2('grinmaw')).toEqual(['summon']);
     expect(only2('warden')).toEqual(['cast']);
     expect(only2('wyrm')).toEqual(['aim']);
-    expect(only2('glutton')).toEqual(['sink:twin']);
-    expect(r.grinmaw.p1).toEqual(['windup', 'withdraw']);
+    expect(only2('glutton')).toEqual(['inflate:fan']);
+    expect(r.grinmaw.p1).toEqual(['spit', 'windup', 'withdraw']);
   });
 
   test('BOS-09 a faded or submerged boss cannot be hit; shots pass through', async ({ page }) => {
@@ -436,10 +435,10 @@ test.describe('Boss design rules (spec 9.1)', () => {
       return out;
     });
     const exclusive = (b, states) => states.every((s) => r[b].includes(s) && !BOSSES.filter((o) => o !== b).some((o) => r[o].includes(s)));
-    expect(exclusive('grinmaw', ['windup', 'slam', 'withdraw', 'hurl', 'advance', 'summon'])).toBe(true);
+    expect(exclusive('grinmaw', ['windup', 'slam', 'spit', 'withdraw', 'hurl', 'advance', 'summon'])).toBe(true);
     expect(exclusive('warden', ['ghost', 'materialize', 'raise', 'cast', 'strike', 'fade', 'return'])).toBe(true);
     expect(exclusive('wyrm', ['aim', 'dive', 'coil', 'lunge', 'hold', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'])).toBe(true);
-    expect(exclusive('glutton', ['sink', 'swim', 'rise', 'bite', 'descend', 'inhale', 'retreat'])).toBe(true);
+    expect(exclusive('glutton', ['sink', 'swim', 'rise', 'bite', 'inflate', 'deflate', 'retreat'])).toBe(true);
     expect(r.synced).toEqual({ state: 'swim', scale: 0.45, alpha: 0.2 });
   });
 
