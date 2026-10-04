@@ -3817,7 +3817,11 @@ function listenToLobby(lobbyId) {
     const data = snap.val();
     if (data) lobbyKnownPlayers = Object.keys(data.players || {});
     if (!data) {
-      if (currentLobbyId === lobbyId) {
+      // leavingLobby is already true for the whole span of this client's own leaveLobby() call
+      // (including the write that deletes an emptied lobby, LOB-09), so this only fires for a
+      // client left behind when someone ELSE's leave or the sweep disbanded the lobby out from
+      // under them - not for the very client whose own Leave click just caused the deletion.
+      if (currentLobbyId === lobbyId && !leavingLobby) {
         alert('🏛️ The lobby host has ended the session.');
         leaveLobby();
       }

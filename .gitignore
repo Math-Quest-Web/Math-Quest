@@ -87,3 +87,6 @@ desktop.ini
 # Playwright output
 test-results/
 playwright-report/
+
+# Headless playtest bot run artifacts (screenshots, reports) - see tests/playtest/
+tests/playtest/runs/
