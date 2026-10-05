@@ -4237,10 +4237,10 @@ function raidApplyHit(hit) {
   if (raidLocal.health <= 0) return;
   if (hit.ward) {
     raidLocal.wardUsed = true;
-    raidLocal.invincible = hit.inv || 30;
+    raidLocal.invincible = hit.inv || RAID_HURT_INV;
   } else {
     raidLocal.health = Math.max(0, raidLocal.health - (hit.amount || 1));
-    raidLocal.invincible = hit.inv || 30;
+    raidLocal.invincible = hit.inv || RAID_HURT_INV;
     raidOnLocalPlayerHit();
   }
   raidSendLocalState();
@@ -4385,9 +4385,9 @@ function raidDamagePlayer(id, p, amount) {
   // Warding Sigil absorbs exactly one hit per raid (WPN-03).
   if (raidCharmOf(p.utility, 'first_hit_ward') && !p.wardUsed) {
     p.wardUsed = true;
-    p.invincible = 30;
-    if (mine) raidPlayerRef.child(id).update({ wardUsed: true, invincible: 30 });
-    else { raidRecentHit[id] = raidG.frame; raidHitsRef.push({ target: id, ward: true, inv: 30, at: Date.now() }); }
+    p.invincible = RAID_HURT_INV;
+    if (mine) raidPlayerRef.child(id).update({ wardUsed: true, invincible: RAID_HURT_INV });
+    else { raidRecentHit[id] = raidG.frame; raidHitsRef.push({ target: id, ward: true, inv: RAID_HURT_INV, at: Date.now() }); }
     return;
   }
   const newHealth = Math.max(0, (p.health || 5) - (amount || 1));
@@ -5099,23 +5099,40 @@ function raidNearestPlayerDir(b) {
   return best && raidPx(best) < b.x ? -1 : 1;
 }
 
-// Walk the boss after the nearest player at up to speed px/frame (never beyond [lo, hi]) - bosses do not stand still
-// (BOS-47): it paces back and forth a stride away from the player instead of parking on them.
-function raidStalk(b, speed, lo, hi) {
-  let best = null, bestD = Infinity;
-  Object.keys(raidG.players).forEach(id => {
-    const p = raidG.players[id];
-    if (!p || p.health === 0) return;
-    const d = Math.abs(raidPx(p) - b.x);
-    if (d < bestD) { bestD = d; best = raidPx(p); }
-  });
-  if (best === null) return;
-  // It keeps a stride away on its own side of the player (touching a boss hurts, BOS-48), drifting 140-300 px off.
-  let side = Math.sign(b.x - best) || 1;
-  let target = best + side * (220 + Math.sin(raidG.frame * 0.011) * 80);
-  if (target < lo || target > hi) { side = -side; target = best + side * (220 + Math.sin(raidG.frame * 0.011) * 80); }
-  target = clampX(target, lo, hi);
-  b.x += Math.max(-speed, Math.min(speed, target - b.x));
+// Bosses are mostly still (BOS-47): one picks a new spot, walks there at up to speed px/frame (never beyond [lo, hi]),
+// stops for a good while (70-160 frames), then moves again. With standoff set (the ground-bound and pacing bosses)
+// the new spot is a stride (160-280 px) from the nearest player, on the boss's own side of them, so it follows a
+// player without ever walking into them (touching a boss hurts, BOS-48); otherwise it is anywhere in the range.
+function raidWander(b, speed, lo, hi, standoff) {
+  if (!b.wander) b.wander = { mode: 'rest', until: raidG.frame + 40 + Math.floor(Math.random() * 40), tx: b.x };
+  const w = b.wander;
+  if (w.mode === 'rest') {
+    if (raidG.frame < w.until) return;
+    let tx = null;
+    if (standoff) {
+      let best = null, bestD = Infinity;
+      Object.keys(raidG.players).forEach(id => {
+        const p = raidG.players[id];
+        if (!p || p.health === 0) return;
+        const d = Math.abs(raidPx(p) - b.x);
+        if (d < bestD) { bestD = d; best = raidPx(p); }
+      });
+      if (best !== null) {
+        const dist = 160 + Math.random() * 120;
+        let side = Math.sign(b.x - best) || 1;
+        tx = best + side * dist;
+        if (tx < lo || tx > hi) { side = -side; tx = best + side * dist; }
+        tx = clampX(tx, lo, hi);
+      }
+    }
+    if (tx === null) {
+      tx = lo + Math.random() * (hi - lo);
+      if (Math.abs(tx - b.x) < 200) tx = clampX(b.x + (b.x < (lo + hi) / 2 ? 1 : -1) * (220 + Math.random() * 120), lo, hi); // a real move
+    }
+    w.tx = tx; w.mode = 'move';
+  }
+  b.x += Math.max(-speed, Math.min(speed, w.tx - b.x));
+  if (Math.abs(w.tx - b.x) < 1) { w.mode = 'rest'; w.until = raidG.frame + 70 + Math.floor(Math.random() * 90); }
 }
 
 // While a boss is fading/submerged it can't be hit - shots pass straight through.
@@ -5193,6 +5210,8 @@ function grinmawUltimate(b) {
 // spit: lean back and inhale, then fire. summon: rear up and roar, then throw the imps.
 // windup -> slam -> dazed: rise up, crash down (shockwaves), then slump exhausted.
 const GRINMAW_POSITIONAL = ['withdraw', 'hurl', 'advance'];
+// How far he drops from his hover to bring his body down onto the floor for the slam.
+const GRINMAW_SLAM_DROP = (raidGROUND_Y - BOSS_HURT.grinmaw.bounds.y1) - BOSS_HOVER_Y.grinmaw;
 const GRINMAW_FAR_SCALE = 0.6; // how small he is drawn in the background
 
 function updateGrinmawAnimation(b) {
@@ -5236,12 +5255,14 @@ function updateGrinmawAnimation(b) {
     if (a.timer >= 42) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'windup') {
     const t = Math.min(a.timer / 60, 1);
-    b.animOffsetY = -32 * easeInOut(t);
+    b.animOffsetY = -50 * easeInOut(t); // he rears up high...
     b.animScale = 1 + 0.05 * t;
     if (t >= 1) { a.state = 'slam'; a.timer = 0; }
   } else if (a.state === 'slam') {
+    // ...and comes crashing down: his body really reaches the floor, and the shockwaves start from there
+    if (a.timer === 1) a.fromOff = b.animOffsetY || 0;
     const t = Math.min(a.timer / 5, 1);
-    b.animOffsetY = -32 * (1 - t) + 10 * t;
+    b.animOffsetY = lerp(a.fromOff, GRINMAW_SLAM_DROP, t * t);
     b.animAlpha = 1;
     if (t >= 1) {
       grinmawShockwaves(b);
@@ -5249,11 +5270,11 @@ function updateGrinmawAnimation(b) {
       b.exposed = BOSS_STUN_FRAMES;
     }
   } else if (a.state === 'dazed') {
-    b.animOffsetY = 10 + Math.sin(a.timer * 0.2) * 1.5;
+    b.animOffsetY = GRINMAW_SLAM_DROP; // stunned, sitting on the floor
     b.animScale = 0.97;
     if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'settle') {
-    const t = Math.min(a.timer / 18, 1);
+    const t = Math.min(a.timer / 30, 1);
     b.animOffsetY = (b.animOffsetY || 0) * (1 - t);
     b.animScale = 1 + ((b.animScale || 1) - 1) * (1 - t);
     if (t >= 1) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetY = 0; b.animScale = 1; }
@@ -5430,11 +5451,10 @@ function wyrmUltimate(b) {
 
 const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'];
 
-// Its patrol is a wide loop across the arena (it is never still): out to 380 px either side, rising and
-// falling by up to 45 px (always higher than its resting height, so it stays out of reach from the floor).
+// Where it rests (BOS-47): wherever it last decided to go, with a small bob (never lower than its resting height).
 function wyrmPathPos() {
-  const f = raidG.frame;
-  return { x: 500 + Math.sin(f * 0.011) * 380, y: BOSS_HOVER_Y.wyrm - (0.5 + 0.5 * Math.sin(f * 0.017)) * 45 };
+  const b = raidG.boss;
+  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.wyrm - 8 + Math.sin(raidG.frame * 0.03) * 8 };
 }
 
 function updateWyrmAnimation(b) {
@@ -5598,9 +5618,10 @@ function gluttonUltimate(b) {
 
 const GLUTTON_POSITIONAL = ['sink', 'swim', 'rise', 'bite', 'dazed', 'retreat'];
 
-// It wallows back and forth right across the swamp rather than hovering in the middle (BOS-47).
+// Where it rests (BOS-47): wherever it last decided to go, with a small bob.
 function gluttonPathPos() {
-  return { x: 500 + Math.sin(raidG.frame * 0.0085) * 330, y: BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6 };
+  const b = raidG.boss;
+  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6 };
 }
 
 function updateGluttonAnimation(b) {
@@ -6001,11 +6022,10 @@ function griffonUltimate(b) {
 
 const GRIFFON_POSITIONAL = ['swoop', 'track', 'plunge', 'thud', 'soar', 'strafeAim', 'strafe', 'strafeReturn'];
 
-// It circles the whole arena - out to 380 px either side, rising and falling (never below its resting height,
-// so it stays out of reach from the floor).
+// Where it rests (BOS-47): wherever it last decided to go, with a small bob (never lower than its resting height).
 function griffonPathPos() {
-  const f = raidG.frame;
-  return { x: 500 + Math.sin(f * 0.013) * 380, y: BOSS_HOVER_Y.griffon - (0.5 + 0.5 * Math.cos(f * 0.013)) * 45 };
+  const b = raidG.boss;
+  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.griffon - 6 + Math.sin(raidG.frame * 0.03) * 6 };
 }
 
 function updateGriffonAnimation(b) {
@@ -6438,51 +6458,49 @@ function raidBossUpdate() {
   // (the *_POSITIONAL states), so non-travelling wind-ups don't freeze it in place.
   if (b.type === 'warden') {
     if (!WARDEN_POSITIONAL.includes(b.anim.state)) {
-      raidStalk(b, 0.9, 150, 850); // it patrols after the nearest player instead of hanging in one spot
-      b.y = BOSS_HOVER_Y.warden + Math.sin(raidG.frame * 0.02) * 24;
+      if (b.anim.state === 'idle') raidWander(b, 1.2, 150, 850, true);
+      b.y = BOSS_HOVER_Y.warden + Math.sin(raidG.frame * 0.02) * 12;
     }
     if (b.anim.state !== 'idle') updateWardenAnimation(b);
     if (!WARDEN_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
   } else if (b.type === 'wyrm') {
-    const path = wyrmPathPos();
-    b.x = path.x;
-    b.y = path.y;
+    b.x -= b.appliedOffX || 0; // undo last frame's lean so the offset never accumulates
+    if (b.anim.state === 'idle') raidWander(b, 2.4, 120, 880, false);
+    if (!WYRM_POSITIONAL.includes(b.anim.state)) b.y = wyrmPathPos().y;
     if (b.anim.state !== 'idle') updateWyrmAnimation(b);
     if (!WYRM_POSITIONAL.includes(b.anim.state)) {
-      b.x += b.animOffsetX || 0;
+      b.appliedOffX = b.animOffsetX || 0;
+      b.x += b.appliedOffX;
       b.y += b.animOffsetY || 0;
-    }
+    } else b.appliedOffX = 0;
   } else if (b.type === 'glutton') {
-    if (!GLUTTON_POSITIONAL.includes(b.anim.state)) {
-      const path = gluttonPathPos();
-      b.x = path.x; b.y = path.y;
-    }
+    if (b.anim.state === 'idle') raidWander(b, 1.6, 120, 880, false);
+    if (!GLUTTON_POSITIONAL.includes(b.anim.state)) b.y = gluttonPathPos().y;
     if (b.anim.state !== 'idle') updateGluttonAnimation(b);
   } else if (b.type === 'bramblehide') {
     // Ground-anchored (BOS-43): sits at floor height with only a small sway, no floating drift,
     // so a grounded player can melee or shoot it without needing to jump.
     b.x -= b.appliedOffX || 0; // undo last frame's lean so the offset never accumulates
-    if (b.anim.state === 'idle') raidStalk(b, 1.1, 120, 880); // it paces after the nearest player rather than standing still
+    if (b.anim.state === 'idle') raidWander(b, 1.8, 120, 880, true);
     b.y = raidGROUND_Y - BOSS_HURT.bramblehide.bounds.y1 + Math.sin(raidG.frame * 0.03) * 3;
     if (b.anim.state !== 'idle') updateBramblehideAnimation(b);
     b.appliedOffX = b.animOffsetX || 0;
     b.x += b.appliedOffX;
   } else if (b.type === 'colossus') {
     // Ground-anchored (BOS-43), same as Bramblehide.
-    if (b.anim.state === 'idle') raidStalk(b, 1.0, 120, 880); // it does not stand still: it strides after the nearest player
+    if (b.anim.state === 'idle') raidWander(b, 1.4, 120, 880, true);
     b.y = raidGROUND_Y - BOSS_HURT.colossus.bounds.y1 + Math.sin(raidG.frame * 0.025) * 2;
     if (b.anim.state !== 'idle') updateColossusAnimation(b);
     b.y += b.animOffsetY || 0;
   } else if (b.type === 'griffon') {
-    if (!GRIFFON_POSITIONAL.includes(b.anim.state)) {
-      const path = griffonPathPos();
-      b.x = path.x; b.y = path.y;
-    }
+    if (b.anim.state === 'idle') raidWander(b, 2.4, 120, 880, false);
+    if (!GRIFFON_POSITIONAL.includes(b.anim.state)) b.y = griffonPathPos().y;
     if (b.anim.state !== 'idle') updateGriffonAnimation(b);
     if (!GRIFFON_POSITIONAL.includes(b.anim.state)) b.y += b.animOffsetY || 0;
   } else {
-    if (b.anim.state === 'idle') raidStalk(b, 1.0, 150, 850); // Grinmaw does not sit still: he strides after the nearest player
-    b.y = BOSS_HOVER_Y.grinmaw + Math.sin(raidG.frame * 0.025) * 12;
+    if (b.anim.state === 'idle') raidWander(b, 1.4, 150, 850, true);
+    // (no hover bob while he is slamming or stunned on the floor)
+    b.y = BOSS_HOVER_Y.grinmaw + (b.anim.state === 'slam' || b.anim.state === 'dazed' ? 0 : Math.sin(raidG.frame * 0.025) * 12);
     if (b.anim.state !== 'idle') updateGrinmawAnimation(b);
     b.y += b.animOffsetY || 0;
   }
@@ -7267,9 +7285,10 @@ function raidDashFrames() { // Long Stride
   const u = raidCharm('dash_distance');
   return u ? Math.round(RAID_DASH_FRAMES * u.value) : RAID_DASH_FRAMES;
 }
+const RAID_HURT_INV = 60; // a full second of invincibility after taking a hit (RAI-11)
 function raidHurtInvincibleFrames(utilStr) { // Thick Skin (host-side: the hit player's synced list)
   const u = raidCharmOf(utilStr, 'hurt_iframes');
-  return u ? Math.round(30 * u.value) : 30;
+  return u ? Math.round(RAID_HURT_INV * u.value) : RAID_HURT_INV;
 }
 function raidParryReachFor(utilStr) { // Deflector
   const u = raidCharmOf(utilStr, 'parry_reach');
@@ -7364,8 +7383,8 @@ function raidAttackPose(dir, swing, facing) {
 // facing, squashed - easing out as it counts down. Dash i-frames top out at 21, so they never
 // read as a flinch.
 function raidHurtPose(invincible, facing) {
-  if (!(invincible >= 22)) return { dx: 0, rot: 0, sx: 1, sy: 1 };
-  const t = (invincible - 22) / 8;
+  if (!(invincible >= RAID_HURT_INV - 8)) return { dx: 0, rot: 0, sx: 1, sy: 1 }; // only the first 8 frames of the invincibility
+  const t = Math.min(1, (invincible - (RAID_HURT_INV - 8)) / 8);
   return { dx: -facing * 6 * t, rot: -facing * 0.35 * t, sx: 1 + 0.12 * t, sy: 1 - 0.14 * t };
 }
 
@@ -11369,7 +11388,7 @@ function drawPlayerCuphead(ctx, x, y, w, h, facing, health, maxHealth, shield, i
 
   let top, bottom;
   if (shield) { top = '#66ddff'; bottom = '#3399dd'; }
-  else if (invincible > 24) { top = '#ffffff'; bottom = '#ffe0e0'; } // impact frame: bright flash on the hit itself
+  else if (invincible > RAID_HURT_INV - 6) { top = '#ffffff'; bottom = '#ffe0e0'; } // impact frame: bright flash on the hit itself
   else if (invincible > 0 && invincible % 6 < 3) { top = '#ffaa88'; bottom = '#dd6644'; }
   else if (classic) { top = isLocal ? '#ffcc88' : '#88aaff'; bottom = isLocal ? '#dd8844' : '#446688'; }
   else if (sk.bodyDyn) { const cc = sk.bodyDyn(t); top = cc[0]; bottom = cc[1]; }

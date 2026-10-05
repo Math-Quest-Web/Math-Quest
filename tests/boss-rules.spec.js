@@ -349,7 +349,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
       // waits for the current attack animation to finish before starting the beat
       T.prepBoss('grinmaw', 1); raidG.boss.anim = { state: 'windup', timer: 0 }; raidG.boss.hp = raidG.boss.maxHp * 0.5;
       T.step(5); out.deferred = raidG.boss.transition;
-      T.until(() => raidG.boss.transition > 0, 200); out.startsAfterAnim = raidG.boss.transition > 0;
+      T.until(() => raidG.boss.transition > 0, 400); out.startsAfterAnim = raidG.boss.transition > 0;
       return out;
     });
     expect(r.phases).toEqual([1, 1, 2, 2, 3]);

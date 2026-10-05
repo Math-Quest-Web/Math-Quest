@@ -147,6 +147,32 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     expect(r.jumping).toBe(5);
   });
 
+  test('BOS-20 the slam really hits the floor: he drops from the air onto the ground, the shockwaves start there, he is stunned sitting on it, then he rises back up', async ({ page }) => {
+    await setup(page, 'grinmaw');
+    const r = await page.evaluate(() => {
+      T.prepBoss('grinmaw', 1); T.place(900); raidG.boss.anim = { state: 'windup', timer: 0 }; raidG.boss.attackTimer = 99999;
+      const bottom = () => Math.max(...raidBossRects(raidG.boss).map((q) => q[3]));
+      const out = { before: Math.round(bottom()), waveBottom: null, dazed: [], hover: BOSS_FLOAT_BOTTOM_Y };
+      let highest = 1e9;
+      for (let f = 0; f < 400; f++) {
+        T.step(1);
+        const st = raidG.boss.anim.state;
+        if (st === 'windup') highest = Math.min(highest, bottom());
+        if (out.waveBottom === null && raidG.hazards.some((h) => h.kind === 'shockwave')) out.waveBottom = Math.round(bottom());
+        if (st === 'dazed' && f % 20 === 0) out.dazed.push(Math.round(bottom()));
+        if (st === 'idle' && out.waveBottom !== null) break;
+      }
+      out.raised = Math.round(highest);
+      out.after = Math.round(bottom());
+      return out;
+    });
+    expect(r.raised, 'he rears up before the slam').toBeLessThan(r.before - 25);
+    expect(r.waveBottom, 'the shockwaves are born with his body on the floor').toBeGreaterThanOrEqual(500 - 25);
+    expect(r.waveBottom).toBeLessThanOrEqual(500 + 10);
+    r.dazed.forEach((d) => expect(d, 'and he sits on the floor while stunned').toBeGreaterThanOrEqual(500 - 25));
+    expect(r.after, 'then he floats back up to where he hovers').toBeLessThan(r.hover + 25);
+  });
+
   test('BOS-20 minion summon (phase 2+): two imps are hurled from the hands, land, then scurry along the floor', async ({ page }) => {
     await setup(page, 'grinmaw');
     const r = await page.evaluate(() => {
@@ -1130,32 +1156,33 @@ test.describe('Bosses hover near the ground (BOS-44)', () => {
   }
 });
 
-test.describe('Bosses keep moving (BOS-47)', () => {
+test.describe('Bosses move, then stop for a bit (BOS-47)', () => {
   for (const boss of ['grinmaw', 'warden', 'wyrm', 'glutton', 'bramblehide', 'colossus', 'griffon']) {
-    test(`BOS-47 ${boss} never stands still while idle: it covers ground, and the ground-bound ones follow the nearest player`, async ({ page }) => {
+    test(`BOS-47 ${boss} is mostly still: it moves to a new spot, stops for a while, then moves again - and the ground-bound ones follow a player who moves`, async ({ page }) => {
       await setup(page, boss);
       const r = await page.evaluate((type) => {
-        const run = (playerX) => {
-          T.prepBoss(type, 1); T.place(playerX, 60); // up on a ledge so nothing is in the way
-          raidG.boss.attackTimer = 99999;
-          const xs = [];
-          for (let f = 0; f < 900; f++) { T.place(playerX, 60); T.step(1); if (f >= 300) xs.push(raidG.boss.x); }
-          let travelled = 0; for (let i = 1; i < xs.length; i++) travelled += Math.abs(xs[i] - xs[i - 1]);
-          const windows = []; // how far it moves in each second of the last ten
-          for (let i = 0; i + 60 < xs.length; i += 60) { let d = 0; for (let j = i + 1; j <= i + 60; j++) d += Math.abs(xs[j] - xs[j - 1]); windows.push(d); }
-          return { mean: xs.reduce((a, b) => a + b, 0) / xs.length, range: Math.max(...xs) - Math.min(...xs), perFrame: travelled / (xs.length - 1), minWindow: Math.min(...windows), y: raidG.boss.y, anim: raidG.boss.anim.state };
-        };
-        return { left: run(150), right: run(850) };
+        T.prepBoss(type, 1); raidG.boss.attackTimer = 99999;
+        const seg = 450, xs = [], playerXs = [];
+        for (let f = 0; f < seg * 6; f++) {
+          const px = Math.floor(f / seg) % 2 ? 850 : 150; // the player keeps changing sides, up on a ledge
+          T.place(px, 60);
+          T.step(1);
+          xs.push(raidG.boss.x); playerXs.push(px);
+        }
+        const run = (pred) => { let best = 0, cur = 0; for (let i = 1; i < xs.length; i++) { if (pred(Math.abs(xs[i] - xs[i - 1]))) { cur++; best = Math.max(best, cur); } else cur = 0; } return best; };
+        let travelled = 0; for (let i = 1; i < xs.length; i++) travelled += Math.abs(xs[i] - xs[i - 1]);
+        const still = xs.filter((x, i) => i && Math.abs(x - xs[i - 1]) < 0.05).length / xs.length;
+        // how far from the player it is during the last 150 frames of each stretch
+        const gaps = []; for (let k = 0; k < 6; k++) { let g = 0; for (let i = k * seg + seg - 150; i < (k + 1) * seg; i++) g += Math.abs(xs[i] - playerXs[i]); gaps.push(g / 150); }
+        return { longestStill: run((d) => d < 0.05), longestMoving: run((d) => d > 0.3), travelled, still, gaps, anim: raidG.boss.anim.state };
       }, boss);
-      expect(r.left.anim).toBe('idle');
-      for (const k of ['left', 'right']) {
-        expect(r[k].perFrame, 'moves all the time').toBeGreaterThan(0.3);
-        expect(r[k].range, 'and covers real ground').toBeGreaterThan(120);
-        expect(r[k].minWindow, 'every second of it').toBeGreaterThan(8);
-      }
+      expect(r.anim).toBe('idle');
+      expect(r.longestStill, 'it stops for a good while (about a second or more)').toBeGreaterThanOrEqual(50);
+      expect(r.longestMoving, 'and when it moves, it really moves').toBeGreaterThanOrEqual(40);
+      expect(r.travelled, 'it does cover ground').toBeGreaterThan(900);
+      expect(r.still, 'it is still for at least a third of the time').toBeGreaterThan(0.33);
       if (['grinmaw', 'warden', 'bramblehide', 'colossus'].includes(boss)) {
-        expect(r.left.mean, 'follows a player on the left').toBeLessThan(400);
-        expect(r.right.mean, 'follows a player on the right').toBeGreaterThan(600);
+        r.gaps.slice(1).forEach((g, i) => expect(g, 'it has caught up with the player by the end of each stretch (' + (i + 1) + ')').toBeLessThan(380));
       }
     });
   }

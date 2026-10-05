@@ -61,7 +61,7 @@ test.describe('Touching a boss hurts (BOS-48)', () => {
       for (const type of ['grinmaw', 'warden', 'bramblehide', 'colossus']) {
         T.prepBoss(type, 1); raidContactDamage = true; raidLocal.health = 5; raidG.boss.attackTimer = 99999;
         let minGap = 1e9, hurt = 0;
-        for (let f = 0; f < 1500; f++) {
+        for (let f = 0; f < 2400; f++) {
           T.place(150, undefined, { invincible: 0, health: 5 });
           T.step(1);
           minGap = Math.min(minGap, Math.abs(raidG.boss.x - 150));
