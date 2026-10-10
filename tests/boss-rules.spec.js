@@ -425,7 +425,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
       const out = {};
       for (const boss of BOSS_ORDER) {
         T.seed(4);
-        out[boss] = T.simulate(boss, 3, 4000).states.filter((s) => s !== 'idle').sort();
+        out[boss] = T.simulate(boss, 3, 14000).states.filter((s) => s !== 'idle').sort();
       }
       // the animation and the transform values are part of the synced boss object
       T.prepBoss('glutton', 1); raidG.boss.anim = { state: 'swim', timer: 5, targetX: 300, homeX: 500, homeY: 95 }; raidG.boss.animScale = 0.45; raidG.boss.animAlpha = 0.2;
@@ -437,7 +437,7 @@ test.describe('Boss design rules (spec 9.1)', () => {
     const exclusive = (b, states) => states.every((s) => r[b].includes(s) && !BOSSES.filter((o) => o !== b).some((o) => r[o].includes(s)));
     expect(exclusive('grinmaw', ['windup', 'slam', 'spit', 'withdraw', 'hurl', 'advance', 'summon'])).toBe(true);
     expect(exclusive('warden', ['ghost', 'materialize', 'raise', 'cast', 'strike', 'fade', 'return'])).toBe(true);
-    expect(exclusive('wyrm', ['aim', 'dive', 'coil', 'lunge', 'hold', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'])).toBe(true);
+    expect(exclusive('wyrm', ['aim', 'dive', 'coil', 'lunge', 'hold', 'climb', 'sweepAim', 'sweepPass', 'sweepDaze', 'sweepOut'])).toBe(true);
     expect(exclusive('glutton', ['sink', 'swim', 'rise', 'bite', 'inflate', 'deflate', 'retreat'])).toBe(true);
     expect(r.synced).toEqual({ state: 'swim', scale: 0.45, alpha: 0.2 });
   });

@@ -49,12 +49,12 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     expect(r.scaleWhileInhaling, 'the boss visibly swells while inhaling').toBeGreaterThan(1.05);
   });
 
-  test('BOS-20 bombardment: Grinmaw withdraws into the background (40), lobs one slow piece of rubble per wave from there (waves 130 frames apart), then comes forward (45) and slams; he cannot be hit while far away', async ({ page }) => {
+  test('BOS-20 bombardment: Grinmaw withdraws into the background (40), lobs one slow piece of rubble per wave from there (waves 95 frames apart), then comes forward (45) and slams; he cannot be hit while far away', async ({ page }) => {
     await setup(page, 'grinmaw');
     const r = await page.evaluate(() => {
       T.prepBoss('grinmaw', 1); T.place(300);
       raidPlayerRef.child('p2').set(Object.assign({}, T.me(), { x: 700 - 18 })); // a second player, kept in the shared player list
-      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [30, 160] };
+      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [25, 120] };
       const out = { thrown: [], waves: [] };
       const seq = []; let cur = null, farHits = 0, nearScale = null, minScale = 9, untargetableWhileFar = true, lastCount = 0;
       for (let f = 0; f < 420; f++) {
@@ -79,9 +79,9 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     });
     expect(r.seq).toEqual(['withdraw', 'hurl', 'advance', 'slam']);
     near(r.lens[0], 40);
-    near(r.lens[1], 160 + 50);
+    near(r.lens[1], 120 + 50);
     near(r.lens[2], 45);
-    expect(r.waves.map((w) => w.frame), 'two waves, 130 frames apart (counted from the frame he starts throwing)').toEqual([31, 161]);
+    expect(r.waves.map((w) => w.frame), 'two waves, 95 frames apart (counted from the frame he starts throwing)').toEqual([26, 121]);
     expect(r.waves.map((w) => w.n), 'one piece of rubble per wave, however many players there are').toEqual([1, 1]);
     r.thrown.forEach((t) => {
       expect(t.onLand).toBe('rubble');
@@ -94,7 +94,7 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
     expect(r.thrown.filter((t) => Math.abs(t.landX - 300) < 90).length, 'the waves take the players in turn: first one').toBe(1);
     expect(r.thrown.filter((t) => Math.abs(t.landX - 700) < 90).length, 'then the other').toBe(1);
     expect(r.minScale, 'drawn small, as if far in the background').toBeLessThan(0.7);
-    expect(r.untargetableWhileFar).toBe(true);
+    expect(r.untargetableWhileFar, 'he can be hit while he lobs rubble from the background (only the trip there and back is untouchable)').toBe(false);
     expect(r.terrain, 'rubble bursts where it lands but changes nothing on the floor').toBe(0);
     expect(r.dazedTargetable, 'and hittable again once he has come forward').toBe(true);
   });
@@ -105,13 +105,13 @@ test.describe('Grinmaw the Enthroned (BOS-20)', () => {
       const wavesFor = (phase) => { T.prepBoss('grinmaw', phase); for (let i = 0; i < 200; i++) { T.prepBoss('grinmaw', phase); BOSS_ATTACK_FNS.grinmaw(raidG.boss); if (raidG.boss.anim.state === 'withdraw') return raidG.boss.anim.waves.slice(); } return null; };
       const out = { p1: wavesFor(1), p2: wavesFor(2) };
       T.prepBoss('grinmaw', 1); T.place(900);
-      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [30, 160] };
+      raidG.boss.anim = { state: 'withdraw', timer: 0, homeX: raidG.boss.x, homeY: raidG.boss.y, waves: [25, 120] };
       T.until(() => raidG.boss.anim.state === 'dazed', 700);
       out.stunned = raidG.boss.exposed; out.shock = raidG.hazards.filter((h) => h.kind === 'shockwave').length;
       return out;
     });
-    expect(r.p1).toEqual([30, 160]);
-    expect(r.p2, 'a third wave from phase 2').toEqual([30, 150, 270]);
+    expect(r.p1).toEqual([25, 120]);
+    expect(r.p2, 'a third wave from phase 2').toEqual([25, 105, 185]);
     expect(r.stunned).toBeGreaterThanOrEqual(119);
     expect(r.shock).toBe(2);
   });
@@ -353,7 +353,7 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
         const a0 = raidG.boss.anim;
         const out = { dir: a0.dir, seq: [], ys: [], xs: [] };
         let cur = null;
-        for (let f = 0; f < 260; f++) {
+        for (let f = 0; f < 450; f++) {
           T.step(1);
           const a = raidG.boss.anim;
           if (!cur || cur[0] !== a.state) { cur = [a.state, 0]; out.seq.push(cur); }
@@ -368,16 +368,16 @@ test.describe('Trio, the Three-Headed Wyrm (BOS-22)', () => {
       // a grounded player in the low stretch is hit once; one who jumps, or who waits at the ends of the arena, is not
       const pass = (px, airborne) => {
         T.prepBoss('wyrm', 1); raidLocal.health = 5; wyrmSweep(raidG.boss); raidG.boss.anim.dir = 1; raidG.boss.anim.startX = 70; raidG.boss.anim.endX = 930;
-        for (let f = 0; f < 260; f++) { T.place(px, airborne ? raidGROUND_Y - 48 - 90 : undefined, { health: T.me().health, invincible: 0 }); T.step(1); if (raidG.boss.anim.state === 'idle') break; }
+        for (let f = 0; f < 450; f++) { T.place(px, airborne ? raidGROUND_Y - 48 - 90 : undefined, { health: T.me().health, invincible: 0 }); T.step(1); if (raidG.boss.anim.state === 'idle') break; }
         return T.me().health;
       };
       return { p1: run(1), p2: run(2), middle: pass(500, false), middleJump: pass(500, true), edge: pass(120, false), farEdge: pass(880, false) };
     });
     for (const k of ['p1', 'p2']) {
-      expect(r[k].names).toEqual(['sweepAim', 'sweepPass', 'sweepOut', 'idle']);
+      expect(r[k].names).toEqual(['sweepAim', 'sweepPass', 'sweepDaze', 'sweepOut', 'idle']);
       near(r[k].lens[0], 50);
       near(r[k].lens[1], 110);
-      near(r[k].lens[2], 45);
+      near(r[k].lens[3], 45);
       const xs = r[k].xs;
       expect(Math.abs(xs[xs.length - 1] - xs[0]), 'crosses the whole map').toBeGreaterThan(700);
       expect(Math.sign(xs[xs.length - 1] - xs[0])).toBe(r[k].dir);

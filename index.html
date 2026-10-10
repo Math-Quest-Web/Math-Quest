@@ -5138,7 +5138,7 @@ function raidWander(b, speed, lo, hi, standoff) {
 // While a boss is fading/submerged it can't be hit - shots pass straight through.
 function raidBossUntargetable(b) {
   const s = b.anim ? b.anim.state : 'idle';
-  if (b.type === 'grinmaw') return (s === 'withdraw' || s === 'hurl' || s === 'advance') && b.animScale < 0.85; // far in the background
+  if (b.type === 'grinmaw') return (s === 'withdraw' || s === 'advance') && b.animScale < 0.85; // on the way to or from the background (he can be hit while he throws from there)
   if (b.type === 'glutton') return s === 'sink' || s === 'swim' || s === 'rise';
   if (b.type === 'warden') return s === 'fade' || s === 'ghost' || s === 'materialize';
   return false;
@@ -5151,9 +5151,11 @@ function raidBossUntargetable(b) {
 function grinmawAttack(b) {
   const options = ['spit', 'bombard', 'slam'];
   if (b.phase >= 2) options.push('minions');
+  if (b.phase >= 3) options.push('rage');
   const pick = raidPickAttack(b, options);
-  if (pick === 'spit') b.anim = { state: 'spit', timer: 0 };
-  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [30, 150, 270] : [30, 160] };
+  if (pick === 'rage') b.anim = { state: 'windup', timer: 0, kind: 'rage', again: 1, len: 44 }; // two slams in a row (phase 3, BOS-49)
+  else if (pick === 'spit') b.anim = { state: 'spit', timer: 0 };
+  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [25, 105, 185] : [25, 120] };
   else if (pick === 'slam') b.anim = { state: 'windup', timer: 0 };
   else b.anim = { state: 'summon', timer: 0 };
 }
@@ -5229,14 +5231,14 @@ function updateGrinmawAnimation(b) {
     b.x = lerp(a.homeX, 500, e);
     b.animScale = lerp(1, GRINMAW_FAR_SCALE, e);
     b.animAlpha = 1 - 0.2 * e;
-    b.animOffsetY = -70 * e;
+    b.animOffsetY = -50 * e;
     if (a.timer >= 40) { a.state = 'hurl'; a.timer = 0; }
   } else if (a.state === 'hurl') {
     b.x = 500 + Math.sin(a.timer * 0.045) * 170; // paces the back of the hall as he throws
     b.animScale = GRINMAW_FAR_SCALE;
     b.animAlpha = 0.8;
     const wave = a.waves.indexOf(a.timer);
-    b.animOffsetY = -70 - (a.waves.some(w => a.timer >= w && a.timer < w + 8) ? 10 : 0); // a heave with each throw
+    b.animOffsetY = -50 - (a.waves.some(w => a.timer >= w && a.timer < w + 8) ? 10 : 0); // a heave with each throw
     if (wave >= 0) grinmawHurlRubble(b, wave);
     if (a.timer >= a.waves[a.waves.length - 1] + 50) { a.state = 'advance'; a.timer = 0; a.fromX = b.x; }
   } else if (a.state === 'advance') {
@@ -5245,7 +5247,7 @@ function updateGrinmawAnimation(b) {
     b.x = lerp(a.fromX, 500, e);
     b.animScale = lerp(GRINMAW_FAR_SCALE, 1.08, e);
     b.animAlpha = lerp(0.8, 1, e);
-    b.animOffsetY = lerp(-70, -32, e);
+    b.animOffsetY = lerp(-50, -32, e);
     if (a.timer >= 45) { a.state = 'slam'; a.timer = 0; }
   } else if (a.state === 'summon') {
     const e = easeInOut(Math.min(a.timer / 30, 1));
@@ -5254,8 +5256,8 @@ function updateGrinmawAnimation(b) {
     if (a.timer === 30) grinmawMinionSummon(b);
     if (a.timer >= 42) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'windup') {
-    const t = Math.min(a.timer / 60, 1);
-    b.animOffsetY = -50 * easeInOut(t); // he rears up high...
+    const t = Math.min(a.timer / (a.len || 60), 1);
+    b.animOffsetY = lerp(a.riseFrom || 0, -50, easeInOut(t)); // he rears up high...
     b.animScale = 1 + 0.05 * t;
     if (t >= 1) { a.state = 'slam'; a.timer = 0; }
   } else if (a.state === 'slam') {
@@ -5266,8 +5268,8 @@ function updateGrinmawAnimation(b) {
     b.animAlpha = 1;
     if (t >= 1) {
       grinmawShockwaves(b);
-      a.state = 'dazed'; a.timer = 0;
-      b.exposed = BOSS_STUN_FRAMES;
+      if (a.again > 0) { a.again--; a.state = 'windup'; a.timer = 0; a.len = 36; a.riseFrom = b.animOffsetY; } // rage: straight back up for a second slam
+      else { a.state = 'dazed'; a.timer = 0; b.exposed = BOSS_STUN_FRAMES; }
     }
   } else if (a.state === 'dazed') {
     b.animOffsetY = GRINMAW_SLAM_DROP; // stunned, sitting on the floor
@@ -5288,8 +5290,10 @@ function updateGrinmawAnimation(b) {
 function wardenAttack(b) {
   const options = ['lash', 'vanish'];
   if (b.phase >= 2) options.push('orb');
+  if (b.phase >= 3) options.push('cage');
   const pick = raidPickAttack(b, options);
-  if (pick === 'lash') wardenChainLash(b);
+  if (pick === 'cage') wardenChainCage(b);
+  else if (pick === 'lash') wardenChainLash(b);
   else if (pick === 'vanish') wardenStartVanish(b);
   else wardenVoidOrb(b);
 }
@@ -5303,6 +5307,15 @@ function wardenChainLash(b) {
     raidHazard({ kind: 'chainLash', tx: tx, ty: raidGROUND_Y - 6, delay: i * 30, life: 110 + i * 30 });
   }
   b.anim = { state: 'raise', timer: 0 };
+}
+
+// Chain cage (phase 3, BOS-49): four chains are marked at once around the nearest player - 110 and 220 px either
+// side - and land one after another. The way out is to stand still in the space between them.
+function wardenChainCage(b) {
+  const pick = raidRandomPlayer();
+  const px = pick ? raidPx(pick.p) : 500;
+  [-220, -110, 110, 220].forEach((dx, i) => raidHazard({ kind: 'chainLash', tx: clampX(px + dx, 60, 940), ty: raidGROUND_Y - 6, delay: i * 8, life: 110 + i * 8 }));
+  b.anim = { state: 'raise', timer: 0, kind: 'cage' };
 }
 
 // The Warden slowly fades out, drifts unseen to a marked spot on the floor, slowly
@@ -5398,8 +5411,10 @@ const WYRM_HEAD_OFFSETS = [-52.5, 0, 52.5];
 function wyrmAttack(b) {
   const options = ['fire', 'sweep'];
   if (b.phase >= 2) options.push('dive');
+  if (b.phase >= 3) options.push('storm');
   const pick = raidPickAttack(b, options);
   if (pick === 'fire') wyrmFireSpit(b);
+  else if (pick === 'storm') b.anim = { state: 'coil', timer: 0, age: 0, kind: 'storm', shots: [30] };
   else if (pick === 'sweep') wyrmSweep(b);
   else wyrmDiveBomb(b);
 }
@@ -5409,6 +5424,14 @@ function wyrmAttack(b) {
 function wyrmFireSpit(b) {
   const shots = b.phase >= 2 ? [26, 60, 94] : [26, 60];
   b.anim = { state: 'coil', timer: 0, age: 0, shots: shots };
+}
+
+// Firestorm (phase 3, BOS-49): after a coil, six pillars of flame are marked in a row across the arena and erupt
+// one after another, 14 frames apart (from either end), with 74 px of safe floor between each.
+function wyrmFirestorm(b) {
+  const xs = [125, 275, 425, 575, 725, 875];
+  if (Math.random() < 0.5) xs.reverse();
+  xs.forEach((x, i) => raidHazard({ kind: 'pillar', x: x, delay: i * 14, life: i * 14 + 66 }));
 }
 
 function wyrmFireShot(b) {
@@ -5427,6 +5450,7 @@ function wyrmFireShot(b) {
 // arc. Where it comes low (the middle of the arena) its body hurts anyone on the floor it passes - a jump clears
 // it, and the ends of the arena are safe. The low stretch is marked on the floor from the start.
 const WYRM_SWEEP_TOP = 120, WYRM_SWEEP_DIP = 300, WYRM_SWEEP_LOW_Y = 350;
+const WYRM_SWEEP_STUN = 80; // after the pass it settles at the edge, stunned, so the sweep can be punished (BOS-22)
 function wyrmSweep(b) {
   const dir = Math.random() < 0.5 ? 1 : -1;
   b.anim = { state: 'sweepAim', timer: 0, dir: dir, startX: dir > 0 ? 70 : 930, endX: dir > 0 ? 930 : 70, fromX: b.x, fromY: b.y };
@@ -5449,7 +5473,7 @@ function wyrmUltimate(b) {
   });
 }
 
-const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb', 'sweepAim', 'sweepPass', 'sweepOut'];
+const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb', 'sweepAim', 'sweepPass', 'sweepDaze', 'sweepOut'];
 
 // Where it rests (BOS-47): wherever it last decided to go, with a small bob (never lower than its resting height).
 function wyrmPathPos() {
@@ -5463,7 +5487,7 @@ function updateWyrmAnimation(b) {
   if (a.shots) {
     a.age++;
     const idx = a.shots.indexOf(a.age);
-    if (idx >= 0) wyrmFireShot(b);
+    if (idx >= 0) { if (a.kind === 'storm') wyrmFirestorm(b); else wyrmFireShot(b); }
   }
   if (a.state === 'coil') {
     const t = Math.min(a.timer / 16, 1);
@@ -5524,7 +5548,12 @@ function updateWyrmAnimation(b) {
         if (Math.abs(raidPx(p) - b.x) < 70 && !raidAirborne(p, 40)) { raidDamagePlayer(id, p, 1); raidChargeHitState[id] = true; }
       });
     }
-    if (u >= 1) { a.state = 'sweepOut'; a.timer = 0; a.endY = b.y; }
+    if (u >= 1) { a.state = 'sweepDaze'; a.timer = 0; a.endY = b.y; b.exposed = WYRM_SWEEP_STUN; }
+  } else if (a.state === 'sweepDaze') {
+    const e = easeInOut(Math.min(a.timer / 20, 1));
+    b.x = a.endX;
+    b.y = lerp(a.endY, wyrmPathPos().y, e); // down to its hover height, where it can be reached
+    if (a.timer >= WYRM_SWEEP_STUN) { a.state = 'sweepOut'; a.timer = 0; a.endY = b.y; }
   } else if (a.state === 'sweepOut') {
     const e = easeInOut(Math.min(a.timer / 45, 1));
     const p = wyrmPathPos();
@@ -5549,8 +5578,10 @@ function gluttonAttack(b) {
   b.invulnerable = false; b.feastWarning = false; b.feastCooldown = Math.max(b.feastCooldown || 0, 200);
   const options = ['belch', 'chomp'];
   if (b.phase >= 2) options.push('fan', 'twin');
+  if (b.phase >= 3) options.push('frenzy');
   const pick = raidPickAttack(b, options);
-  if (pick === 'chomp') gluttonStartChomp(b);
+  if (pick === 'frenzy') { gluttonStartChomp(b, 2); b.anim.kind = 'frenzy'; } // three chomps in a row (phase 3, BOS-49)
+  else if (pick === 'chomp') gluttonStartChomp(b);
   else if (pick === 'twin') gluttonStartChomp(b, 1);
   else b.anim = { state: 'inflate', timer: 0, kind: pick };
 }
@@ -5721,8 +5752,10 @@ function gluttonMaybeFeast(b) {
 function bramblehideAttack(b) {
   const options = ['spikes', 'charge', 'quills'];
   if (b.phase >= 2) options.push('wave');
+  if (b.phase >= 3) options.push('barrage');
   const pick = raidPickAttack(b, options);
-  if (pick === 'spikes') b.anim = { state: 'rootWindup', timer: 0 };
+  if (pick === 'barrage') b.anim = { state: 'quillWindup', timer: 0, kind: 'barrage', again: 1 }; // two fans of quills (phase 3, BOS-49)
+  else if (pick === 'spikes') b.anim = { state: 'rootWindup', timer: 0 };
   else if (pick === 'quills') b.anim = { state: 'quillWindup', timer: 0 };
   else if (pick === 'charge') {
     const dir = raidNearestPlayerDir(b);
@@ -5760,10 +5793,10 @@ function bramblehideCharge(b, dir, laneTarget) {
 
 // Quills (BOS-40): the boar puffs up and shoots spikes out of its own back - a fan of 5 (7 from phase 2) that arc up
 // and land 120 px apart, opening toward the nearest player. Big enough to parry; they leave nothing behind.
-function bramblehideQuills(b) {
+function bramblehideQuills(b, shift) {
   const n = b.phase >= 2 ? 7 : 5, dir = raidNearestPlayerDir(b);
   for (let i = 0; i < n; i++) {
-    const tx = b.x + dir * 240 + (i - (n - 1) / 2) * 120;
+    const tx = b.x + dir * 240 + (i - (n - 1) / 2) * 120 + (shift || 0);
     raidThrow(b, 'quill', tx, { x: b.x + (i - (n - 1) / 2) * 24, y: b.y - 40, T: 56, noLand: true });
   }
 }
@@ -5821,7 +5854,11 @@ function updateBramblehideAnimation(b) {
     const t = Math.min(a.timer / 34, 1);
     b.animScale = 1 + 0.12 * easeInOut(t);
     b.animOffsetX = Math.sin(a.timer * 1.3) * 2.5 * t; // it bristles and shakes
-    if (a.timer === 34) { b.animOffsetX = 0; bramblehideQuills(b); }
+    if (a.timer === 34) {
+      b.animOffsetX = 0;
+      bramblehideQuills(b, a.second ? 60 : 0); // the second fan of a barrage is shifted, so its gaps are somewhere else
+      if (a.again > 0) { a.again--; a.second = true; a.timer = 8; }
+    }
     if (a.timer >= 40) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'waveWindup') {
     const t = Math.min(a.timer / 30, 1);
@@ -5858,7 +5895,9 @@ function updateBramblehideAnimation(b) {
 function colossusAttack(b) {
   const options = ['slam', 'hurl', 'march'];
   if (b.phase >= 2) options.push('pulse');
+  if (b.phase >= 3) options.push('meltdown');
   const pick = raidPickAttack(b, options);
+  if (pick === 'meltdown') { b.anim = { state: 'pulseWindup', timer: 0, kind: 'melt' }; return; } // the pulse and tremors both ways (phase 3, BOS-49)
   if (pick === 'slam') b.anim = { state: 'slamWindup', timer: 0 };
   else if (pick === 'hurl') b.anim = { state: 'hurlWindup', timer: 0 };
   else if (pick === 'march') b.anim = { state: 'marchWindup', timer: 0 };
@@ -5902,6 +5941,17 @@ function colossusEarthquakeStomp(b) {
 }
 
 // Phase 2+: a ground shockwave rolling out in both directions - reuses Grinmaw's exactly.
+// Meltdown (phase 3, BOS-49): along with the overload pulse, a line of tremors steps away from the golem in BOTH
+// directions (three each side), each erupting 20 frames after the last.
+function colossusMarchBoth(b) {
+  [-1, 1].forEach(dir => {
+    for (let i = 0; i < 3; i++) {
+      const delay = i * 20;
+      raidHazard({ kind: 'tremor', x: clampX(b.x + dir * 130 * (i + 1), 40, 960), delay: delay, life: delay + RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE + 2 });
+    }
+  });
+}
+
 function colossusOverloadPulse(b) {
   [-1, 1].forEach(dir => {
     raidHazard({ kind: 'shockwave', x: b.x, dir: dir, speed: 2.6 + b.phase * 0.3, life: 300 });
@@ -5946,6 +5996,7 @@ function updateColossusAnimation(b) {
     b.animScale = 1 + 0.1 * easeInOut(t);
     if (t >= 1) {
       colossusOverloadPulse(b);
+      if (a.kind === 'melt') colossusMarchBoth(b);
       a.state = 'dazed'; a.timer = 0;
       b.exposed = BOSS_STUN_FRAMES;
     }
@@ -5966,8 +6017,10 @@ function updateColossusAnimation(b) {
 
 function griffonAttack(b) {
   const options = ['dive', 'strafe', 'rain'];
+  if (b.phase >= 3) options.push('tempest');
   const pick = raidPickAttack(b, options);
-  if (pick === 'dive') griffonWindDive(b);
+  if (pick === 'tempest') b.anim = { state: 'rainWindup', timer: 0, kind: 'tempest' }; // two rounds of feather columns (phase 3, BOS-49)
+  else if (pick === 'dive') griffonWindDive(b);
   else if (pick === 'strafe') griffonStrafeStart(b);
   else b.anim = { state: 'rainWindup', timer: 0 };
 }
@@ -5993,6 +6046,20 @@ function griffonFeatherRain(b) {
     const x = clampX(first + i * gap + (Math.random() - 0.5) * 60, 60, 940);
     raidHazard({ kind: 'featherFall', x: x, delay: delay, life: delay + RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2 });
   }
+}
+
+// Tempest (phase 3, BOS-49): nine feather columns in two rounds - five across the arena, then four between them
+// 70 frames later - all marked from the start, so the way through is to be in the gaps at the right moments.
+function griffonTempest(b) {
+  const strike = (xs, base) => {
+    const order = [...xs.keys()].sort(() => Math.random() - 0.5);
+    xs.forEach((x, i) => {
+      const delay = base + order[i] * 10;
+      raidHazard({ kind: 'featherFall', x: x, delay: delay, life: delay + RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2 });
+    });
+  };
+  strike([100, 300, 500, 700, 900], 0);
+  strike([200, 400, 600, 800], 70);
 }
 
 // 0..1: how far the griffon's head is tipped down to watch its target - fully while tracking and
@@ -6078,7 +6145,7 @@ function updateGriffonAnimation(b) {
     const t = Math.min(a.timer / 40, 1);
     b.animOffsetY = -34 * easeInOut(t);
     b.animScale = 1 + 0.06 * Math.sin(a.timer * 0.5);
-    if (a.timer === 40) griffonFeatherRain(b);
+    if (a.timer === 40) { if (a.kind === 'tempest') griffonTempest(b); else griffonFeatherRain(b); }
     if (a.timer >= 46) { a.state = 'settle'; a.timer = 0; }
   } else if (a.state === 'plunge') {
     const t = Math.min(a.timer / 24, 1);
@@ -6269,8 +6336,9 @@ function raidUpdateHazards() {
       }
       hz.life--;
     } else if (hz.kind === 'pillar') {
-      // 0-32 marker on the floor, 32-60 flames erupt.
-      if (hz.timer >= 32 && hz.timer < 60) {
+      // 0-32 marker on the floor, 32-60 flames erupt (a delayed pillar is marked from the start, strikes later).
+      const pt = hz.timer - (hz.delay || 0);
+      if (pt >= 32 && pt < 60) {
         Object.keys(raidG.players).forEach(id => {
           const p = raidG.players[id];
           if (!p) return;
@@ -7483,6 +7551,7 @@ const BOSS_SPRITE_STATES = {
     aim: [[Infinity, 'telegraph']],
     sweepAim: [[Infinity, 'telegraph']],
     sweepPass: [[Infinity, 'attack']],
+    sweepDaze: [[Infinity, 'recover']],
     sweepOut: [[Infinity, 'recover']],
     dive: [[Infinity, 'attack']],
     crash: [[Infinity, 'attack']],
@@ -8535,7 +8604,7 @@ function raidSfxTick() {
     const key = h.kind + ':' + Math.round(h.x !== undefined ? h.x : h.tx) + ':' + (h.delay || 0);
     live[key] = true;
     const t = (h.timer || 0) - (h.delay || 0);
-    const due = (h.kind === 'pillar' && h.timer >= 32) || (h.kind === 'thornSpike' && h.timer - (h.delay || 0) >= RAID_THORN_WARN)
+    const due = (h.kind === 'pillar' && h.timer - (h.delay || 0) >= 32) || (h.kind === 'thornSpike' && h.timer - (h.delay || 0) >= RAID_THORN_WARN)
       || (h.kind === 'tremor' && t >= RAID_TREMOR_WARN) || (h.kind === 'featherFall' && t >= RAID_FEATHERFALL_WARN)
       || (h.kind === 'chainLash' && t >= 62);
     if (due && !S.struck[key]) { S.struck[key] = true; if (def.strike) play(def.strike, { pan: sfxPan(h.x !== undefined ? h.x : h.tx) }); }
@@ -9211,10 +9280,11 @@ function raidDraw() {
         }
       }
     } else if (hz.kind === 'pillar') {
-      if (hz.timer < 32) {
-        raidDrawGroundWarning(raidCtx, hz.x, 38, hz.timer / 32, '255,150,50');
-      } else if (hz.timer < 60) {
-        const w = 54 + Math.sin(hz.timer * 1.3) * 6;
+      const pt = hz.timer - (hz.delay || 0);
+      if (pt < 32) {
+        raidDrawGroundWarning(raidCtx, hz.x, 38, hz.timer / (32 + (hz.delay || 0)), '255,150,50');
+      } else if (pt < 60) {
+        const w = 54 + Math.sin(pt * 1.3) * 6;
         const pg = raidCtx.createLinearGradient(0, raidGROUND_Y, 0, raidGROUND_Y - 200);
         pg.addColorStop(0, 'rgba(255,230,120,0.95)');
         pg.addColorStop(0.5, 'rgba(255,130,40,0.75)');
@@ -9768,6 +9838,10 @@ function raidDraw() {
       raidCtx.fillStyle = '#c9c9ff';
       raidCtx.font = '18px sans-serif';
       raidCtx.fillText(raidLastReward.trophies.map(id => TROPHY_DEFS[id].icon + ' ' + TROPHY_DEFS[id].name).join('   '), 500, 428);
+      if (raidLastReward.firstKills && raidLastReward.firstKills.length) {
+        raidCtx.fillStyle = '#9ef0c2';
+        raidCtx.fillText('🎁 First victories unlocked: ' + raidLastReward.firstKills.map(k => k.name + (k.dup ? ' (+' + k.coins + ' 🪙)' : '')).join(', '), 500, 452);
+      }
     } else if (raidLastReward) {
       raidCtx.fillStyle = '#ffd84d';
       raidCtx.font = 'bold 34px sans-serif';
@@ -9775,6 +9849,11 @@ function raidDraw() {
       raidCtx.fillStyle = '#c9c9ff';
       raidCtx.font = '18px sans-serif';
       raidCtx.fillText(raidLastReward.difficulty.toUpperCase() + ' fight: ' + raidLastReward.base + '  +  ' + raidLastReward.bonus + ' for ' + raidLastReward.hearts + ' hearts left   |   Balance: ' + raidLastReward.balance + ' 🪙', 500, 428);
+      if (raidLastReward.firstKill) {
+        const fk = raidLastReward.firstKill;
+        raidCtx.fillStyle = '#9ef0c2';
+        raidCtx.fillText('🎁 First victory over ' + ((BOSS_DEFS[fk.boss] && BOSS_DEFS[fk.boss].name) || fk.boss) + '! Unlocked: ' + fk.name + (fk.dup ? ' (already yours: +' + fk.coins + ' 🪙)' : ''), 500, 452);
+      }
     }
     raidCtx.fillStyle = '#8888ff';
     raidCtx.font = '20px sans-serif';
@@ -11788,6 +11867,20 @@ const MQ_HEART_BONUS = 10;
 // weapon's id" (always a sword now, WPN-01).
 const MQ_SLOT_KEY = { skin: 'skin', weapon: 'gun', utility: 'utility' };
 
+// The first time a boss is beaten it gives up a charm of its own (RWD-04); one you already own pays its
+// duplicate coins instead.
+const BOSS_FIRST_KILL = { grinmaw: 'util_hide', warden: 'util_ward', wyrm: 'util_cloud', glutton: 'util_idol', bramblehide: 'util_spring', colossus: 'util_brace', griffon: 'util_double' };
+function mqGrantFirstKill(type) {
+  const id = BOSS_FIRST_KILL[type];
+  if (!id || !mqProfile.firstKills || mqProfile.firstKills[type]) return null;
+  mqProfile.firstKills[type] = true;
+  const item = MQ_ITEM_MAP[id];
+  const dup = (mqProfile.owned[id] || 0) > 0;
+  let coins = 0;
+  if (dup) { coins = MQ_RARITY[item.rarity].refund; mqProfile.coins += coins; } else mqProfile.owned[id] = 1;
+  return { boss: type, id: id, name: item.name, dup: dup, coins: coins };
+}
+
 function mqDefaultProfile() {
   return {
     v: 1,
@@ -11795,7 +11888,8 @@ function mqDefaultProfile() {
     owned: { skin_classic: 1, sword_training: 1 },
     equipped: { skin: 'skin_classic', gun: 'sword_training', utility: '' },
     stats: { crates: 0, raids: 0 },
-    trophies: {}
+    trophies: {},
+    firstKills: {} // bosses beaten at least once (RWD-04)
   };
 }
 
@@ -11813,6 +11907,9 @@ function mqLoadProfile() {
       if (MQ_SKIN_MAP[s.equipped.skin] && p.owned[s.equipped.skin]) p.equipped.skin = s.equipped.skin;
       if (MQ_WEAPON_MAP[s.equipped.gun] && p.owned[s.equipped.gun]) p.equipped.gun = s.equipped.gun;
       if (typeof s.equipped.utility === 'string') p.equipped.utility = mqSanitizeCharms(s.equipped.utility, p.owned); // WPN-13
+    }
+    if (s.firstKills && typeof s.firstKills === 'object') {
+      Object.keys(s.firstKills).forEach(id => { if (BOSS_FIRST_KILL[id] && s.firstKills[id]) p.firstKills[id] = true; });
     }
     if (s.trophies && typeof s.trophies === 'object') {
       Object.keys(s.trophies).forEach(id => { if (TROPHY_DEFS[id] && s.trophies[id] > 0) p.trophies[id] = Math.floor(s.trophies[id]); });
@@ -11872,10 +11969,11 @@ function mqAwardGauntletClear() {
   const trophies = gauntletTrophyIds(currentDifficulty, currentChallenges);
   trophies.forEach(id => { mqProfile.trophies[id] = (mqProfile.trophies[id] || 0) + 1; });
   mqProfile.coins += total;
+  const firstKills = BOSS_ORDER.map(mqGrantFirstKill).filter(Boolean); // clearing the gauntlet beats every boss
   mqProfile.stats.raids++;
   mqSaveProfile();
   mqRefreshCoinUI();
-  return { coins: total, gauntlet: true, challenges: currentChallenges.length, trophies: trophies, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins };
+  return { coins: total, gauntlet: true, challenges: currentChallenges.length, trophies: trophies, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins, firstKills: firstKills };
 }
 
 let raidGauntletLossPaid = false;
@@ -11907,11 +12005,12 @@ function mqAwardRaidVictory() {
   const coinMult = mqCoinMultiplier(mqProfile.equipped.utility);
   const total = Math.round((base + bonus) * coinMult);
   mqProfile.coins += total;
+  const firstKill = mqGrantFirstKill(currentBossType);
   sfx('coins');
   mqProfile.stats.raids++;
   mqSaveProfile();
   mqRefreshCoinUI();
-  return { coins: total, base: base, bonus: bonus, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins };
+  return { coins: total, base: base, bonus: bonus, hearts: hearts, difficulty: currentDifficulty, balance: mqProfile.coins, firstKill: firstKill };
 }
 
 let raidRewardGiven = false;
@@ -12481,7 +12580,7 @@ const MQ_SFX_DEFS = {
 const MQ_BOSS_SFX = {
   grinmaw: { windup: 'growl_grinmaw', slam: 'boss_slam', spit: 'boss_inflate', withdraw: 'growl_grinmaw', hurl: null, advance: 'boss_swoosh', summon: 'roar_grinmaw', dazed: null, settle: null },
   warden: { raise: 'growl_warden', cast: 'growl_warden', fade: 'boss_vanish', ghost: null, materialize: 'boss_appear', strike: 'boss_slam', return: null, dazed: null, settle: null },
-  wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, sweepAim: 'growl_wyrm', sweepPass: 'boss_swoosh', sweepOut: null, settle: null },
+  wyrm: { aim: 'growl_wyrm', coil: 'growl_wyrm', lunge: 'boss_swoosh', hold: null, dive: 'boss_swoosh', crash: 'boss_slam', climb: null, sweepAim: 'growl_wyrm', sweepPass: 'boss_swoosh', sweepDaze: null, sweepOut: null, settle: null },
   glutton: { sink: 'boss_swim', swim: null, rise: 'boss_splash', bite: 'boss_bite', inflate: 'growl_glutton', deflate: 'boss_deflate', retreat: null, dazed: null, settle: null },
   bramblehide: { rootWindup: 'growl_bramblehide', quillWindup: 'growl_bramblehide', chargeWindup: 'growl_bramblehide', charging: 'boss_charge', waveWindup: 'growl_bramblehide', dazed: null, trot: null, settle: null },
   colossus: { slamWindup: 'growl_colossus', slamDown: 'boss_slam', pulseWindup: 'growl_colossus', hurlWindup: 'growl_colossus', marchWindup: 'growl_colossus', dazed: null, settle: null },

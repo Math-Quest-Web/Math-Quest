@@ -164,7 +164,7 @@ window.T = {
       const dangers = [];
       raidG.hazards.forEach((h) => {
         if (h.kind === 'chainLash') { const t = h.timer - h.delay; if (t >= 15 && t < 82) dangers.push({ x: h.tx, r: 75 }); }
-        if (h.kind === 'pillar' && h.timer >= 15 && h.timer < 62) dangers.push({ x: h.x, r: 75 });
+        if (h.kind === 'pillar' && h.timer >= 15 && h.timer - (h.delay || 0) < 62) dangers.push({ x: h.x, r: 75 });
         if (h.kind === 'thornSpike' && h.timer >= 15 && h.timer - (h.delay || 0) < RAID_THORN_WARN + RAID_THORN_ACTIVE + 2) dangers.push({ x: h.x, r: RAID_THORN_HALF + 15 });
         if (h.kind === 'tremor') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_TREMOR_WARN + RAID_TREMOR_ACTIVE + 2) dangers.push({ x: h.x, r: 80 }); }
         if (h.kind === 'featherFall') { const t = h.timer - h.delay; if (h.timer >= 15 && t < RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2) dangers.push({ x: h.x, r: 65 }); }
