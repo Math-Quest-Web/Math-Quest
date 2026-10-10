@@ -6505,6 +6505,12 @@ function raidBossUpdate() {
     b.y += b.animOffsetY || 0;
   }
 
+  if (b.pushV) { // shoved by a Steady Stance swing (WPN-17): slides to a stop
+    b.x = clampX(b.x + b.pushV, 60, 940);
+    b.pushV *= 0.85;
+    if (Math.abs(b.pushV) < 0.2) b.pushV = 0;
+  }
+
   const hpPercent = (b.hp / b.maxHp) * 100;
   if (hpPercent < 30) b.phase = 3;
   else if (hpPercent < 60) b.phase = 2;
@@ -6768,7 +6774,7 @@ function raidSwordSwing() {
   p.swingDir = raidResolveSwingDir(p.input);
   // Recoil (WPN-16): the swing kicks you back the other way (about 20 px once friction has had its say); an upward
   // swing in the air also presses you down. No kick during a dash. A downward swing is left to the pogo (WPN-08).
-  if (!(p.dashTimer > 0)) {
+  if (!(p.dashTimer > 0) && !raidCharm('no_recoil')) { // Steady Stance (WPN-17) plants your feet
     const v = RAID_SWORD_DIR_VECTORS[p.swingDir] || [p.facing || 1, 0];
     p.vx -= v[0] * RAID_SWING_RECOIL;
     if (v[1] < 0 && !p.onGround) p.vy += -v[1] * RAID_SWING_RECOIL_UP;
@@ -6981,6 +6987,7 @@ function raidCheckLocalPogo() {
 // actually overlaps the boss's real hit area (raidBossHalfExtent) - not a one-time reach check
 // snapped onto the boss's own coordinates. Host and non-host players are resolved identically
 // from their synced state, so there's no separate relay path for melee any more.
+const RAID_BOSS_PUSH = 4; // px/frame given to a boss hit by a Steady Stance swing; friction slides it about 25 px
 function raidCheckSwordSwings(b) {
   if (raidBossUntargetable(b)) return;
   Object.keys(raidG.players).forEach(id => {
@@ -6995,6 +7002,10 @@ function raidCheckSwordSwings(b) {
       const poly = raidSlashWorldPoly(p, raidSwingProgress(steps[i]));
       if (poly && raidPolyHitsBoss(poly, b)) {
         st.hasHit = true;
+        if (raidCharmOf(p.utility, 'no_recoil')) { // Steady Stance (WPN-17): you do not take the recoil, so the boss does
+          const v = RAID_SWORD_DIR_VECTORS[p.swingDir] || [p.facing || 1, 0];
+          b.pushV = (b.pushV || 0) + v[0] * RAID_BOSS_PUSH; // (before the hit: raidHitBoss re-syncs, which swaps the boss object)
+        }
         raidHitBoss(b, { x: poly.hand[0], y: poly.hand[1], damage: raidSwordDamageFor(p.utility), dir: p.swingDir || 'side', stunBonus: raidStunBonusFor(p.utility) });
       }
     }
@@ -7078,7 +7089,12 @@ function raidUpdateLocal() {
   p.trail.forEach(g => g.life--);
   p.trail = p.trail.filter(g => g.life > 0);
 
-  if (p.vx > 0.5) p.facing = 1;
+  if (p.swingTimer > 0) {
+    // While swinging you keep facing the way you were: the recoil (WPN-16) must not turn you round, so only the
+    // keys you hold can.
+    if (p.input.right && !p.input.left) p.facing = 1;
+    else if (p.input.left && !p.input.right) p.facing = -1;
+  } else if (p.vx > 0.5) p.facing = 1;
   else if (p.vx < -0.5) p.facing = -1;
 
   p.x += p.vx;
@@ -11151,7 +11167,10 @@ const MQ_UTILITY = [
   { id: 'util_idol', name: 'Golden Idol', rarity: 'epic', effect: 'coin_bonus_big', value: 1.25,
     color: '#ffd84d', accent: '#fff3b0', blurb: '+25% coins from every win (adds to Lucky Charm).' },
   { id: 'util_titan', name: 'Titan Heart', rarity: 'legendary', effect: 'max_health_big', value: 2,
-    color: '#ff4a5e', accent: '#ffd0d6', blurb: '+2 max hearts.' }
+    color: '#ff4a5e', accent: '#ffd0d6', blurb: '+2 max hearts.' },
+  // WPN-17: swinging does not kick you back; the boss you hit is shoved instead.
+  { id: 'util_brace', name: 'Steady Stance', rarity: 'rare', effect: 'no_recoil', value: 1,
+    color: '#c8b48a', accent: '#ffc46b', blurb: 'No recoil when you swing - the boss you hit is shoved back instead.' }
 ];
 
 // Charm loadout (WPN-13): up to MQ_CHARM_SLOTS charms at once, but their points may not add up to
@@ -11161,7 +11180,7 @@ const MQ_CHARM_BUDGET = 5;
 const MQ_CHARM_COSTS = {
   util_boots: 1, util_coin: 1, util_boots2: 1, util_iron: 1, util_shield: 1, util_regen: 1, util_feather: 1,
   util_range: 2, util_dashi: 2, util_heart: 2, util_ward: 3, util_double: 3, util_minion: 3,
-  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3
+  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3, util_brace: 2
 };
 MQ_UTILITY.forEach(u => { u.cost = MQ_CHARM_COSTS[u.id] || 1; });
 
@@ -11714,6 +11733,15 @@ function mqDrawCharmGlyph(ctx, item, t) {
     ctx.fillStyle = '#ffd84d'; ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 0); ctx.lineTo(0, 11); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#6a4a00'; ctx.fillRect(-4, -2, 3, 3); ctx.fillRect(1, -2, 3, 3);
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.4 + 0.6 * Math.abs(sin(t * 0.12)); mqSparkle(ctx, 9, -9, 4);
+  } else if (id === 'util_brace') { // an anchor that digs in, with dust kicked up either side
+    const dig = Math.max(0, sin(t * 0.12));
+    ctx.translate(0, dig * 1.5);
+    ctx.strokeStyle = acc; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, -9, 3, 0, PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, 8); ctx.moveTo(-5, -2); ctx.lineTo(5, -2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 2, 8, 0.15 * PI, 0.85 * PI); ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.globalAlpha = 0.4 + 0.6 * dig;
+    ctx.beginPath(); ctx.moveTo(-12 - dig * 3, 10); ctx.lineTo(-8, 10); ctx.moveTo(12 + dig * 3, 10); ctx.lineTo(8, 10); ctx.stroke();
   } else if (id === 'util_titan') { // a big heart, beating hard
     const sc = 1 + Math.max(0, sin(t * 0.14)) * 0.3; ctx.scale(sc, sc);
     ctx.fillStyle = '#ff3b4f';

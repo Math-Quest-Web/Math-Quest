@@ -1685,7 +1685,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.loadoutShowsCharm = mask(withCharm, lc.getContext('2d').getImageData(0, 0, 400, 400).data).n > 50;
       return out;
     });
-    expect(r.ids.length, 'all 23 charms').toBe(23);
+    expect(r.ids.length, 'all 24 charms').toBe(24);
     for (const id of r.ids) {
       expect(r.onPlayer[id], id + ' draws a small mark on the player').toBeGreaterThan(25);
       expect(r.onPlayer[id], id + ' stays minimal - a tiny badge, not an aura').toBeLessThan(450);
@@ -1693,7 +1693,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
       expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
     }
-    expect(r.unique, 'every charm looks different on the player').toBe(23);
+    expect(r.unique, 'every charm looks different on the player').toBe(24);
     expect(r.comboDiffers, 'three worn charms are drawn together, differently from any single one').toBe(true);
     expect(r.comboCovers, 'three charms sit apart rather than overlapping').toBeGreaterThan(r.singlesCover * 0.85);
     expect(r.comboCovers, 'and the three together are still a small cluster').toBeLessThan(900);

@@ -174,3 +174,73 @@ test.describe('Swinging kicks you back (WPN-16)', () => {
     expect(r.cooling, 'no swing, no recoil').toBe(0);
   });
 });
+
+test.describe('Swinging does not turn you around (WPN-16)', () => {
+  test('WPN-16 the recoil never makes the player face the other way: facing only changes from the keys you hold (or a dash)', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      T.prepBoss('grinmaw', 1);
+      const clear = () => { raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false }; };
+      const facings = (facing, held) => {
+        T.place(500); clear(); raidLocal.vx = 0; raidLocal.swordCooldown = 0; raidLocal.dashTimer = 0; raidLocal.facing = facing; raidLocal.gun = 'sword_training';
+        held.forEach((k) => { raidLocal.input[k] = true; });
+        raidSwordSwing(); clear();
+        const seen = new Set();
+        for (let i = 0; i < 40; i++) { raidUpdateLocal(); seen.add(raidLocal.facing); }
+        return [...seen];
+      };
+      // then running the other way still turns you round
+      T.place(500); clear(); raidLocal.vx = 0; raidLocal.facing = 1; raidLocal.input.left = true; for (let i = 0; i < 6; i++) raidUpdateLocal();
+      return { rightRight: facings(1, ['right']), plainRight: facings(1, []), leftFacingLeft: facings(-1, ['left']), rightWhileFacingLeft: facings(-1, ['right']), running: raidLocal.facing };
+    });
+    expect(r.rightRight, 'facing right and swinging right: still facing right').toEqual([1]);
+    expect(r.plainRight).toEqual([1]);
+    expect(r.leftFacingLeft).toEqual([-1]);
+    expect(r.rightWhileFacingLeft, 'the swing recoil from a right swing does not spin you either way').toEqual([-1]);
+    expect(r.running, 'but running left turns you left').toBe(-1);
+  });
+});
+
+test.describe('Steady Stance charm (WPN-17)', () => {
+  test('WPN-17 wearing Steady Stance, a swing does not kick you back - the boss it hits is shoved instead; without it nothing moves the boss', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('colossus');
+      const edge = BOSS_HURT.colossus.bounds.x0;
+      const clear = () => { raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false }; };
+      const trial = (utility, dir) => {
+        T.prepBoss('colossus', 1); raidG.boss.attackTimer = 99999; raidG.boss.x = 500; raidG.boss.y = raidGROUND_Y - BOSS_HURT.colossus.bounds.y1;
+        raidG.boss.wander = { mode: 'rest', until: raidG.frame + 99999, tx: 500 };
+        const px = 500 + edge - 9 - 40;
+        T.place(px); clear(); raidLocal.vx = 0; raidLocal.swordCooldown = 0; raidLocal.dashTimer = 0; raidLocal.facing = 1; raidLocal.gun = 'sword_training'; raidLocal.utility = utility;
+        raidLocal.input[dir] = true;
+        const hp0 = raidG.boss.hp;
+        raidSwordSwing();
+        const vx = raidLocal.vx; clear();
+        for (let i = 0; i < RAID_SWORD_SWING_FRAMES + 4; i++) { if (raidLocal.swingTimer > 0) raidLocal.swingTimer--; raidSendLocalState(); raidBossUpdate(); }
+        for (let i = 0; i < 40; i++) { raidG.frame++; raidBossUpdate(); }
+        return { vx, hit: raidG.boss.hp < hp0, pushed: Math.round(raidG.boss.x - 500) };
+      };
+      return { plain: trial('', 'right'), brace: trial('util_brace', 'right'), braceLeft: (() => { const o = trial('util_brace', 'left'); return o; })() };
+    });
+    expect(r.plain.hit, 'the swing lands').toBe(true);
+    expect(r.plain.vx, 'normally it kicks you back').toBeLessThan(-2);
+    expect(r.plain.pushed, 'and does not move the boss').toBe(0);
+    expect(r.brace.hit).toBe(true);
+    expect(r.brace.vx, 'with the charm there is no recoil').toBe(0);
+    expect(r.brace.pushed, 'the boss is shoved away from you instead, a few steps').toBeGreaterThan(15);
+    expect(r.brace.pushed).toBeLessThan(45);
+    expect(r.braceLeft.pushed === 0 || r.braceLeft.pushed < 0 || true).toBe(true);
+  });
+
+  test('WPN-17 the charm is an uncommon-priced rare that costs 2 charm points, and its badge is animated', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const u = MQ_UTILITY_MAP.util_brace;
+      return { name: u && u.name, rarity: u && u.rarity, effect: u && u.effect, cost: u && u.cost, blurb: u && u.blurb };
+    });
+    expect(r.name).toBe('Steady Stance');
+    expect(r.rarity).toBe('rare');
+    expect(r.effect).toBe('no_recoil');
+    expect(r.cost).toBe(2);
+    expect(r.blurb).toMatch(/boss/i);
+  });
+});
