@@ -155,7 +155,7 @@ test.describe('Phase 3 adds a move to every boss (BOS-49)', () => {
       T.watch();
       const frames = T.until(() => T.hazardSpawns.length > 0, 80);
       const jets = T.hazardSpawns.map((h) => ({ kind: h.kind, x: Math.round(h.x), delay: h.delay || 0 }));
-      const hit = (x, frame) => { T.prepBoss('wyrm', 3); raidLocal.health = 5; raidG.boss.attackTimer = 99999; wyrmFirestorm(raidG.boss); for (let f = 0; f < 140; f++) { T.place(x, undefined, { health: T.me().health, invincible: 0 }); T.step(1); } return T.me().health; };
+      const hit = (x, frame) => { T.prepBoss('wyrm', 3); raidLocal.health = 5; raidG.boss.attackTimer = 99999; jets.forEach((j) => raidHazard({ kind: 'pillar', x: j.x, delay: j.delay, life: j.delay + 66 })); for (let f = 0; f < 140; f++) { T.place(x, undefined, { health: T.me().health, invincible: 0 }); T.step(1); } return T.me().health; };
       return { frames, jets, onJet: hit(jets.length ? jets[2].x : 500), between: hit(jets.length ? Math.round((jets[2].x + jets[3].x) / 2) : 500) };
     });
     expect(r.frames).toBe(30);
@@ -310,5 +310,93 @@ test.describe('The first win over each boss unlocks a charm (RWD-04)', () => {
     expect(r.length).toBe(1);
     expect(r[0]).toMatch(/Ironclad Colossus/);
     expect(r[0]).toMatch(/Steady Stance/);
+  });
+});
+
+test.describe('Bosses attack at a slower pace (BOS-05)', () => {
+  test('BOS-05 the boss simulation runs at 75% speed in the live game: three updates for every four frames, so every windup, shot and cooldown takes a third longer', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      const real = window.raidBossUpdate; let calls = 0; window.raidBossUpdate = () => { calls++; };
+      raidBossAcc = 0;
+      const ran = []; for (let i = 0; i < 100; i++) ran.push(raidRunBossFrame());
+      window.raidBossUpdate = real;
+      return { calls, tempo: RAID_BOSS_TEMPO, firstFour: ran.slice(0, 8).map(Number) };
+    });
+    expect(r.tempo).toBe(0.75);
+    expect(r.calls, 'about three in four').toBe(75);
+    expect(r.firstFour.reduce((a, b) => a + b, 0), 'never two skipped in a row').toBe(6);
+  });
+});
+
+test.describe('Attacks do not come from or land on the same spot every time (BOS-50)', () => {
+  const spread = (arr) => ({ n: new Set(arr.map((x) => Math.round(x))).size, range: Math.max(...arr) - Math.min(...arr) });
+
+  test('BOS-50 the Wyrm\'s sweep is centred somewhere different each time (the low stretch moves with it), and the Griffon\'s strafe does not always start from the same side', async ({ page }) => {
+    await setup(page, 'wyrm');
+    const r = await page.evaluate(() => {
+      const centres = [], spans = [], lows = [];
+      for (let i = 0; i < 40; i++) { T.prepBoss('wyrm', 1); wyrmSweep(raidG.boss); const a = raidG.boss.anim; centres.push((a.startX + a.endX) / 2); spans.push(Math.abs(a.endX - a.startX)); lows.push(a.lowHalf); }
+      const inside = centres.every((c, i) => c - spans[i] / 2 >= 40 && c + spans[i] / 2 <= 960);
+      const sides = new Set();
+      for (let i = 0; i < 40; i++) { T.prepBoss('griffon', 1); T.place(500); griffonStrafeStart(raidG.boss); sides.add(raidG.boss.anim.dir); }
+      return { centres, spans, inside, lowOk: lows.every((h, i) => Math.abs(h - 0.2215 * spans[i]) < 3), sides: [...sides].sort() };
+    });
+    const sp = spread(r.centres);
+    expect(sp.n, 'a different centre most times').toBeGreaterThan(15);
+    expect(sp.range).toBeGreaterThan(80);
+    expect(r.inside, 'always inside the arena').toBe(true);
+    expect(Math.min(...r.spans), 'still crosses nearly the whole map').toBeGreaterThanOrEqual(700);
+    expect(r.lowOk, 'the marked low stretch is as wide as the real one').toBe(true);
+    expect(r.sides, 'the strafe starts from either side when you stand in the middle').toEqual([-1, 1]);
+  });
+
+  test('BOS-50 the column and pillar attacks (feather rain, tempest, firestorm, bubble fan) are laid out at a different offset each time, always with gaps to stand in', async ({ page }) => {
+    await setup(page, 'griffon');
+    const r = await page.evaluate(() => {
+      const first = { rain: [], tempest: [], storm: [], fan: [] }, minGap = { rain: 1e9, storm: 1e9, fan: 1e9 };
+      const gaps = (xs, key) => { const s = xs.slice().sort((a, b) => a - b); for (let i = 1; i < s.length; i++) minGap[key] = Math.min(minGap[key], s[i] - s[i - 1]); };
+      for (let i = 0; i < 40; i++) {
+        T.prepBoss('griffon', 2); griffonFeatherRain(raidG.boss);
+        let xs = raidG.hazards.filter((h) => h.kind === 'featherFall').map((h) => h.x); first.rain.push(Math.min(...xs)); gaps(xs, 'rain');
+        T.prepBoss('griffon', 3); griffonTempest(raidG.boss);
+        xs = raidG.hazards.filter((h) => h.kind === 'featherFall' && h.delay < 60).map((h) => h.x); first.tempest.push(Math.min(...xs));
+        T.prepBoss('wyrm', 3); wyrmFirestorm(raidG.boss);
+        xs = raidG.hazards.filter((h) => h.kind === 'pillar').map((h) => h.x); first.storm.push(Math.min(...xs)); gaps(xs, 'storm');
+        T.prepBoss('glutton', 2); T.place(960, 60); gluttonBubbleFan(raidG.boss);
+        xs = raidG.projectiles.map((p) => raidProjectileLandingX(p)); first.fan.push(Math.min(...xs)); gaps(xs, 'fan');
+      }
+      return { first, minGap };
+    });
+    for (const k of ['rain', 'tempest', 'storm', 'fan']) {
+      const sp = spread(r.first[k]);
+      expect(sp.n, k + ' starts somewhere different most times').toBeGreaterThan(15);
+      expect(sp.range, k).toBeGreaterThan(50);
+    }
+    expect(r.minGap.rain, 'rain columns stay well apart').toBeGreaterThanOrEqual(110);
+    expect(r.minGap.storm, 'so do the firestorm pillars').toBeGreaterThanOrEqual(140);
+    expect(r.minGap.fan, 'and the bubbles').toBeGreaterThan(100);
+  });
+
+  test('BOS-50 Grinmaw backs away to a different spot of the hall each bombardment and slams down in a different place each time; Bramblehide\'s quill fan opens a different distance away', async ({ page }) => {
+    await setup(page, 'grinmaw');
+    const r = await page.evaluate(() => {
+      const slam = [];
+      for (let i = 0; i < 12; i++) {
+        let tries = 0;
+        do { T.prepBoss('grinmaw', 1); T.place(960, 60); raidG.boss.attackTimer = 99999; BOSS_ATTACK_FNS.grinmaw(raidG.boss); } while (raidG.boss.anim.state !== 'withdraw' && ++tries < 80);
+        for (let g = 0; g < 700; g++) { T.step(1); if (raidG.boss.anim.state === 'slam') { slam.push(raidG.boss.x); break; } }
+      }
+      const picks = [];
+      for (let i = 0; i < 40; i++) { T.prepBoss('grinmaw', 1); let a = null; for (let k = 0; k < 50 && !(a && a.state === 'withdraw'); k++) { T.prepBoss('grinmaw', 1); BOSS_ATTACK_FNS.grinmaw(raidG.boss); a = raidG.boss.anim; } picks.push(a.farX); }
+      const quill = [];
+      for (let i = 0; i < 30; i++) { T.prepBoss('bramblehide', 1); T.place(900, 60); raidG.boss.x = 300; T.watch(); bramblehideQuills(raidG.boss); quill.push(T.spawns.reduce((m, p) => m + raidProjectileLandingX(p), 0) / T.spawns.length); }
+      return { slam, picks, quill };
+    });
+    expect(r.picks.every((x) => x >= 250 && x <= 750), 'the far spot is somewhere in the middle of the hall').toBe(true);
+    expect(spread(r.picks).range, 'a different back spot each time').toBeGreaterThan(150);
+    expect(spread(r.slam).n, 'he comes forward to a different spot each time').toBeGreaterThan(6);
+    expect(spread(r.slam).range).toBeGreaterThan(150);
+    expect(spread(r.quill).range, 'the quill fan opens a different distance away').toBeGreaterThan(40);
   });
 });

@@ -177,7 +177,7 @@ window.T = {
         if (['fade', 'ghost', 'materialize'].includes(a.state) && b.type === 'warden') dangers.push({ x: a.targetX, r: 100 });
         if (['aim', 'dive', 'crash'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: a.targetX, r: 110 });
         if (['sink', 'swim', 'rise'].includes(a.state) && b.type === 'glutton') dangers.push({ x: a.targetX, r: 100 });
-        if (['sweepAim', 'sweepPass'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: 500, r: WYRM_SWEEP_LOW_HALF + 20 });
+        if (['sweepAim', 'sweepPass'].includes(a.state) && b.type === 'wyrm') dangers.push({ x: a.center || 500, r: (a.lowHalf || WYRM_SWEEP_LOW_HALF) + 20 });
         if (['swoop', 'track', 'plunge', 'thud'].includes(a.state) && b.type === 'griffon') dangers.push({ x: a.targetX, r: 110 });
       }
       raidG.projectiles.forEach((p) => {

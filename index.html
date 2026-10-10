@@ -5155,7 +5155,7 @@ function grinmawAttack(b) {
   const pick = raidPickAttack(b, options);
   if (pick === 'rage') b.anim = { state: 'windup', timer: 0, kind: 'rage', again: 1, len: 44 }; // two slams in a row (phase 3, BOS-49)
   else if (pick === 'spit') b.anim = { state: 'spit', timer: 0 };
-  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [25, 105, 185] : [25, 120] };
+  else if (pick === 'bombard') b.anim = { state: 'withdraw', timer: 0, homeX: b.x, homeY: b.y, waves: b.phase >= 2 ? [25, 105, 185] : [25, 120], farX: 250 + Math.random() * 500 };
   else if (pick === 'slam') b.anim = { state: 'windup', timer: 0 };
   else b.anim = { state: 'summon', timer: 0 };
 }
@@ -5228,23 +5228,23 @@ function updateGrinmawAnimation(b) {
   } else if (a.state === 'withdraw') {
     // back into the background: smaller, hazier and higher, out of reach
     const e = easeInOut(Math.min(a.timer / 40, 1));
-    b.x = lerp(a.homeX, 500, e);
+    b.x = lerp(a.homeX, a.farX || 500, e);
     b.animScale = lerp(1, GRINMAW_FAR_SCALE, e);
     b.animAlpha = 1 - 0.2 * e;
     b.animOffsetY = -50 * e;
     if (a.timer >= 40) { a.state = 'hurl'; a.timer = 0; }
   } else if (a.state === 'hurl') {
-    b.x = 500 + Math.sin(a.timer * 0.045) * 170; // paces the back of the hall as he throws
+    b.x = clampX((a.farX || 500) + Math.sin(a.timer * 0.045) * 120, 130, 870); // paces the back of the hall as he throws
     b.animScale = GRINMAW_FAR_SCALE;
     b.animAlpha = 0.8;
     const wave = a.waves.indexOf(a.timer);
     b.animOffsetY = -50 - (a.waves.some(w => a.timer >= w && a.timer < w + 8) ? 10 : 0); // a heave with each throw
     if (wave >= 0) grinmawHurlRubble(b, wave);
-    if (a.timer >= a.waves[a.waves.length - 1] + 50) { a.state = 'advance'; a.timer = 0; a.fromX = b.x; }
+    if (a.timer >= a.waves[a.waves.length - 1] + 50) { a.state = 'advance'; a.timer = 0; a.fromX = b.x; a.slamX = 250 + Math.random() * 500; } // and comes forward somewhere new
   } else if (a.state === 'advance') {
     // he comes forward, growing, to slam the floor
     const e = easeInOut(Math.min(a.timer / 45, 1));
-    b.x = lerp(a.fromX, 500, e);
+    b.x = lerp(a.fromX, a.slamX || 500, e);
     b.animScale = lerp(GRINMAW_FAR_SCALE, 1.08, e);
     b.animAlpha = lerp(0.8, 1, e);
     b.animOffsetY = lerp(-50, -32, e);
@@ -5429,7 +5429,8 @@ function wyrmFireSpit(b) {
 // Firestorm (phase 3, BOS-49): after a coil, six pillars of flame are marked in a row across the arena and erupt
 // one after another, 14 frames apart (from either end), with 74 px of safe floor between each.
 function wyrmFirestorm(b) {
-  const xs = [125, 275, 425, 575, 725, 875];
+  const shift = (Math.random() - 0.5) * 80; // the whole row sits a little differently each time
+  const xs = [125, 275, 425, 575, 725, 875].map(x => x + shift);
   if (Math.random() < 0.5) xs.reverse();
   xs.forEach((x, i) => raidHazard({ kind: 'pillar', x: x, delay: i * 14, life: i * 14 + 66 }));
 }
@@ -5451,12 +5452,14 @@ function wyrmFireShot(b) {
 // it, and the ends of the arena are safe. The low stretch is marked on the floor from the start.
 const WYRM_SWEEP_TOP = 120, WYRM_SWEEP_DIP = 300, WYRM_SWEEP_LOW_Y = 350;
 const WYRM_SWEEP_STUN = 80; // after the pass it settles at the edge, stunned, so the sweep can be punished (BOS-22)
+// Its centre (and so the low stretch) moves a little each time, within 430-570; it always crosses 740 px of the arena.
 function wyrmSweep(b) {
-  const dir = Math.random() < 0.5 ? 1 : -1;
-  b.anim = { state: 'sweepAim', timer: 0, dir: dir, startX: dir > 0 ? 70 : 930, endX: dir > 0 ? 930 : 70, fromX: b.x, fromY: b.y };
+  const dir = Math.random() < 0.5 ? 1 : -1, span = 740, c = 500 + (Math.random() - 0.5) * 140;
+  b.anim = { state: 'sweepAim', timer: 0, dir: dir, startX: c - dir * span / 2, endX: c + dir * span / 2, center: c, lowHalf: WYRM_SWEEP_LOW_FRAC * span, fromX: b.x, fromY: b.y };
 }
 // Half the width of the low stretch of the sweep (the part of the arc below WYRM_SWEEP_LOW_Y).
-const WYRM_SWEEP_LOW_HALF = (() => { const u0 = Math.asin((WYRM_SWEEP_LOW_Y - WYRM_SWEEP_TOP) / WYRM_SWEEP_DIP) / Math.PI; return (0.5 - u0) * 860; })();
+const WYRM_SWEEP_LOW_FRAC = (() => { const u0 = Math.asin((WYRM_SWEEP_LOW_Y - WYRM_SWEEP_TOP) / WYRM_SWEEP_DIP) / Math.PI; return 0.5 - u0; })(); // the low stretch is this fraction of the span either side of its centre
+const WYRM_SWEEP_LOW_HALF = WYRM_SWEEP_LOW_FRAC * 860;
 
 // The Wyrm flies over its target, hovers while a shadow grows on the floor, then dives.
 // It crashes into the ground and is left dazed before climbing back up.
@@ -5598,8 +5601,9 @@ function gluttonBelch(b) {
 // Phase 2+: a spread of bubbles lobbed up and out that drift down across the arena with
 // gaps between them, so the answer is to pick a gap.
 function gluttonBubbleFan(b) {
+  const shift = (Math.random() - 0.5) * 100;
   for (let i = 0; i < 5; i++) {
-    gluttonLobBubble(b, clampX(100 + i * 200 + (Math.random() - 0.5) * 60, 40, 960), 95);
+    gluttonLobBubble(b, clampX(100 + i * 200 + shift + (Math.random() - 0.5) * 60, 40, 960), 95);
   }
 }
 
@@ -5793,10 +5797,11 @@ function bramblehideCharge(b, dir, laneTarget) {
 
 // Quills (BOS-40): the boar puffs up and shoots spikes out of its own back - a fan of 5 (7 from phase 2) that arc up
 // and land 120 px apart, opening toward the nearest player. Big enough to parry; they leave nothing behind.
-function bramblehideQuills(b, shift) {
+function bramblehideQuills(b, shift, off) {
   const n = b.phase >= 2 ? 7 : 5, dir = raidNearestPlayerDir(b);
+  if (off === undefined) off = 190 + Math.random() * 100; // how far from him the fan opens differs each time
   for (let i = 0; i < n; i++) {
-    const tx = b.x + dir * 240 + (i - (n - 1) / 2) * 120 + (shift || 0);
+    const tx = b.x + dir * off + (i - (n - 1) / 2) * 120 + (shift || 0);
     raidThrow(b, 'quill', tx, { x: b.x + (i - (n - 1) / 2) * 24, y: b.y - 40, T: 56, noLand: true });
   }
 }
@@ -5856,7 +5861,8 @@ function updateBramblehideAnimation(b) {
     b.animOffsetX = Math.sin(a.timer * 1.3) * 2.5 * t; // it bristles and shakes
     if (a.timer === 34) {
       b.animOffsetX = 0;
-      bramblehideQuills(b, a.second ? 60 : 0); // the second fan of a barrage is shifted, so its gaps are somewhere else
+      if (a.off === undefined) a.off = 190 + Math.random() * 100;
+      bramblehideQuills(b, a.second ? 60 : 0, a.off); // the second fan of a barrage is shifted, so its gaps are somewhere else
       if (a.again > 0) { a.again--; a.second = true; a.timer = 8; }
     }
     if (a.timer >= 40) { a.state = 'settle'; a.timer = 0; }
@@ -6030,7 +6036,7 @@ function griffonAttack(b) {
 function griffonStrafeStart(b) {
   const pick = raidRandomPlayer();
   const px = pick ? raidPx(pick.p) : 500;
-  const dir = px < 500 ? -1 : 1; // sweep direction: it starts at the edge on the far side
+  const dir = Math.abs(px - 500) < 120 ? (Math.random() < 0.5 ? -1 : 1) : (px < 500 ? -1 : 1); // it starts at the edge on the far side (either, if you stand in the middle)
   b.anim = { state: 'strafeAim', timer: 0, dir: dir, fromX: b.x, fromY: b.y };
 }
 const RAID_STRAFE_Y = raidGROUND_Y - 85;
@@ -6041,9 +6047,10 @@ const RAID_STRAFE_EDGES = [60, 940];
 function griffonFeatherRain(b) {
   const n = b.phase >= 2 ? 5 : 3, gap = n === 5 ? 200 : 330, first = n === 5 ? 100 : 170;
   const order = [...Array(n).keys()].sort(() => Math.random() - 0.5);
+  const shift = (Math.random() - 0.5) * 100; // the whole set of columns sits somewhere different each time
   for (let i = 0; i < n; i++) {
     const delay = order[i] * 12;
-    const x = clampX(first + i * gap + (Math.random() - 0.5) * 60, 60, 940);
+    const x = clampX(first + i * gap + shift + (Math.random() - 0.5) * 60, 60, 940);
     raidHazard({ kind: 'featherFall', x: x, delay: delay, life: delay + RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2 });
   }
 }
@@ -6058,8 +6065,9 @@ function griffonTempest(b) {
       raidHazard({ kind: 'featherFall', x: x, delay: delay, life: delay + RAID_FEATHERFALL_WARN + RAID_FEATHERFALL_ACTIVE + 2 });
     });
   };
-  strike([100, 300, 500, 700, 900], 0);
-  strike([200, 400, 600, 800], 70);
+  const shift = (Math.random() - 0.5) * 80;
+  strike([100, 300, 500, 700, 900].map(x => x + shift), 0);
+  strike([200, 400, 600, 800].map(x => x + shift), 70);
 }
 
 // 0..1: how far the griffon's head is tipped down to watch its target - fully while tracking and
@@ -9447,7 +9455,7 @@ function raidDraw() {
     ripple(ta.targetX, raidGROUND_Y + 2, prog, '190,150,255');
   }
   if (tb0.type === 'wyrm' && (ta.state === 'sweepAim' || ta.state === 'sweepPass')) {
-    raidDrawGroundWarning(raidCtx, 500, WYRM_SWEEP_LOW_HALF, ta.state === 'sweepAim' ? Math.min(ta.timer / 50, 1) * 0.6 : 0.8, '255,150,70');
+    raidDrawGroundWarning(raidCtx, ta.center || 500, ta.lowHalf || WYRM_SWEEP_LOW_HALF, ta.state === 'sweepAim' ? Math.min(ta.timer / 50, 1) * 0.6 : 0.8, '255,150,70');
   }
   if (tb0.type === 'wyrm' && ta.state === 'sweepAim') {
     // the planned flight path, dotted across the sky and brightening as the Wyrm gets into position
@@ -9929,6 +9937,19 @@ function raidExtrapolateProjectiles() {
   });
 }
 
+// The boss simulation runs at 75% speed in the live game (BOS-05): three updates for every four frames, so every
+// windup, shot, hazard and cooldown takes a third longer. (Player swings are replayed frame by frame when the boss
+// next updates, so nothing is lost.) The test harness steps raidBossUpdate itself and is not slowed.
+const RAID_BOSS_TEMPO = 0.75;
+let raidBossAcc = 0;
+function raidRunBossFrame() {
+  raidBossAcc += RAID_BOSS_TEMPO;
+  if (raidBossAcc < 1) return false;
+  raidBossAcc -= 1;
+  raidBossUpdate();
+  return true;
+}
+
 function raidGameLoop() {
   if (!raidLoopRunning) return;
   if (raidHitStopTimer > 0) {
@@ -9938,7 +9959,7 @@ function raidGameLoop() {
     raidUpdateLocal();
     mqCheckRaidReward();
     if (raidIsHost) {
-      raidBossUpdate();
+      raidRunBossFrame();
     } else {
       raidExtrapolateProjectiles();
     }
