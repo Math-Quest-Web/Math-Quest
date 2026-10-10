@@ -348,7 +348,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.noJumpMidDash).toBe(true);
   });
 
-  test('RAI-17 running tops out near 3 px/frame and a tap jump rises about 100 px', async ({ page }) => {
+  test('RAI-17 running tops out near 3 px/frame and a tap jump is only a little hop (about 45 px)', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       T.place(100);
@@ -365,8 +365,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     });
     expect(r.maxV, 'a bit slower than the old ~4 px/frame').toBeLessThan(3.6);
     expect(r.maxV).toBeGreaterThan(2.5);
-    expect(r.rise, 'much lower than the old ~210 px jump').toBeGreaterThan(85);
-    expect(r.rise).toBeLessThan(125);
+    expect(r.rise, 'a tap is just a little hop').toBeGreaterThan(30);
+    expect(r.rise).toBeLessThan(65);
     expect(r.backOnGround).toBe(true);
   });
 
@@ -397,8 +397,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.constants.vy).toBeCloseTo(-7.7 * 0.75, 6);
     expect(r.constants.holdGrav).toBeCloseTo(0.1 * 0.5625, 6);
     expect(r.constants.holdFrames).toBe(16);
-    expect(r.tap).toBeGreaterThan(85);
-    expect(r.tap).toBeLessThan(125);
+    expect(r.tap, 'a tap is a little hop').toBeGreaterThan(30);
+    expect(r.tap).toBeLessThan(65);
     expect(r.fullHold, 'holding the whole way up still rises beyond a tap').toBeGreaterThan(r.tap + 30);
     expect(r.fullHold, 'but a full jump is still low').toBeLessThan(190);
   });
@@ -1304,8 +1304,10 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         if (airborne) { T.place(500, 150); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 0; raidLocal.input.jump = false; raidLocal.wasJumpPressed = false; }
         else { T.place(500); raidLocal.onGround = true; raidLocal.jumpBoosting = false; }
         const y0 = raidLocal.y; let minY = y0;
-        raidLocal.input.jump = true; raidUpdateLocal(); raidLocal.input.jump = false;
-        for (let i = 0; i < 80; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.jump = true; // the first jump is held (a tap is only a little hop); the air jump is never boosted
+        for (let i = 0; i < (airborne ? 1 : 20); i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.jump = false;
+        for (let i = 0; i < 100; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
         return y0 - minY;
       };
       const groundRise = rise(false), airRise = rise(true);

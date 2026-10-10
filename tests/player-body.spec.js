@@ -105,7 +105,7 @@ test.describe('The slash is long (WPN-10)', () => {
 });
 
 test.describe('A floatier jump (RAI-17)', () => {
-  test('RAI-17 the jump reaches the same height as before but takes longer to get there, and falls slower', async ({ page }) => {
+  test('RAI-17 the full jump reaches the same height as before but takes longer to get there, and falls slower; a tap is only a little hop', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const jump = (hold) => {
@@ -121,15 +121,18 @@ test.describe('A floatier jump (RAI-17)', () => {
         }
         return { height: Math.round(groundY - minY), apexFrame, maxFall: Math.round(maxFall * 100) / 100, airFrames: frames, landed };
       };
-      return { tap: jump(1), hold: jump(60) };
+      return { tap: jump(1), hold: jump(60), half: jump(8) };
     });
-    expect(r.tap.height, 'a tap still rises about 120 px').toBeGreaterThan(108);
-    expect(r.tap.height).toBeLessThan(128);
+    expect(r.tap.height, 'a tap is only a little hop, about 45 px').toBeGreaterThan(30);
+    expect(r.tap.height).toBeLessThan(65);
+    expect(r.half.height, 'holding the key part of the way gives a jump in between').toBeGreaterThan(r.tap.height + 25);
+    expect(r.half.height).toBeLessThan(r.hold.height - 15);
     expect(r.hold.height, 'a held jump still about 170 px').toBeGreaterThan(155);
     expect(r.hold.height).toBeLessThan(190);
-    expect(r.tap.apexFrame, 'but it takes longer to reach the top (it used to be 31 frames)').toBeGreaterThanOrEqual(38);
-    expect(r.tap.maxFall, 'and it comes down more slowly (it used to hit 7.7)').toBeLessThan(6.2);
-    expect(r.tap.airFrames, 'so it is in the air for longer (it used to be about 62 frames)').toBeGreaterThanOrEqual(78);
+    expect(r.hold.apexFrame, 'the full jump takes longer to reach the top than it used to (31 frames)').toBeGreaterThanOrEqual(38);
+    expect(r.hold.maxFall, 'and comes down more slowly (a full jump used to hit 9.2)').toBeLessThan(7.2);
+    expect(r.hold.airFrames, 'so it is in the air for longer (it used to be about 62 frames)').toBeGreaterThanOrEqual(78);
+    expect(r.tap.apexFrame, 'the little hop is quick').toBeLessThan(r.hold.apexFrame);
     expect(r.tap.landed && r.hold.landed).toBe(true);
   });
 });

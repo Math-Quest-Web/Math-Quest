@@ -3899,6 +3899,9 @@ const RAID_JUMP_VY = -7.7 * RAID_JUMP_SLOW;
 const RAID_AIR_JUMP_VY = RAID_JUMP_VY * 0.85; // Second Wind (WPN-06): a little smaller than the first jump, never held
 const RAID_JUMP_HOLD_GRAVITY = 0.1 * RAID_JUMP_SLOW * RAID_JUMP_SLOW;
 const RAID_JUMP_HOLD_FRAMES = Math.round(12 / RAID_JUMP_SLOW);
+// Letting go of the jump key while still rising fast cuts the rise to this speed, so a tap is only a little hop
+// (about 45 px) and holding the key longer gives a bigger jump, up to about 170 px (RAI-17).
+const RAID_JUMP_CUT_VY = 3.2;
 
 // Dash tuning (RAI-16): a committed burst - see raidUpdateLocal, which is what RAI-16's fix
 // keeps from being immediately undone by the normal running speed cap.
@@ -4192,6 +4195,7 @@ function raidOnLocalPlayerHit() {
   const kb = raidKnockbackMult(); // Iron Skin (WPN-03)
   raidLocal.vx = -raidLocal.facing * 6 * kb;
   raidLocal.vy = Math.min(raidLocal.vy, -4 * kb);
+  raidLocal.jumpCut = false; // (a hit's pop up is not a jump to be cut short)
 }
 
 function raidListenToPlayers() {
@@ -7052,6 +7056,7 @@ function raidCheckLocalPogo() {
     raidPogoState.bounced = true;
     sfx('pogo');
     p.vy = raidPogoVy(); // Pogo Spring bounces higher (WPN-14)
+    p.jumpCut = false; // a bounce is not cut short when the jump key is up
     p.jumpBoosting = false; // a clean fixed-height bounce, not modulated by stale jump-hold
     p.onGround = false;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch'; // reuse the RAI-21 launch pop
@@ -7216,6 +7221,7 @@ function raidUpdateLocal() {
     // no jumping mid-dash
   } else if (p.input.jump && p.onGround) {
     p.vy = RAID_JUMP_VY;
+    p.jumpCut = true; // releasing the key early will cut this jump short
     p.onGround = false;
     p.jumpBoosting = true;
     p.jumpHoldTimer = 0;
@@ -7227,9 +7233,14 @@ function raidUpdateLocal() {
     // apex of the ground jump).
     p.vy = RAID_AIR_JUMP_VY; // smaller than the first jump, and holding the key does not boost it
     p.jumpBoosting = false;
+    p.jumpCut = false;
     p.jumpHoldTimer = 0;
     p.airJumpsUsed = (p.airJumpsUsed || 0) + 1;
     p.squashTimer = RAID_SQUASH_FRAMES; p.squashKind = 'launch';
+  }
+  if (p.jumpCut && !dashing) { // variable-height jump: let go early and the rise is cut short
+    if (p.onGround || p.vy >= 0) p.jumpCut = false;
+    else if (!p.input.jump) { if (p.vy < -RAID_JUMP_CUT_VY) p.vy = -RAID_JUMP_CUT_VY; p.jumpCut = false; }
   }
   if (tfx.lift && p.input.jump && !p.onGround && !dashing && p.vy > -5.5) p.vy = Math.max(-5.5, p.vy - 0.32); // holding jump in an updraft keeps climbing once the jump is slowing (never slows a faster rise)
   p.wasJumpPressed = p.input.jump;
