@@ -6766,9 +6766,17 @@ function raidSwordSwing() {
   // Direction is read once, at the moment the swing starts (WPN-05), so releasing the key
   // mid-swing doesn't change an already-playing animation.
   p.swingDir = raidResolveSwingDir(p.input);
+  // Recoil (WPN-16): the swing kicks you back the other way (about 20 px once friction has had its say); an upward
+  // swing in the air also presses you down. No kick during a dash. A downward swing is left to the pogo (WPN-08).
+  if (!(p.dashTimer > 0)) {
+    const v = RAID_SWORD_DIR_VECTORS[p.swingDir] || [p.facing || 1, 0];
+    p.vx -= v[0] * RAID_SWING_RECOIL;
+    if (v[1] < 0 && !p.onGround) p.vy += -v[1] * RAID_SWING_RECOIL_UP;
+  }
   raidUpdateUI();
   raidSendLocalState();
 }
+const RAID_SWING_RECOIL = 3, RAID_SWING_RECOIL_UP = 1.2;
 
 // The player's world-space melee hitbox for the swing direction chosen when the swing started
 // (WPN-02/WPN-05) - a simple offset rectangle, not a new shape system. `p` is any synced player

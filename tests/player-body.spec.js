@@ -133,3 +133,44 @@ test.describe('A floatier jump (RAI-17)', () => {
     expect(r.tap.landed && r.hold.landed).toBe(true);
   });
 });
+
+test.describe('Swinging kicks you back (WPN-16)', () => {
+  test('WPN-16 every swing pushes the player back the way the blade did not go; up-swings press an airborne player down; a dash and a swing on cooldown do not', async ({ page }) => {
+    const r = await page.evaluate(async () => {
+      await T.setupRaid('grinmaw');
+      T.prepBoss('grinmaw', 1);
+      const clear = () => { raidLocal.input = { left: false, right: false, up: false, down: false, jump: false, space: false }; };
+      const swing = (held, setup) => {
+        T.place(500); clear(); raidLocal.vx = 0; raidLocal.vy = 0; raidLocal.swordCooldown = 0; raidLocal.dashTimer = 0; raidLocal.facing = 1; raidLocal.gun = 'sword_training';
+        if (setup) setup();
+        held.forEach((k) => { raidLocal.input[k] = true; });
+        raidSwordSwing();
+        const first = { vx: raidLocal.vx, vy: raidLocal.vy, dir: raidLocal.swingDir };
+        clear(); const x0 = raidLocal.x;
+        for (let i = 0; i < 40; i++) raidUpdateLocal();
+        return Object.assign(first, { moved: Math.round(raidLocal.x - x0) });
+      };
+      return {
+        right: swing(['right']), left: swing(['left']), plain: swing([]), up: swing(['up']),
+        upAir: swing(['up'], () => { raidLocal.y = 300; raidLocal.onGround = false; }),
+        downAir: swing(['down'], () => { raidLocal.y = 300; raidLocal.onGround = false; }),
+        downright: swing(['down', 'right'], () => { raidLocal.y = 300; raidLocal.onGround = false; }),
+        dashing: swing(['right'], () => { raidLocal.dashTimer = 8; raidLocal.dashDir = 1; }),
+        cooling: (() => { T.place(500); clear(); raidLocal.vx = 0; raidLocal.swordCooldown = 10; raidLocal.input.right = true; raidSwordSwing(); return raidLocal.vx; })()
+      };
+    });
+    expect(r.right.dir).toBe('right');
+    expect(r.right.vx, 'swinging right shoves you left').toBeLessThan(-2);
+    expect(r.right.moved, 'a push of a few steps, not a launch').toBeLessThan(-12);
+    expect(r.right.moved).toBeGreaterThan(-40);
+    expect(r.left.vx, 'swinging left shoves you right').toBeGreaterThan(2);
+    expect(r.plain.vx, 'a plain swing kicks you back from the way you face (right)').toBeLessThan(-2);
+    expect(r.up.vy, 'on the floor an upward swing has nothing to push against').toBe(0);
+    expect(r.up.vx).toBe(0);
+    expect(r.upAir.vy, 'in the air an upward swing presses you down').toBeGreaterThan(0.5);
+    expect(r.downAir.vy, 'a downward swing does not kick you (the pogo is its own bounce)').toBe(0);
+    expect(r.downright.vx, 'a diagonal swing pushes along its horizontal part').toBeLessThan(-1);
+    expect(r.dashing.vx, 'no recoil mid-dash').toBe(0);
+    expect(r.cooling, 'no swing, no recoil').toBe(0);
+  });
+});
