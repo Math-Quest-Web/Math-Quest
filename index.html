@@ -7106,6 +7106,9 @@ function raidIsParryable(proj) {
 // the shot reaches the floor). Host-only like the rest of the sim, resolved from the same synced
 // swing state as raidCheckSwordSwings, and runs even while the boss itself is untargetable.
 let raidParryState = {};
+// How far past the drawn slash a shot can be and still be deflected (WPN-11): the parry is deliberately a little
+// more generous than the picture, because a shot you swung at and saw touch the blade should always go.
+const RAID_PARRY_PAD = 8;
 function raidParryProjectiles() {
   Object.keys(raidG.players).forEach(id => {
     const p = raidG.players[id];
@@ -7114,21 +7117,35 @@ function raidParryProjectiles() {
     const st = raidParryState[id] || (raidParryState[id] = { lastTimer: 0, hasHit: false });
     if (timer <= 0 && st.lastTimer <= 0) return;
     const reach = raidParryReachFor(p.utility); // Deflector (WPN-14): the slash, grown about the hand
-    raidSwingSteps(st, timer).forEach(k => {
+    const steps = raidSwingSteps(st, timer);
+    if (!steps.length) return;
+    // The slash as it has been on every visible frame of this swing so far (the whole sweep, not just the instant
+    // the host happens to look), including frames that came and went between two updates.
+    const areas = [];
+    for (let k = RAID_SWORD_SWING_FRAMES; k >= Math.min.apply(null, steps); k--) {
       const poly = raidSlashWorldPoly(p, raidSwingProgress(k));
-      if (!poly) return;
+      if (!poly) continue;
       const hand = poly.hand;
-      const area = reach === 1 ? poly : poly.map(q => [hand[0] + (q[0] - hand[0]) * reach, hand[1] + (q[1] - hand[1]) * reach]);
-      raidG.projectiles.forEach(proj => {
-        if (proj.life <= 0 || !raidIsParryable(proj)) return;
-        if (raidPolyHitsCircle(area, proj.x, proj.y, proj.r)) {
-          proj.life = 0;
-          raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
-          raidTriggerHitStop(2);
-        }
-      });
+      areas.push(reach === 1 ? poly : poly.map(q => [hand[0] + (q[0] - hand[0]) * reach, hand[1] + (q[1] - hand[1]) * reach]));
+    }
+    if (!areas.length) return;
+    raidG.projectiles.forEach(proj => {
+      if (proj.life <= 0 || !raidIsParryable(proj)) return;
+      // where the shot is now and where it was at the last look, with a few points between (it may have crossed the blade)
+      const px = proj.pqx === undefined ? proj.x : proj.pqx, py = proj.pqy === undefined ? proj.y : proj.pqy;
+      const r = proj.r + RAID_PARRY_PAD;
+      let hit = false;
+      for (let i = 0; i < areas.length && !hit; i++) {
+        for (let t = 0; t <= 4 && !hit; t++) hit = raidPolyHitsCircle(areas[i], px + (proj.x - px) * t / 4, py + (proj.y - py) * t / 4, r);
+      }
+      if (hit) {
+        proj.life = 0;
+        raidG.slamAnimations.push({ x: proj.x, y: proj.y, life: 10, phase: 'parry', timer: 0, dir: p.swingDir || 'side' });
+        raidTriggerHitStop(2);
+      }
     });
   });
+  raidG.projectiles.forEach(proj => { proj.pqx = proj.x; proj.pqy = proj.y; }); // remembered for the next look
   raidG.projectiles = raidG.projectiles.filter(proj => proj.life > 0);
 }
 

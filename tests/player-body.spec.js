@@ -247,3 +247,67 @@ test.describe('Steady Stance charm (WPN-17)', () => {
     expect(r.blurb).toMatch(/boss/i);
   });
 });
+
+test.describe('Parry is forgiving (WPN-11)', () => {
+  const setup = (page) => page.evaluate(async () => {
+    await T.setupRaid('grinmaw');
+    raidLocal.gun = 'sword_training'; raidLocal.facing = 1; raidLocal.utility = '';
+    T.prepBoss('grinmaw', 1); raidG.boss.x = 800; raidG.boss.y = 300; raidG.boss.attackTimer = 99999; // away from the swing
+    raidLocal.input = { left: false, right: true, up: false, down: false, space: false };
+    window.mkShot = (x, y, r = 12) => ({ x, y, vx: 0, vy: 0, r, life: 100, isWarning: false, isBossProjectile: true, owner: 'candy', kind: 'candy' });
+    window.tick = () => { if (raidLocal.swingTimer > 0) raidLocal.swingTimer--; raidSendLocalState(); raidParryProjectiles(); };
+    window.startSwing = () => { T.place(300, 300); raidLocal.swordCooldown = 0; raidG.projectiles = []; raidG.slamAnimations = []; raidSwordSwing(); }; // swingTimer 14
+    window.gone = (p) => p.life <= 0 || !raidG.projectiles.includes(p);
+    window.polys = (from, to) => { const out = []; for (let k = from; k >= to; k--) { const q = raidSlashWorldPoly(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }), raidSwingProgress(k)); if (q) out.push(q); } return out; };
+  });
+
+  test('WPN-11 a shot that crosses the slash between two updates is still parried (the path it took is tested, not only where it is now)', async ({ page }) => {
+    await setup(page);
+    const r = await page.evaluate(() => {
+      startSwing();
+      const spot = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }), 8);
+      while (raidLocal.swingTimer > 10) tick(); // swing timer is now 10
+      const shot = mkShot(spot.x - 230, spot.y); raidG.projectiles = [shot];
+      tick(); // timer 9: the shot is well behind the hand, nothing happens
+      const before = !gone(shot);
+      shot.x = spot.x + 230; // the next update finds it on the far side of the blade
+      tick();
+      return { before, parried: gone(shot), startedOutside: true };
+    });
+    expect(r.before).toBe(true);
+    expect(r.parried, 'it passed through the slash').toBe(true);
+  });
+
+  test('WPN-11 a shot that wanders into where the blade swept a few frames ago is parried while the swing lasts', async ({ page }) => {
+    await setup(page);
+    const r = await page.evaluate(() => {
+      startSwing();
+      const early = T.slashPoint(Object.assign({}, raidLocal, { swingDir: 'right', facing: 1 }), 11);
+      while (raidLocal.swingTimer > 5) tick(); // timer 5: the slash has moved on
+      const nowPoly = polys(5, 5)[0];
+      const stillInside = nowPoly ? raidPointInPoly(early.x, early.y, nowPoly) : false;
+      const shot = mkShot(early.x, early.y); raidG.projectiles = [shot];
+      tick();
+      return { stillInside, parried: gone(shot) };
+    });
+    expect(r.stillInside, 'precondition: the blade is no longer exactly there').toBe(false);
+    expect(r.parried).toBe(true);
+  });
+
+  test('WPN-11 the parry area is a little bigger than the slash drawn: within about 8 px of its edge counts, 40 px does not', async ({ page }) => {
+    await setup(page);
+    const r = await page.evaluate(() => {
+      startSwing();
+      while (raidLocal.swingTimer > 8) tick();
+      const all = polys(12, 7); let tip = [-1e9, 0];
+      all.forEach((q) => q.forEach((v) => { if (v[0] > tip[0]) tip = v; }));
+      const R = 12;
+      const near = mkShot(tip[0] + R + 5, tip[1], R), far = mkShot(tip[0] + R + 40, tip[1], R);
+      raidG.projectiles = [near, far];
+      tick();
+      return { near: gone(near), far: gone(far) };
+    });
+    expect(r.near, 'grazing the edge of the slash deflects it').toBe(true);
+    expect(r.far, 'well clear of it does not').toBe(false);
+  });
+});
