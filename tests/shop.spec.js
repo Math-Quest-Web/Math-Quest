@@ -63,18 +63,18 @@ test.describe('Shop and crates (spec 10.2)', () => {
     expect(r.crate_cosmic).toMatchObject({ name: 'Cosmic Crate', price: 400, weights: { rare: 60, epic: 32, legendary: 8 } });
     expect(r.crate_legend).toMatchObject({ name: 'Legend Crate', price: 700, weights: { rare: 46, epic: 39, legendary: 15 } });
 
-    expect(r.crate_starter.pool).toHaveLength(33);
+    expect(r.crate_starter.pool).toHaveLength(34);
     expect(r.crate_starter.types).toEqual(['skin', 'sword', 'utility']);
     expect(r.crate_starter.rarities).toEqual(['common', 'epic', 'rare', 'uncommon']);
     expect(r.crate_hero.pool).toHaveLength(10);
     expect(r.crate_hero.types).toEqual(['skin']);
     expect(r.crate_hero.rarities).toEqual(['epic', 'legendary', 'rare', 'uncommon']);
     // Arsenal is swords and charms (charms are weapon-locker gear, WPN-03); there are no guns any more.
-    expect(r.crate_arsenal.pool).toHaveLength(21);
+    expect(r.crate_arsenal.pool).toHaveLength(22);
     expect(r.crate_arsenal.types).toEqual(['sword', 'utility']);
     // The cosmic-tagged items: two skins and two swords (Dawnbreaker took over as the cosmic legendary).
     expect(r.crate_cosmic.pool).toEqual(['Astronaut', 'Dawnbreaker', 'Galaxy Walker', 'Voidbone Fang']);
-    expect(r.crate_legend.pool).toHaveLength(22);
+    expect(r.crate_legend.pool).toHaveLength(23);
     expect(r.crate_legend.types).toEqual(['skin', 'sword', 'utility']);
     expect(r.crate_legend.rarities).toEqual(['epic', 'legendary', 'rare']);
     // default items are never in a crate
@@ -170,12 +170,12 @@ test.describe('My Items and equipping (spec 10.2)', () => {
       mqProfile.owned.skin_wizard = 2; mqProfile.owned.sword_frost = 1;
       showSection('shop'); mqOnShopOpen(); mqSetTab('inv');
     });
-    await expect(page.locator('.inv-card')).toHaveCount(42);
-    await expect(page.locator('#invCount')).toHaveText('4 / 42 collected');
-    await expect(page.locator('.inv-card.locked')).toHaveCount(38);
+    await expect(page.locator('.inv-card')).toHaveCount(43);
+    await expect(page.locator('#invCount')).toHaveText('4 / 43 collected');
+    await expect(page.locator('.inv-card.locked')).toHaveCount(39);
     await expect(page.locator('.inv-card:not(.locked) .inv-equip')).toHaveCount(4);
     await expect(page.locator('.inv-card.locked .inv-equip')).toHaveCount(0);
-    await expect(page.locator('.inv-card.locked .inv-buy'), 'every locked item can be bought').toHaveCount(38);
+    await expect(page.locator('.inv-card.locked .inv-buy'), 'every locked item can be bought').toHaveCount(39);
     await expect(page.locator('.inv-card:not(.locked) .inv-buy')).toHaveCount(0);
     await expect(page.locator('.inv-card', { hasText: 'Star Wizard' })).toContainText('x2');
 
@@ -279,11 +279,11 @@ test.describe('My Items and equipping (spec 10.2)', () => {
 const CHARM_COSTS = {
   util_boots: 1, util_coin: 1, util_boots2: 1, util_iron: 1, util_shield: 1, util_regen: 1, util_feather: 1,
   util_range: 2, util_dashi: 2, util_heart: 2, util_ward: 3, util_double: 3, util_minion: 3,
-  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3
+  util_hands: 1, util_stride: 1, util_spring: 1, util_deflect: 1, util_whet: 2, util_cloud: 2, util_hunter: 2, util_hide: 2, util_idol: 2, util_titan: 3, util_brace: 2
 };
 
 test.describe('Charm loadout (WPN-13)', () => {
-  test('WPN-13 there are 23 charms; each costs 1-3 charm points', async ({ page }) => {
+  test('WPN-13 there are 24 charms; each costs 1-3 charm points', async ({ page }) => {
     const r = await page.evaluate(() => ({
       slots: MQ_CHARM_SLOTS, budget: MQ_CHARM_BUDGET,
       costs: Object.fromEntries(MQ_UTILITY.map((u) => [u.id, u.cost])),
@@ -293,8 +293,8 @@ test.describe('Charm loadout (WPN-13)', () => {
     expect(r.slots).toBe(3);
     expect(r.budget).toBe(5);
     expect(r.costs).toEqual(CHARM_COSTS);
-    expect(Object.keys(r.costs).length).toBe(23);
-    expect(r.effects, 'every charm has its own effect, so none are redundant').toBe(23);
+    expect(Object.keys(r.costs).length).toBe(24);
+    expect(r.effects, 'every charm has its own effect, so none are redundant').toBe(24);
     // the new ones fill every rarity
     ['common', 'uncommon', 'rare', 'epic', 'legendary'].forEach((k) => expect(r.rarities[k], k).toBeGreaterThan(0));
   });
@@ -410,7 +410,7 @@ test.describe('Charm loadout (WPN-13)', () => {
     expect(r.synced).toBe(r.local);
     expect(r.dash, 'Swift Boots').toBe(135);
     expect(r.hearts, 'Vital Core').toBe(6);
-    expect(r.hold, 'Feather Cloak').toBe(Math.round(12 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 12
+    expect(r.hold, 'Feather Cloak').toBe(Math.round(16 * 1.3)); // RAID_JUMP_HOLD_FRAMES is 16
   });
 });
 
@@ -523,8 +523,8 @@ test.describe('Items (spec 10.3)', () => {
     });
     expect(r.skins).toEqual(SPEC_SKINS);
     expect(r.swords).toEqual(SPEC_SWORDS);
-    expect(r.items).toBe(42); // 14 skins + 5 swords + 23 charms
-    expect(r.uniqueIds).toBe(42);
+    expect(r.items).toBe(43); // 14 skins + 5 swords + 24 charms
+    expect(r.uniqueIds).toBe(43);
     expect(r.distinctSkins, 'every skin looks different').toBe(14);
     expect(r.errors).toEqual([]);
     expect(r.animatedRare, 'epic and legendary skins are animated').toEqual([true, true, true, true]);

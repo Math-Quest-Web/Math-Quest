@@ -312,9 +312,8 @@ test.describe('Combat sounds (SND-03)', () => {
       raidLocal.input = { left: false, right: false, up: false, down: false, jump: true, space: false };
       MQ_SFX.log.length = 0; raidUpdateLocal(); out.jump = MQ_SFX.log.slice();
       // then it falls back down and lands
-      raidLocal.input.jump = false;
       MQ_SFX.log.length = 0;
-      for (let i = 0; i < 120; i++) raidUpdateLocal();
+      for (let i = 0; i < 160; i++) { raidLocal.input.jump = i < 20; raidUpdateLocal(); } // held for 20 frames: a full jump (a tap is a soft little hop)
       out.land = MQ_SFX.log.slice();
       // a double jump with Second Wind
       raidLocal.utility = 'util_double';

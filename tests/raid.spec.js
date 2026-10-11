@@ -172,7 +172,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.jumpKeyJumps, 'the jump key (Z) is what jumps').toBe(true);
   });
 
-  test('RAI-11 five hearts, 30 frames of invincibility after a hit, defeat when a player reaches zero', async ({ page }) => {
+  test('RAI-11 five hearts, 60 frames (a full second) of invincibility after a hit, defeat when a player reaches zero', async ({ page }) => {
     const out = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       const o = { start: raidLocal.health, defeatedAfter: [] };
@@ -180,12 +180,21 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       o.afterHit = T.me().health; o.invincible = T.me().invincible; o.defeatedAfter.push(raidG.gameOver);
       raidDamagePlayer(raidMyId, T.me(), 1); // ignored while invincible
       o.afterSecond = T.me().health;
+      // the invincibility really lasts a second: run the local player's frames
+      T.place(500, undefined, { invincible: 60, health: 4 });
+      for (let i = 0; i < 59; i++) raidUpdateLocal();
+      raidSendLocalState(); raidDamagePlayer(raidMyId, T.me(), 1); const at59 = T.me().health;
+      for (let i = 0; i < 2; i++) raidUpdateLocal();
+      raidSendLocalState(); raidDamagePlayer(raidMyId, T.me(), 1); const at61 = T.me().health;
+      o.heldFor = { at59, at61 };
+      raidLocal.health = 4; T.place(500, undefined, { invincible: 0, health: 4 }); // back to where it was
       for (let i = 0; i < 4; i++) { T.place(500, undefined, { invincible: 0 }); raidDamagePlayer(raidMyId, T.me(), 1); o.defeatedAfter.push(raidG.gameOver); }
       return o;
     });
     expect(out.start).toBe(5);
     expect(out.afterHit).toBe(4);
-    expect(out.invincible).toBe(30);
+    expect(out.invincible).toBe(60);
+    expect(out.heldFor, 'a second hit 59 frames later is still ignored, one at 61 frames lands').toEqual({ at59: 4, at61: 3 });
     expect(out.afterSecond).toBe(4);
     // hits 1-4 leave the raid running; the fifth hit (5 hearts gone) is a defeat
     expect(out.defeatedAfter).toEqual([false, false, false, false, true]);
@@ -214,9 +223,9 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       const wardAfterSecond = { health: w.health };
       return { afterFirst, afterSecond, wardAfterFirst, wardAfterSecond };
     });
-    expect(r.afterFirst).toEqual({ health: 4, invincible: 30 });
-    expect(r.afterSecond).toEqual({ health: 4, invincible: 30 });
-    expect(r.wardAfterFirst).toEqual({ health: 5, wardUsed: true, invincible: 30 });
+    expect(r.afterFirst).toEqual({ health: 4, invincible: 60 });
+    expect(r.afterSecond).toEqual({ health: 4, invincible: 60 });
+    expect(r.wardAfterFirst).toEqual({ health: 5, wardUsed: true, invincible: 60 });
     expect(r.wardAfterSecond).toEqual({ health: 5 });
   });
 
@@ -339,7 +348,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     expect(r.noJumpMidDash).toBe(true);
   });
 
-  test('RAI-17 running tops out near 3 px/frame and a tap jump rises about 100 px', async ({ page }) => {
+  test('RAI-17 running tops out near 3 px/frame and a tap jump is only a little hop (about 45 px)', async ({ page }) => {
     const r = await page.evaluate(async () => {
       await T.setupRaid('grinmaw');
       T.place(100);
@@ -356,8 +365,8 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     });
     expect(r.maxV, 'a bit slower than the old ~4 px/frame').toBeLessThan(3.6);
     expect(r.maxV).toBeGreaterThan(2.5);
-    expect(r.rise, 'much lower than the old ~210 px jump').toBeGreaterThan(85);
-    expect(r.rise).toBeLessThan(125);
+    expect(r.rise, 'a tap is just a little hop').toBeGreaterThan(30);
+    expect(r.rise).toBeLessThan(65);
     expect(r.backOnGround).toBe(true);
   });
 
@@ -383,9 +392,13 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         constants: { grav: RAID_GRAVITY, vy: RAID_JUMP_VY, holdGrav: RAID_JUMP_HOLD_GRAVITY, holdFrames: RAID_JUMP_HOLD_FRAMES }
       };
     });
-    expect(r.constants).toEqual({ grav: 0.25, vy: -7.7, holdGrav: 0.1, holdFrames: 12 });
-    expect(r.tap).toBeGreaterThan(85);
-    expect(r.tap).toBeLessThan(125);
+    // the same height as before (0.25 / -7.7 / 0.1 / 12 frames), reached 25% more slowly
+    expect(r.constants.grav).toBeCloseTo(0.25 * 0.5625, 6);
+    expect(r.constants.vy).toBeCloseTo(-7.7 * 0.75, 6);
+    expect(r.constants.holdGrav).toBeCloseTo(0.1 * 0.5625, 6);
+    expect(r.constants.holdFrames).toBe(16);
+    expect(r.tap, 'a tap is a little hop').toBeGreaterThan(30);
+    expect(r.tap).toBeLessThan(65);
     expect(r.fullHold, 'holding the whole way up still rises beyond a tap').toBeGreaterThan(r.tap + 30);
     expect(r.fullHold, 'but a full jump is still low').toBeLessThan(190);
   });
@@ -434,13 +447,13 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       raidLocal.facing = 1; raidLocal.vx = 0; raidLocal.vy = 0;
       // as raidDamagePlayer would on the host, but observed the way every client actually finds
       // out - through its own player-list listener - so this also covers non-host players.
-      await raidPlayerRef.child(raidMyId).update({ health: 4, invincible: 30 });
+      await raidPlayerRef.child(raidMyId).update({ health: 4, invincible: 60 });
       const out = {};
       out.knockedBack = raidLocal.vx < 0; // pushed opposite of facing (+1)
       out.poppedUp = raidLocal.vy < 0;
       out.hitStop = raidHitStopTimer > 0;
 
-      // the bright flash renders during the first ~6 of the 30 invincibility frames
+      // the bright flash renders during the first ~6 of the 60 invincibility frames
       // (40, 76) sits in the lower torso, comfortably inside the body fill and clear of both
       // the outline stroke and the smaller (WPN-20), feet-anchored head's shadow trail.
       const flashAt = (invincible) => {
@@ -449,7 +462,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
         drawPlayerCuphead(ctx, 20, 40, 36, 48, 1, 4, 5, false, invincible, true, { noBar: true, noShadow: true, noGun: true, t: 0 });
         return ctx.getImageData(40, 76, 1, 1).data;
       };
-      const bright = flashAt(28), late = flashAt(10);
+      const bright = flashAt(58), late = flashAt(30);
       out.veryWhite = bright[0] > 245 && bright[1] > 225 && bright[2] > 225;
       out.laterNotAsWhite = !(late[0] > 245 && late[1] > 225 && late[2] > 225);
 
@@ -641,9 +654,9 @@ test.describe('Player controls and stats (spec 8.2)', () => {
     const r = await page.evaluate(() => {
       const none = raidHurtPose(0, 1);
       const dashing = raidHurtPose(21, 1); // dash i-frames are not a hurt pose
-      const impact = raidHurtPose(30, 1);
-      const easing = raidHurtPose(26, 1);
-      const flipped = raidHurtPose(30, -1);
+      const impact = raidHurtPose(60, 1);
+      const easing = raidHurtPose(56, 1);
+      const flipped = raidHurtPose(60, -1);
       const hash = (invincible) => {
         const c = document.createElement('canvas'); c.width = 80; c.height = 120;
         const ctx = c.getContext('2d');
@@ -663,7 +676,7 @@ test.describe('Player controls and stats (spec 8.2)', () => {
       raidLocal.health = 5; raidFx.lastHealth = 5;
       return {
         none, dashing, impactRot: impact.rot, impactDx: impact.dx, impactSy: impact.sy, easingRot: easing.rot,
-        flippedRot: flipped.rot, poseDrawn: hash(23) !== hash(0), before, spawned, expired
+        flippedRot: flipped.rot, poseDrawn: hash(57) !== hash(0), before, spawned, expired
       };
     });
     expect(r.none).toEqual({ dx: 0, rot: 0, sx: 1, sy: 1 });
@@ -1017,14 +1030,14 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.previewTrailSpot = alphaAt(0.45, undefined, 40, -11, 'sword_training');
       return out;
     });
-    expect(r.reachFromBody, 'it reaches about 125 px out from the body, as drawn').toBeGreaterThan(100);
-    expect(r.reachFromBody).toBeLessThan(140);
+    expect(r.reachFromBody, 'it reaches about 190 px out from the body, as drawn').toBeGreaterThan(165);
+    expect(r.reachFromBody).toBeLessThan(215);
     expect(r.sameAsRight).toBe(true);
     expect(Math.abs(r.reachUp - r.reachSide), 'up and down are the side slash turned a quarter: the same reach').toBeLessThan(10);
     expect(Math.abs(r.reachDown - r.reachSide)).toBeLessThan(10);
     expect(Math.abs(r.reachLeft - r.reachSide), 'and so is left').toBeLessThan(2);
-    expect(r.R, 'the crescent radius is the scaled slash radius').toBeGreaterThan(90);
-    expect(r.R).toBeLessThan(150);
+    expect(r.R, 'the crescent radius is the scaled slash radius').toBeGreaterThan(130);
+    expect(r.R).toBeLessThan(220);
     expect(r.height, 'the arc is compressed across its direction: shorter than it is far-reaching').toBeLessThan(r.R * 1.2);
     expect(r.squash).toBeLessThan(0.7);
     expect(r.behindHand, 'the slash does not wrap round behind the hand').toBeLessThan(2);
@@ -1241,10 +1254,10 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
     expect(r.stunBoth).toBe(15);
     expect(r.pogoSpring, 'Pogo Spring: +30% bounce').toBeCloseTo(r.pogoBase * 1.3, 5);
     expect(r.fallLight, 'Light Step: a falling player has dropped less far after 20 frames').toBeLessThan(r.fallBase);
-    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25, 5);
+    expect(r.riseGravity, 'but rising is unchanged').toBeCloseTo(0.25 * 0.75 * 0.75, 5);
     expect(r.dashStride, 'Long Stride: +30% dash length').toBe(Math.round(r.dashBase * 1.3));
-    expect(r.hurtBase).toBe(30);
-    expect(r.hurtHide, 'Thick Skin: +50% invincibility after a hit').toBe(45);
+    expect(r.hurtBase).toBe(60);
+    expect(r.hurtHide, 'Thick Skin: +50% invincibility after a hit').toBe(90);
     expect(r.coinBase).toBe(170);
     expect(r.coinIdol, 'Golden Idol: +25% coins').toBe(213);
     expect(r.coinBoth, 'with Lucky Charm the bonuses add: +35%').toBe(230);
@@ -1291,8 +1304,10 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
         if (airborne) { T.place(500, 150); raidLocal.onGround = false; raidLocal.airJumpsUsed = 0; raidLocal.vy = 0; raidLocal.input.jump = false; raidLocal.wasJumpPressed = false; }
         else { T.place(500); raidLocal.onGround = true; raidLocal.jumpBoosting = false; }
         const y0 = raidLocal.y; let minY = y0;
-        raidLocal.input.jump = true; raidUpdateLocal(); raidLocal.input.jump = false;
-        for (let i = 0; i < 80; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.jump = true; // the first jump is held (a tap is only a little hop); the air jump is never boosted
+        for (let i = 0; i < (airborne ? 1 : 20); i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
+        raidLocal.input.jump = false;
+        for (let i = 0; i < 100; i++) { raidUpdateLocal(); minY = Math.min(minY, raidLocal.y); }
         return y0 - minY;
       };
       const groundRise = rise(false), airRise = rise(true);
@@ -1672,7 +1687,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       out.loadoutShowsCharm = mask(withCharm, lc.getContext('2d').getImageData(0, 0, 400, 400).data).n > 50;
       return out;
     });
-    expect(r.ids.length, 'all 23 charms').toBe(23);
+    expect(r.ids.length, 'all 24 charms').toBe(24);
     for (const id of r.ids) {
       expect(r.onPlayer[id], id + ' draws a small mark on the player').toBeGreaterThan(25);
       expect(r.onPlayer[id], id + ' stays minimal - a tiny badge, not an aura').toBeLessThan(450);
@@ -1680,7 +1695,7 @@ test.describe('Equipment: weapons and utility (spec 8.5)', () => {
       expect(r.icon[id], id + ' has its own icon glyph').toBeGreaterThan(30);
       expect(r.iconAnimates[id], id + ' animates in the shop icon').toBe(true);
     }
-    expect(r.unique, 'every charm looks different on the player').toBe(23);
+    expect(r.unique, 'every charm looks different on the player').toBe(24);
     expect(r.comboDiffers, 'three worn charms are drawn together, differently from any single one').toBe(true);
     expect(r.comboCovers, 'three charms sit apart rather than overlapping').toBeGreaterThan(r.singlesCover * 0.85);
     expect(r.comboCovers, 'and the three together are still a small cluster').toBeLessThan(900);

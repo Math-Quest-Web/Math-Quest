@@ -171,7 +171,7 @@ test.describe('Boss hurt areas follow the art (BOS-46)', () => {
 test.describe('The slash that is drawn is the slash that hits (WPN-15)', () => {
   const PLAYER = { x: 300, y: 452, facing: 1, utility: '' }; // standing on the floor, centre x = 318
 
-  test('WPN-15 the hit area is the drawn crescent: it starts at the hand, reaches 115 px (scaled) along the swing and follows Long Reach', async ({ page }) => {
+  test('WPN-15 the hit area is the drawn crescent: it starts at the hand, reaches 172 px (scaled) along the swing and follows Long Reach', async ({ page }) => {
     const r = await page.evaluate((P) => {
       const S = MQ_PLAYER_SCALE;
       const out = {};
@@ -187,7 +187,7 @@ test.describe('The slash that is drawn is the slash that hits (WPN-15)', () => {
           const hand = [cx + S * pose.sx * 30 * p.facing + pose.dx, feet + S * pose.sy * (22 - 48) + pose.dy];
           const mult = util ? 1.25 : 1;
           const along = farthest(poly, v[0], v[1]) - (hand[0] * v[0] + hand[1] * v[1]);
-          out[dir + ':' + util] = { along, expected: 115 * mult * S * (Math.abs(v[0]) > 0 ? pose.sx : pose.sy), n: poly.length };
+          out[dir + ':' + util] = { along, expected: RAID_SWORD_SLASH_R * mult * S * (Math.abs(v[0]) > 0 ? pose.sx : pose.sy), n: poly.length };
         }
       }
       // not in view before the swing has started opening up, nor once it has faded away
