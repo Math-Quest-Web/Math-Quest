@@ -400,3 +400,44 @@ test.describe('Attacks do not come from or land on the same spot every time (BOS
     expect(spread(r.quill).range, 'the quill fan opens a different distance away').toBeGreaterThan(40);
   });
 });
+
+test.describe('Bosses do not fly home between attacks (BOS-51)', () => {
+  // Runs one attack, remembers where the boss was at the end of its last "active" state, and where it is when it goes idle.
+  const run = (page, boss, phase, start, active) => page.evaluate(([b, ph, startSrc, act]) => {
+    T.prepBoss(b, ph); T.place(700, 60); raidG.boss.attackTimer = 99999; raidG.boss.x = 420;
+    new Function('b', startSrc)(raidG.boss);
+    let lastActiveX = null; const states = new Set(); let idleX = null, steps = 0;
+    for (let f = 0; f < 1500; f++) {
+      T.place(700, 60); T.step(1); steps++;
+      const st = raidG.boss.anim.state; states.add(st);
+      if (st === act) lastActiveX = raidG.boss.x;
+      if (st === 'idle' && f > 5) { idleX = raidG.boss.x; break; }
+    }
+    // and it stays put through the rest that follows
+    const x0 = raidG.boss.x; let drift = 0;
+    for (let f = 0; f < 36; f++) { T.place(700, 60); T.step(1); drift = Math.max(drift, Math.abs(raidG.boss.x - x0)); }
+    return { lastActiveX, idleX, drift, states: [...states] };
+  }, [boss, phase, start, active]);
+
+  const CASES = [
+    ['warden', 1, 'wardenStartVanish(b)', 'dazed', 2],
+    ['wyrm', 2, 'wyrmDiveBomb(b)', 'crash', 2],
+    ['griffon', 1, 'griffonWindDive(b)', 'thud', 2],
+    ['glutton', 1, 'gluttonStartChomp(b)', 'dazed', 2],
+    ['bramblehide', 1, 'b.anim = { state: "chargeWindup", timer: 0, dir: 1 }', 'dazed', 2],
+    ['wyrm', 1, 'wyrmSweep(b)', 'sweepDaze', 100],
+    ['griffon', 1, 'griffonStrafeStart(b)', 'strafe', 100]
+  ];
+  for (const [boss, phase, start, active, tol] of CASES) {
+    test(`BOS-51 ${boss} ends ${start.replace(/\(.*$/, '')} where the action ended, goes idle there and stays put for a while`, async ({ page }) => {
+      await setup(page, boss);
+      const r = await run(page, boss, phase, start, active);
+      expect(r.lastActiveX).not.toBeNull();
+      expect(Math.abs(r.idleX - r.lastActiveX), 'no trip back to a home spot').toBeLessThanOrEqual(tol);
+      expect(r.idleX, 'and still on screen').toBeGreaterThan(100);
+      expect(r.idleX).toBeLessThan(900);
+      expect(r.drift, 'it rests before it moves again').toBeLessThan(2);
+      expect(r.states, 'Bramblehide no longer trots home').not.toContain('trot');
+    });
+  }
+});

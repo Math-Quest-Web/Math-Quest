@@ -682,16 +682,18 @@ test.describe('Bramblehide the Ravenous (BOS-40)', () => {
     expect(r.terrain).toBe(0);
   });
 
-  test('BOS-40 ram charge: skids to a stop and trots back to its home spot afterward', async ({ page }) => {
+  test('BOS-40 ram charge: skids to a stop and stays where it stopped (it does not trot back home)', async ({ page }) => {
     await setup(page, 'bramblehide');
     const r = await page.evaluate(() => {
       T.prepBoss('bramblehide', 1); T.place(900); // out of the way, so it isn't stopped by a hit
       raidG.boss.anim = { state: 'chargeWindup', timer: 0, dir: raidNearestPlayerDir(raidG.boss) };
-      // 45 windup + 36 charging + 120 dazed + 40 trot + 18 settle = 259 frames end to end.
-      runs(300, () => raidG.boss.anim.state === 'idle');
-      return { home: raidG.boss.anim.state === 'idle' && raidG.boss.x > 120 && raidG.boss.x < 880 };
+      // 45 windup + 36 charging + 120 dazed + 18 settle = 219 frames end to end.
+      let stopX = null;
+      runs(300, () => { if (raidG.boss.anim.state === 'dazed') stopX = raidG.boss.x; return raidG.boss.anim.state === 'idle'; });
+      return { idle: raidG.boss.anim.state === 'idle', moved: Math.abs(raidG.boss.x - stopX) };
     });
-    expect(r.home, 'ends up back in the middle of the arena and idle, not stranded at the wall').toBe(true);
+    expect(r.idle).toBe(true);
+    expect(r.moved, 'where it skidded to a stop is where its next attack starts from').toBeLessThan(2);
   });
 
   test('BOS-40 thorn wave (phase 2+): a 30-frame rear-up, then five thorn clumps are marked in a line toward the nearest player and erupt one after another', async ({ page }) => {
@@ -1171,15 +1173,16 @@ test.describe('Bosses move, then stop for a bit (BOS-47)', () => {
         }
         const run = (pred) => { let best = 0, cur = 0; for (let i = 1; i < xs.length; i++) { if (pred(Math.abs(xs[i] - xs[i - 1]))) { cur++; best = Math.max(best, cur); } else cur = 0; } return best; };
         let travelled = 0; for (let i = 1; i < xs.length; i++) travelled += Math.abs(xs[i] - xs[i - 1]);
+        let maxMove = 0, run1 = 0; for (let i = 1; i < xs.length; i++) { const d = Math.abs(xs[i] - xs[i - 1]); if (d > 0.05) { run1 += d; maxMove = Math.max(maxMove, run1); } else run1 = 0; }
         const still = xs.filter((x, i) => i && Math.abs(x - xs[i - 1]) < 0.05).length / xs.length;
         // how far from the player it is during the last 150 frames of each stretch
         const gaps = []; for (let k = 0; k < 6; k++) { let g = 0; for (let i = k * seg + seg - 150; i < (k + 1) * seg; i++) g += Math.abs(xs[i] - playerXs[i]); gaps.push(g / 150); }
-        return { longestStill: run((d) => d < 0.05), longestMoving: run((d) => d > 0.3), travelled, still, gaps, anim: raidG.boss.anim.state };
+        return { longestStill: run((d) => d < 0.05), longestMoving: run((d) => d > 0.3), travelled, still, maxMove, gaps, anim: raidG.boss.anim.state };
       }, boss);
       expect(r.anim).toBe('idle');
       expect(r.longestStill, 'it stops for a good while (about a second or more)').toBeGreaterThanOrEqual(50);
-      expect(r.longestMoving, 'and when it moves, it really moves').toBeGreaterThanOrEqual(40);
-      expect(r.travelled, 'it does cover ground').toBeGreaterThan(900);
+      expect(r.travelled, 'it does shuffle about now and then').toBeGreaterThan(150);
+      expect(r.maxMove, ['grinmaw', 'warden', 'bramblehide', 'colossus'].includes(boss) ? 'a move toward a player is a step of a few hundred px at most' : 'it never flies across the arena: each move is a short shuffle').toBeLessThanOrEqual(['grinmaw', 'warden', 'bramblehide', 'colossus'].includes(boss) ? 290 : 100);
       expect(r.still, 'it is still for a good part of the time (about a third)').toBeGreaterThan(0.28);
       if (['grinmaw', 'warden', 'bramblehide', 'colossus'].includes(boss)) {
         r.gaps.slice(1).forEach((g, i) => expect(g, 'it has caught up with the player by the end of each stretch (' + (i + 1) + ')').toBeLessThan(380));

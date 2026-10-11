@@ -5107,6 +5107,7 @@ function raidNearestPlayerDir(b) {
 // stops for a good while (70-160 frames), then moves again. With standoff set (the ground-bound and pacing bosses)
 // the new spot is a stride (160-280 px) from the nearest player, on the boss's own side of them, so it follows a
 // player without ever walking into them (touching a boss hurts, BOS-48); otherwise it is anywhere in the range.
+const RAID_WANDER_STEP_FOLLOW = 280; // the most a following boss walks toward a player in one go
 function raidWander(b, speed, lo, hi, standoff) {
   if (!b.wander) b.wander = { mode: 'rest', until: raidG.frame + 40 + Math.floor(Math.random() * 40), tx: b.x };
   const w = b.wander;
@@ -5129,9 +5130,10 @@ function raidWander(b, speed, lo, hi, standoff) {
         tx = clampX(tx, lo, hi);
       }
     }
-    if (tx === null) {
-      tx = lo + Math.random() * (hi - lo);
-      if (Math.abs(tx - b.x) < 200) tx = clampX(b.x + (b.x < (lo + hi) / 2 ? 1 : -1) * (220 + Math.random() * 120), lo, hi); // a real move
+    if (standoff) { if (tx !== null && Math.abs(tx - b.x) > RAID_WANDER_STEP_FOLLOW) tx = b.x + Math.sign(tx - b.x) * RAID_WANDER_STEP_FOLLOW; } // a stride toward the player at a time
+    if (tx === null) { // a short shuffle (40-90 px), never a flight across the arena
+      const dir = b.x - lo < 100 ? 1 : hi - b.x < 100 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+      tx = clampX(b.x + dir * (40 + Math.random() * 50), lo, hi);
     }
     w.tx = tx; w.mode = 'move';
   }
@@ -5393,7 +5395,7 @@ function updateWardenAnimation(b) {
     if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'return'; a.timer = 0; }
   } else if (a.state === 'return') {
     const e = easeInOut(Math.min(a.timer / 40, 1));
-    b.x = lerp(a.targetX, a.homeX, e);
+    b.x = a.targetX; // it rises back to its hover height right where it struck (BOS-51)
     b.y = lerp(a.targetY + 8, a.homeY, e);
     b.animScale = 0.97 + 0.03 * e;
     if (a.timer >= 40) { b.anim = { state: 'idle', timer: 0 }; b.animAlpha = 1; b.animScale = 1; b.animOffsetY = 0; }
@@ -5485,7 +5487,7 @@ const WYRM_POSITIONAL = ['aim', 'dive', 'crash', 'climb', 'sweepAim', 'sweepPass
 // Where it rests (BOS-47): wherever it last decided to go, with a small bob (never lower than its resting height).
 function wyrmPathPos() {
   const b = raidG.boss;
-  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.wyrm - 8 + Math.sin(raidG.frame * 0.03) * 8 };
+  return { x: b.x, y: BOSS_HOVER_Y.wyrm - 8 + Math.sin(raidG.frame * 0.03) * 8 };
 }
 
 function updateWyrmAnimation(b) {
@@ -5535,7 +5537,7 @@ function updateWyrmAnimation(b) {
   } else if (a.state === 'climb') {
     const e = easeInOut(Math.min(a.timer / 50, 1));
     const p = wyrmPathPos();
-    b.x = lerp(a.targetX, p.x, e);
+    b.x = a.targetX; // climbs straight back up from the crater (BOS-51)
     b.y = lerp(raidGROUND_Y - 75, p.y, e);
     if (a.timer >= 50) { b.anim = { state: 'idle', timer: 0 }; b.animOffsetX = 0; b.animOffsetY = 0; }
   } else if (a.state === 'sweepAim') {
@@ -5564,7 +5566,7 @@ function updateWyrmAnimation(b) {
   } else if (a.state === 'sweepOut') {
     const e = easeInOut(Math.min(a.timer / 45, 1));
     const p = wyrmPathPos();
-    b.x = lerp(a.endX, p.x, e);
+    b.x = lerp(a.endX, clampX(a.endX, 150, 850), e); // only far enough in from the very edge to be on screen (BOS-51)
     b.y = lerp(a.endY, p.y, e);
     if (a.timer >= 45) { b.anim = { state: 'idle', timer: 0 }; }
   } else if (a.state === 'settle') {
@@ -5660,7 +5662,7 @@ const GLUTTON_POSITIONAL = ['sink', 'swim', 'rise', 'bite', 'dazed', 'retreat'];
 // Where it rests (BOS-47): wherever it last decided to go, with a small bob.
 function gluttonPathPos() {
   const b = raidG.boss;
-  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6 };
+  return { x: b.x, y: BOSS_HOVER_Y.glutton + Math.sin(raidG.frame * 0.02) * 6 };
 }
 
 function updateGluttonAnimation(b) {
@@ -5718,7 +5720,7 @@ function updateGluttonAnimation(b) {
   } else if (a.state === 'retreat') {
     const e = easeInOut(Math.min(a.timer / 48, 1));
     const home = gluttonPathPos();
-    b.x = lerp(a.startX, home.x, e);
+    b.x = a.startX; // it rises where it bit (BOS-51)
     b.y = lerp(a.startY, home.y, e);
     b.animScale = lerp(1.32, 1, e);
     b.animAlpha = 1;
@@ -5881,15 +5883,7 @@ function updateBramblehideAnimation(b) {
     // snap the boar back to its idle spot while it's still supposed to be stunned mid-arena.
     b.x = a.targetX;
     b.animScale = 0.97;
-    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'trot'; a.timer = 0; a.returnFromX = b.x; }
-  } else if (a.state === 'trot') {
-    // Trots back to its home spot after a dash before handing control back to the idle sway.
-    // Named 'trot' rather than 'return' so its state doesn't collide with the Warden's own
-    // 'return' state (BOS-10: each boss's animation states must be its own).
-    const t = easeInOut(Math.min(a.timer / 40, 1));
-    b.x = lerp(a.returnFromX, 500, t);
-    b.animScale = 0.97 + 0.03 * t;
-    if (t >= 1) { a.state = 'settle'; a.timer = 0; }
+    if (a.timer >= BOSS_STUN_FRAMES) { a.state = 'settle'; a.timer = 0; } // it stays where it skidded to a stop (BOS-51)
   } else if (a.state === 'settle') {
     const t = Math.min(a.timer / 18, 1);
     b.animOffsetX = (b.animOffsetX || 0) * (1 - t);
@@ -6104,7 +6098,7 @@ const GRIFFON_POSITIONAL = ['swoop', 'track', 'plunge', 'thud', 'soar', 'strafeA
 // Where it rests (BOS-47): wherever it last decided to go, with a small bob (never lower than its resting height).
 function griffonPathPos() {
   const b = raidG.boss;
-  return { x: b.wander ? b.wander.tx : 500, y: BOSS_HOVER_Y.griffon - 6 + Math.sin(raidG.frame * 0.03) * 6 };
+  return { x: b.x, y: BOSS_HOVER_Y.griffon - 6 + Math.sin(raidG.frame * 0.03) * 6 };
 }
 
 function updateGriffonAnimation(b) {
@@ -6150,7 +6144,7 @@ function updateGriffonAnimation(b) {
   } else if (a.state === 'strafeReturn') {
     const e = easeInOut(Math.min(a.timer / 50, 1));
     const pp = griffonPathPos();
-    b.x = lerp(a.endX, pp.x, e);
+    b.x = lerp(a.endX, clampX(a.endX, 150, 850), e); // only far enough in from the very edge to be on screen (BOS-51)
     b.y = lerp(RAID_STRAFE_Y, pp.y, e);
     if (a.timer >= 50) b.anim = { state: 'idle', timer: 0 };
   } else if (a.state === 'rainWindup') {
@@ -6180,7 +6174,7 @@ function updateGriffonAnimation(b) {
   } else if (a.state === 'soar') {
     const e = easeInOut(Math.min(a.timer / 50, 1));
     const p = griffonPathPos();
-    b.x = lerp(a.targetX, p.x, e);
+    b.x = a.targetX; // it soars straight up from where it landed (BOS-51)
     b.y = lerp(raidGROUND_Y - 80, p.y, e);
     if (a.timer >= 50) { b.anim = { state: 'idle', timer: 0 }; }
   } else if (a.state === 'settle') {
@@ -6533,6 +6527,7 @@ function raidBossUpdate() {
   if (raidG.gauntlet && raidG.gauntlet.rest > 0) { gauntletRestTick(); return; }
 
   if (!b.anim) b.anim = { state: 'idle', timer: 0 };
+  if (b.anim.state !== 'idle') b.wander = null; // after an attack it rests where it ended up, then starts from there (BOS-51)
 
   // Each boss keeps its idle drift unless the current animation takes over its position
   // (the *_POSITIONAL states), so non-travelling wind-ups don't freeze it in place.
